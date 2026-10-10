@@ -1,0 +1,1680 @@
+<title>CoinGecko ETL</title>
+<script>document.documentElement.lang = "en";</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
+<style>
+/* Layout: a single-column engineering document under a sticky section bar. The pipeline
+   diagram anchors the page; every component opens a detail drawer, and each later section
+   zooms into one mechanism of the same pipeline. */
+:root {
+  --bg: #f3f5f8;
+  --surface: #ffffff;
+  --surface-2: #e9edf2;
+  --ink: #0f1724;
+  --muted: #566275;
+  --line: #d2d9e2;
+  --control-line: #7f8a9b;
+  --accent: #2350d8;
+  --accent-soft: #e3e9fb;
+  --raw: #935b0b;
+  --processed: #0a7459;
+  --rejected: #6553b0;
+  --dlq: #bf3326;
+  --state: #2f6690;
+  --scrim: rgba(8, 12, 20, 0.38);
+  --shadow: 0 18px 48px rgba(15, 23, 36, 0.18);
+  --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
+  --font-body: "IBM Plex Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-2xs: 0.75rem;
+  --fs-xs: 0.8125rem;
+  --fs-sm: 0.875rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.125rem;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0d1117;
+    --surface: #141a23;
+    --surface-2: #1b2330;
+    --ink: #e5eaf1;
+    --muted: #9aa6b8;
+    --line: #2a3442;
+    --control-line: #5b687c;
+    --accent: #84a3ff;
+    --accent-soft: #1c2747;
+    --raw: #e2a54b;
+    --processed: #43c99f;
+    --rejected: #a99af2;
+    --dlq: #ff7e66;
+    --state: #79b4e0;
+    --scrim: rgba(0, 0, 0, 0.6);
+    --shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0d1117;
+  --surface: #141a23;
+  --surface-2: #1b2330;
+  --ink: #e5eaf1;
+  --muted: #9aa6b8;
+  --line: #2a3442;
+  --control-line: #5b687c;
+  --accent: #84a3ff;
+  --accent-soft: #1c2747;
+  --raw: #e2a54b;
+  --processed: #43c99f;
+  --rejected: #a99af2;
+  --dlq: #ff7e66;
+  --state: #79b4e0;
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
+  padding-inline: 16px;
+  padding-block: 0 48px;
+}
+.wrap { max-width: 1180px; margin-inline: auto; }
+h1, h2, h3, h4 { text-wrap: balance; margin: 0; }
+h1, h2 { font-family: var(--font-display); font-stretch: 118%; letter-spacing: -0.01em; }
+h1 { font-size: clamp(2.1rem, 5vw, 3.3rem); font-weight: 760; line-height: 1.05; }
+h2 { font-size: clamp(1.45rem, 3vw, 1.95rem); font-weight: 680; line-height: 1.15; }
+h3 { font-size: 1.05rem; font-weight: 600; line-height: 1.3; }
+h4 { font-size: var(--fs-md); font-weight: 600; line-height: 1.3; }
+p { margin: 0; max-width: 68ch; }
+code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
+code { background: var(--surface-2); padding: 0.08em 0.36em; border-radius: 4px; overflow-wrap: anywhere; }
+a { color: var(--accent); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+button { font: inherit; color: inherit; }
+.eyebrow { font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
+.muted { color: var(--muted); }
+.text-sm { font-size: var(--fs-sm); }
+.text-md { font-size: var(--fs-md); }
+.stack { display: grid; gap: 6px; align-content: start; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.skip:focus { position: static; width: auto; height: auto; overflow: visible; clip: auto; display: inline-block; font-size: var(--fs-sm); }
+.hscroll { overflow-x: auto; }
+.scroll-hint { display: none; }
+@media (max-width: 640px) { .scroll-hint { display: block; font-size: var(--fs-sm); color: var(--muted); } }
+
+/* ---------- header ---------- */
+.top { padding-block: 40px 22px; display: grid; gap: 14px; }
+.lede { font-size: var(--fs-lg); max-width: 72ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; padding-top: 6px; }
+.fact { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-sm); }
+.fact b { font-family: var(--font-mono); font-weight: 600; font-size: var(--fs-xs); color: var(--accent); white-space: nowrap; }
+
+/* ---------- sticky section bar ---------- */
+.toc {
+  position: sticky; top: env(safe-area-inset-top, 0px); z-index: 20;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line);
+  margin-inline: -16px; padding-inline: 16px;
+}
+.toc ul { list-style: none; margin: 0 auto; padding: 8px 0; display: flex; gap: 4px; overflow-x: auto; max-width: 1180px; scrollbar-width: none; }
+.toc ul::-webkit-scrollbar { display: none; }
+.toc a { display: block; white-space: nowrap; text-decoration: none; color: var(--muted); font-size: var(--fs-sm); padding: 6px 10px; border-radius: 4px; }
+.toc a:hover { color: var(--ink); background: var(--surface-2); }
+.toc a:focus-visible { outline-offset: -2px; }
+.toc a[aria-current="true"] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+
+section.block { padding-block: 44px 8px; display: grid; gap: 18px; scroll-margin-top: calc(56px + env(safe-area-inset-top, 0px)); }
+.section-head { display: grid; gap: 8px; align-content: start; }
+.grid-2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+.grid-2 > * { min-width: 0; align-content: start; }
+
+/* ---------- generic surfaces ---------- */
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; min-width: 0; }
+.table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+table { border-collapse: collapse; width: 100%; font-size: var(--fs-md); }
+th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 500; background: var(--surface-2); }
+tr:last-child td { border-bottom: 0; }
+td code { white-space: nowrap; }
+td code.wrap { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .table-wrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .table-wrap table, .table-wrap tbody, .table-wrap tr, .table-wrap td { display: block; }
+  .table-wrap tr { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .table-wrap tr:last-child { border-bottom: 0; }
+  .table-wrap td { padding: 2px 0; border: 0; }
+  .table-wrap td::before { content: attr(data-label); display: block; font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
+  .table-wrap td code { white-space: normal; }
+}
+pre {
+  margin: 0; font-family: var(--font-mono); font-size: var(--fs-xs); line-height: 1.55;
+  background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius);
+  padding: 12px 14px; overflow-x: auto; white-space: pre; color: var(--ink);
+}
+pre .k { color: var(--accent); }
+pre .c { color: var(--muted); }
+pre .s { color: var(--processed); }
+pre .w { color: var(--dlq); }
+.pill {
+  display: inline-flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-2xs);
+  padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); white-space: nowrap;
+}
+.pill::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--c, var(--muted)); }
+.pill.raw { --c: var(--raw); } .pill.processed { --c: var(--processed); }
+.pill.rejected { --c: var(--rejected); } .pill.dlq { --c: var(--dlq); } .pill.state { --c: var(--state); } .pill.accent { --c: var(--accent); }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px; cursor: pointer; border: 1px solid var(--control-line);
+  background: var(--surface); border-radius: 4px; padding: 6px 12px; font-size: var(--fs-sm); min-height: 32px;
+}
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.note { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; font-size: var(--fs-md); max-width: 90ch; }
+figure { margin: 0; display: grid; gap: 10px; }
+figcaption { font-size: var(--fs-sm); color: var(--muted); max-width: 90ch; }
+
+/* ---------- pipeline diagram ---------- */
+.diagram-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.diagram-wrap svg { display: block; min-width: 980px; width: 100%; height: auto; }
+@media (max-width: 640px) { .diagram-wrap svg { min-width: 1150px; } }
+svg text { font-family: var(--font-body); fill: var(--ink); }
+.pipe { color: var(--muted); }
+.pipe .node rect.box { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; transition: stroke 0.2s, fill 0.2s; }
+.pipe .node.pg rect.box { stroke: var(--state); }
+.pipe .node.ext rect.box { stroke-dasharray: 5 4; }
+.pipe .node .title { font-size: 15px; font-weight: 600; }
+.pipe .node .sub { font-size: 11.5px; fill: var(--muted); font-family: var(--font-mono); }
+.pipe .node { cursor: pointer; outline: none; }
+.pipe .node:hover rect.box, .pipe .node:focus-visible rect.box, .pipe .node.lit rect.box { stroke: var(--accent); stroke-width: 2.2; }
+.pipe .node:focus-visible rect.box { fill: var(--accent-soft); }
+.pipe .node.pg .title { fill: var(--state); }
+.pipe .edge { fill: none; stroke: currentColor; stroke-width: 1.6; transition: stroke 0.2s, stroke-width 0.2s; }
+.pipe .edge.state { stroke-dasharray: 4 4; stroke: var(--state); }
+.pipe .edge.to-processed { stroke: var(--processed); }
+.pipe .edge.to-rejected { stroke: var(--rejected); }
+.pipe .edge.to-dlq { stroke: var(--dlq); }
+.pipe .edge.lit { stroke: var(--accent); stroke-width: 2.6; }
+.pipe .elabel { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.pipe .lake-band { fill: var(--surface-2); stroke: var(--line); }
+.pipe .lake-title { font-family: var(--font-mono); font-size: 12px; fill: var(--muted); letter-spacing: 0.04em; }
+.pipe .stripe { stroke: none; }
+.pipe .part { stroke: var(--line); stroke-width: 1.2; }
+.pipe .plabel { font-family: var(--font-mono); font-size: 9.5px; fill: var(--muted); }
+.pipe .pkt { fill: var(--accent); }
+.pipe .pkt.processed { fill: var(--processed); }
+.pipe .pkt.rejected { fill: var(--rejected); }
+.pipe .pkt.dlq { fill: var(--dlq); }
+.pipe .obs rect.box { fill: var(--surface-2); }
+.legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: var(--fs-sm); color: var(--muted); align-items: center; }
+.legend .swatch { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--muted); vertical-align: middle; margin-right: 6px; }
+.legend .swatch.dash { border-top: 2px dashed var(--state); }
+
+.cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
+.card {
+  position: relative; text-align: left; cursor: pointer; background: var(--surface); border: 1px solid var(--control-line); border-radius: var(--radius);
+  padding: 12px 30px 12px 14px; display: grid; gap: 4px; align-content: start; min-width: 0;
+}
+.card::after { content: "›"; position: absolute; right: 12px; top: 50%; translate: 0 -50%; color: var(--muted); font-size: 1.2rem; }
+.card:hover { border-color: var(--accent); }
+.card .name { font-weight: 600; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; align-items: baseline; }
+.card .name span { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--muted); font-weight: 400; min-width: 0; overflow-wrap: anywhere; }
+.card .role { font-size: var(--fs-sm); color: var(--muted); }
+
+/* ---------- drawer ---------- */
+.scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 40; opacity: 0; transition: opacity 0.2s; }
+.scrim.open { opacity: 1; }
+.drawer {
+  position: fixed; z-index: 50; top: 0; right: 0; bottom: 0; width: min(560px, 100%);
+  background: var(--surface); color: var(--ink); border-left: 1px solid var(--line); box-shadow: var(--shadow);
+  display: grid; grid-template-rows: auto 1fr; transform: translateX(104%); transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.drawer.open { transform: translateX(0); }
+.drawer header { display: grid; gap: 6px; padding: 18px 20px 14px; border-bottom: 1px solid var(--line); position: relative; }
+.drawer header h2 { font-size: 1.45rem; font-weight: 700; font-stretch: 112%; padding-right: 44px; }
+.drawer .close { position: absolute; top: 14px; right: 14px; width: 36px; height: 36px; border-radius: 4px; border: 1px solid var(--control-line); background: var(--surface); cursor: pointer; font-size: 1.2rem; line-height: 1; }
+.drawer .close:hover { border-color: var(--accent); color: var(--accent); }
+.drawer .body { overflow-y: auto; overscroll-behavior: contain; padding: 16px 20px 28px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; }
+.drawer .body > * { min-width: 0; }
+.drawer .body:focus-visible { outline-offset: -3px; }
+.drawer .body h3 { margin: 0 0 6px; font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 500; }
+.drawer .body :is(ul, ol) { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+.drawer .body p { font-size: var(--fs-md); }
+.drawer .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.drawer .pill { white-space: normal; overflow-wrap: anywhere; }
+@media (max-width: 640px) {
+  .drawer { top: auto; left: 0; width: 100%; height: min(86vh, 720px); height: min(86dvh, 720px); border-left: 0; border-top: 1px solid var(--line); border-radius: 10px 10px 0 0; transform: translateY(104%); }
+  .drawer.open { transform: translateY(0); }
+}
+@media (prefers-reduced-motion: reduce) { .drawer, .scrim { transition: none; } }
+
+/* ---------- walkthrough ---------- */
+.walk { display: grid; gap: 16px; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: start; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.steps button {
+  width: 100%; text-align: left; cursor: pointer; display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start;
+  padding: 9px 10px; border-radius: 4px; border: 1px solid transparent; background: transparent;
+}
+.steps button:hover { background: var(--surface-2); }
+.steps button[aria-current="step"] { background: var(--surface); border-color: var(--accent); }
+.steps .n {
+  font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 600; width: 26px; height: 26px; border-radius: 50%;
+  display: grid; place-items: center; border: 1px solid var(--line); background: var(--surface); color: var(--muted);
+}
+.steps button[aria-current="step"] .n { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.steps .t { font-weight: 600; font-size: var(--fs-md); }
+.steps .w { display: block; font-size: var(--fs-xs); color: var(--muted); font-family: var(--font-mono); }
+@media (max-width: 860px) {
+  .walk { grid-template-columns: minmax(0, 1fr); }
+  .steps { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+  .steps button { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 8px 6px; }
+  .steps .t { font-size: var(--fs-xs); line-height: 1.25; }
+  .steps .w { display: none; }
+}
+.stage { display: grid; gap: 14px; scroll-margin-top: calc(64px + env(safe-area-inset-top, 0px)); }
+.hops { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: var(--font-mono); font-size: var(--fs-2xs); }
+.hops span { padding: 3px 7px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); background: var(--surface); transition: all 0.25s; }
+.hops span.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
+.hops i { color: var(--muted); font-style: normal; }
+.fade-in { animation: fadeIn 0.35s ease both; }
+@keyframes fadeIn { from { opacity: 0.25; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@media (prefers-reduced-motion: reduce) { .fade-in { animation: none; } }
+
+/* ---------- time model ---------- */
+.timeline-wrap svg { display: block; min-width: 760px; width: 100%; height: auto; color: var(--muted); }
+.timeline-wrap svg text { paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.tl-axis { stroke: var(--line); stroke-width: 2; }
+.tl-tick { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+.tl-mark circle { stroke: var(--surface); stroke-width: 2; }
+.tl-mark .lbl { font-size: 12.5px; font-weight: 600; }
+.tl-mark .val { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+.tl-range { opacity: 0.28; }
+.tl-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
+@media (min-width: 641px) { .tl-list { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } }
+
+/* ---------- data model ---------- */
+.dm-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+@media (min-width: 1120px) { .dm-grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); } }
+.dm svg { display: block; width: 100%; max-width: 760px; height: auto; min-width: 600px; }
+.dm .ds rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.dm .ds { cursor: pointer; outline: none; }
+.dm .ds:hover rect, .dm .ds.sel rect { stroke: var(--processed); stroke-width: 2.4; }
+.dm .ds:focus-visible rect { stroke: var(--accent); stroke-width: 2.4; fill: var(--accent-soft); }
+.dm .ds .title { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
+.dm .ds .sub { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.dm .src rect { fill: var(--surface-2); stroke: var(--line); stroke-dasharray: 5 4; }
+.dm .src text { font-family: var(--font-mono); font-size: 12px; }
+.dm .rel { fill: none; stroke: var(--muted); stroke-width: 1.4; }
+.dm .rlabel { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.fields { display: flex; flex-wrap: wrap; gap: 6px; }
+.fields code { font-size: var(--fs-xs); }
+.fields code.key { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.fields code.flag { color: var(--raw); }
+.rules { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
+.rules .panel { display: grid; gap: 8px; align-content: start; }
+.rules ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: var(--fs-md); }
+
+/* ---------- guarantees ---------- */
+.sim { display: grid; gap: 14px; align-content: start; }
+.cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
+@media (max-width: 640px) { .cmp { grid-template-columns: minmax(0, 1fr); } }
+.cmp .side { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; background: var(--surface-2); min-width: 0; }
+.cmp dl { margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.cmp dt { color: var(--muted); }
+.cmp dd { margin: 0; overflow-wrap: anywhere; }
+.cmp dd.same { color: var(--processed); font-weight: 600; }
+.cmp dd.diff { color: var(--dlq); font-weight: 600; }
+.cmp .mk { display: inline-block; width: 1.4ch; }
+.verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+.verdict .tag { font-family: var(--font-mono); font-weight: 600; font-size: var(--fs-xs); padding: 4px 10px; border-radius: 4px; color: var(--bg); background: var(--c, var(--muted)); }
+.lifecycle svg { display: block; width: 100%; height: auto; min-width: 760px; }
+@media (max-width: 640px) { .lifecycle svg { min-width: 900px; } }
+.lc-step rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.lc-step text { font-size: 12.5px; font-weight: 600; }
+.lc-step .s2 { font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; fill: var(--muted); }
+.lc-arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.crash { cursor: pointer; outline: none; }
+.crash .hit { fill: transparent; }
+.crash .dot { fill: var(--surface); stroke: var(--dlq); stroke-width: 2; }
+.crash text { font-family: var(--font-mono); font-size: 11px; font-weight: 600; fill: var(--dlq); }
+.crash:hover .dot, .crash.sel .dot { fill: var(--dlq); }
+.crash:hover text, .crash.sel text { fill: var(--surface); }
+.crash:focus-visible .dot { stroke: var(--accent); stroke-width: 3; }
+.outcome { display: flex; gap: 10px; flex-wrap: wrap; }
+.parts { display: grid; gap: 6px; }
+.prow { display: grid; grid-template-columns: 70px minmax(0, 1fr) 120px; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.prow .bar { min-height: 26px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 8px; }
+.prow .bar span { white-space: nowrap; padding: 1px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); }
+.prow .bar.empty { background: var(--surface-2); color: var(--muted); }
+.prow .owner { color: var(--muted); }
+@media (max-width: 560px) { .prow { grid-template-columns: 54px minmax(0, 1fr); } .prow .owner { grid-column: 2; } }
+
+/* ---------- schemas ---------- */
+.schema-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
+.schema-cards .panel { display: grid; gap: 6px; align-content: start; }
+.schema-cards .sid { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
+.strict { justify-self: start; font-family: var(--font-mono); font-size: var(--fs-2xs); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); }
+
+/* ---------- storage tree ---------- */
+.tree { font-family: var(--font-mono); font-size: var(--fs-xs); }
+.tree details { margin-left: 14px; }
+.tree > details { margin-left: 0; }
+.tree summary { cursor: pointer; padding: 3px 0; list-style: none; }
+.tree summary::-webkit-details-marker { display: none; }
+.tree summary::before { content: "▸"; display: inline-block; width: 14px; color: var(--muted); transition: transform 0.15s; }
+.tree details[open] > summary::before { transform: rotate(90deg); }
+.tree .file { margin-left: 28px; padding: 3px 0; overflow-wrap: anywhere; }
+.tree .file button { all: unset; cursor: pointer; color: var(--accent); overflow-wrap: anywhere; }
+.tree .file button[aria-pressed="true"] { font-weight: 600; text-decoration: underline; text-underline-offset: 3px; }
+.tree .file button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.tree .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; background: var(--c); }
+
+/* ---------- operations ---------- */
+.boot svg { display: block; width: 100%; height: auto; min-width: 720px; }
+.boot .b rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.boot .b text { font-family: var(--font-mono); font-size: 12px; }
+.boot .b.go rect { stroke: var(--processed); }
+.boot .b.init rect { stroke: var(--accent); stroke-dasharray: 5 4; }
+.boot .col-title { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
+.boot .arr { stroke: var(--muted); stroke-width: 1.4; fill: none; }
+.metric-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
+.metric-list .panel { display: grid; gap: 8px; align-content: start; }
+.metric-list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.metric-list li { display: grid; gap: 1px; }
+.metric-list li code { justify-self: start; }
+.metric-list li span { font-size: var(--fs-sm); color: var(--muted); }
+.alerts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.alerts li { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; }
+.alerts li::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: var(--dlq); transform: translateY(2px); }
+
+/* ---------- decisions ---------- */
+.dec-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.dec-row { border-bottom: 1px solid var(--line); }
+.dec-row:last-child { border-bottom: 0; }
+.dec-row summary { cursor: pointer; display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto; gap: 12px; padding: 12px 14px; list-style: none; align-items: baseline; }
+.dec-row summary::-webkit-details-marker { display: none; }
+.dec-row summary .topic { font-weight: 600; }
+.dec-row summary .more { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--muted); }
+.dec-row[open] summary .more { color: var(--accent); }
+.dec-row .why { padding: 0 14px 14px; display: grid; gap: 8px; font-size: var(--fs-md); }
+.dec-row .why p { max-width: 80ch; }
+@media (max-width: 640px) { .dec-row summary { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+
+footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); font-size: var(--fs-sm); border-top: 1px solid var(--line); margin-top: 48px; }
+</style>
+
+<div class="wrap">
+  <header class="top">
+    <div class="eyebrow">Take-home for the Trust Wallet Data Engineer role</div>
+    <h1>CoinGecko ETL</h1>
+    <p class="lede">The pipeline polls CoinGecko every 30 seconds and keeps every API call in Postgres before any deduplication. It moves raw JSONL through an S3 lake and Redpanda, and writes cleaned, normalized snapshots to the processed zone exactly once, even when a step crashes and runs again.</p>
+    <div class="facts" role="group" aria-label="Key facts">
+      <div class="fact"><b>1 binary</b><span>five Go services as subcommands of <code>etl</code></span></div>
+      <div class="fact"><b>4 zones</b><span>raw, processed, rejected and dlq (dead-letter: records a stage could not process), as plain files</span></div>
+      <div class="fact"><b>1 dedup step</b><span>by natural record key, in the transformer</span></div>
+      <div class="fact"><b>~1.2 GB</b><span>RAM for about 12 containers</span></div>
+    </div>
+  </header>
+</div>
+
+<nav class="toc" aria-label="Sections">
+  <ul>
+    <li><a href="#pipeline">Pipeline</a></li>
+    <li><a href="#walkthrough">One snapshot, end to end</a></li>
+    <li><a href="#time">Time model</a></li>
+    <li><a href="#data">Data model</a></li>
+    <li><a href="#guarantees">Delivery guarantees</a></li>
+    <li><a href="#schemas">Schemas</a></li>
+    <li><a href="#storage">Storage</a></li>
+    <li><a href="#operations">Operations</a></li>
+    <li><a href="#decisions">Decisions</a></li>
+  </ul>
+</nav>
+
+<main class="wrap">
+
+  <!-- ================= PIPELINE ================= -->
+  <section class="block" id="pipeline" aria-labelledby="h-pipeline">
+    <div class="section-head">
+      <h2 id="h-pipeline">Pipeline</h2>
+      <p class="muted">Read the diagram from the top left. Ingest runs left to right along the top row, export drops to the raw bucket at the bottom right, and streaming runs right to left through the middle row into the processed, rejected and dlq buckets at the bottom left. Select any component to open its details.</p>
+    </div>
+    <div class="btn-row">
+      <button class="btn" id="anim-toggle" type="button">Pause animation</button>
+      <div class="legend" aria-hidden="true">
+        <span><span class="swatch"></span>data flow</span>
+        <span><span class="swatch dash"></span>pipeline state in Postgres</span>
+        <span class="pill processed">processed</span>
+        <span class="pill rejected">rejected</span>
+        <span class="pill dlq">dlq</span>
+        <span class="pill raw">raw</span>
+      </div>
+      <a class="skip" href="#cards">Skip the diagram</a>
+    </div>
+    <figure>
+      <div class="diagram-wrap">
+        <svg id="pipe" class="pipe" viewBox="0 0 1200 676" role="group" aria-label="Pipeline diagram. CoinGecko is polled by the fetcher, which inserts every call into Postgres raw.api_calls. The exporter writes raw JSONL objects to the raw bucket. The publisher reads them and produces to the Redpanda topic coingecko.raw. Two transformer replicas consume, deduplicate with claims in Postgres, and write to the processed, rejected and dlq buckets.">
+          <defs>
+            <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
+            </marker>
+            <marker id="arr-state" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0,0 L10,5 L0,10 z" style="fill: var(--state)"></path>
+            </marker>
+            <marker id="arr-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" style="fill: var(--processed)"></path>
+            </marker>
+            <marker id="arr-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" style="fill: var(--rejected)"></path>
+            </marker>
+            <marker id="arr-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+              <path d="M0,0 L10,5 L0,10 z" style="fill: var(--dlq)"></path>
+            </marker>
+            <path id="flow-ingest" d="M180 100 H446"></path>
+            <path id="flow-export" d="M750 100 H1040 V496"></path>
+            <path id="flow-stream" d="M900 498 V332 H394"></path>
+            <path id="flow-processed" d="M300 380 V426 H180 V496"></path>
+            <path id="flow-rejected" d="M320 380 V436 H410 V496"></path>
+            <path id="flow-dlq" d="M340 380 V446 H600 V496"></path>
+          </defs>
+
+          <rect class="lake-band" x="30" y="456" width="1140" height="162" rx="6"></rect>
+          <text class="lake-title" x="46" y="609" aria-hidden="true">versitygw · S3 API over ./data · plain files on disk</text>
+
+          <g aria-hidden="true">
+            <path class="edge" d="M180 100 H236" marker-end="url(#arr)" data-a="coingecko" data-b="fetcher"></path>
+            <text class="elabel" x="208" y="88" text-anchor="middle">GET</text>
+            <path class="edge" d="M380 100 H446" marker-end="url(#arr)" data-a="fetcher" data-b="apicalls"></path>
+            <text class="elabel" x="413" y="88" text-anchor="middle">INSERT</text>
+            <path class="edge" d="M750 100 H826" marker-end="url(#arr)" data-a="apicalls" data-b="exporter"></path>
+            <text class="elabel" x="788" y="88" text-anchor="middle">xid8 cursor</text>
+            <path class="edge" d="M970 100 H1040 V496" marker-end="url(#arr)" data-a="exporter" data-b="b-raw"></path>
+            <text class="elabel" x="1050" y="286">PUT</text>
+            <text class="elabel" x="1050" y="301">If-None-Match: *</text>
+            <path class="edge" d="M900 498 V368" marker-end="url(#arr)" data-a="b-raw" data-b="publisher"></path>
+            <text class="elabel" x="908" y="440">GET object</text>
+            <path class="edge" d="M830 332 H754" marker-end="url(#arr)" data-a="publisher" data-b="redpanda"></path>
+            <text class="elabel" x="792" y="320" text-anchor="middle">produce</text>
+            <path class="edge" d="M450 332 H394" marker-end="url(#arr)" data-a="redpanda" data-b="transformer"></path>
+            <text class="elabel" x="422" y="320" text-anchor="middle">consume</text>
+            <path class="edge to-processed" d="M300 380 V426 H180 V496" marker-end="url(#arr-p)" data-a="transformer" data-b="b-processed"></path>
+            <path class="edge to-rejected" d="M320 380 V436 H410 V496" marker-end="url(#arr-r)" data-a="transformer" data-b="b-rejected"></path>
+            <path class="edge to-dlq" d="M340 380 V446 H600 V496" marker-end="url(#arr-d)" data-a="transformer" data-b="b-dlq"></path>
+            <text class="elabel" x="440" y="430">PUT write-once</text>
+            <path class="edge state" d="M900 134 V192" marker-end="url(#arr-state)" data-a="exporter" data-b="state"></path>
+            <text class="elabel" x="910" y="168">claim · mark</text>
+            <path class="edge state" d="M900 296 V240" marker-end="url(#arr-state)" data-a="publisher" data-b="state"></path>
+            <text class="elabel" x="910" y="272">lease</text>
+            <path class="edge state" d="M315 296 V240" marker-end="url(#arr-state)" data-a="transformer" data-b="state"></path>
+            <text class="elabel" x="325" y="272">TX1 · TX2</text>
+          </g>
+
+          <!-- packets: painted before the nodes so boxes cover packets passing through them; negative begins start mid-path -->
+          <g aria-hidden="true">
+            <circle class="pkt" r="5"><animateMotion dur="2.6s" begin="0s" repeatCount="indefinite"><mpath href="#flow-ingest" xlink:href="#flow-ingest"></mpath></animateMotion></circle>
+            <circle class="pkt" r="5"><animateMotion dur="2.6s" begin="-1.3s" repeatCount="indefinite"><mpath href="#flow-ingest" xlink:href="#flow-ingest"></mpath></animateMotion></circle>
+            <circle class="pkt" r="5"><animateMotion dur="3.4s" begin="-0.4s" repeatCount="indefinite"><mpath href="#flow-export" xlink:href="#flow-export"></mpath></animateMotion></circle>
+            <circle class="pkt" r="5"><animateMotion dur="3.8s" begin="-0.9s" repeatCount="indefinite"><mpath href="#flow-stream" xlink:href="#flow-stream"></mpath></animateMotion></circle>
+            <circle class="pkt" r="5"><animateMotion dur="3.8s" begin="-2.8s" repeatCount="indefinite"><mpath href="#flow-stream" xlink:href="#flow-stream"></mpath></animateMotion></circle>
+            <circle class="pkt processed" r="5"><animateMotion dur="2.4s" begin="-1.6s" repeatCount="indefinite"><mpath href="#flow-processed" xlink:href="#flow-processed"></mpath></animateMotion></circle>
+            <circle class="pkt processed" r="5"><animateMotion dur="2.4s" begin="-0.4s" repeatCount="indefinite"><mpath href="#flow-processed" xlink:href="#flow-processed"></mpath></animateMotion></circle>
+            <circle class="pkt rejected" r="5" opacity="0">
+              <animateMotion dur="7.2s" begin="-1s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.62;0.94;1" calcMode="linear"><mpath href="#flow-rejected" xlink:href="#flow-rejected"></mpath></animateMotion>
+              <animate attributeName="opacity" dur="7.2s" begin="-1s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.6;0.63;0.93;1"></animate>
+            </circle>
+            <circle class="pkt dlq" r="5" opacity="0">
+              <animateMotion dur="14s" begin="-3s" repeatCount="indefinite" keyPoints="0;0;1;1" keyTimes="0;0.82;0.97;1" calcMode="linear"><mpath href="#flow-dlq" xlink:href="#flow-dlq"></mpath></animateMotion>
+              <animate attributeName="opacity" dur="14s" begin="-3s" repeatCount="indefinite" values="0;0;1;1;0" keyTimes="0;0.8;0.83;0.96;1"></animate>
+            </circle>
+          </g>
+
+          <!-- nodes -->
+          <g class="node ext" data-id="coingecko" tabindex="0" role="button" aria-label="CoinGecko API: open details">
+            <rect class="box" x="30" y="66" width="150" height="68" rx="5"></rect>
+            <text class="title" x="105" y="96" text-anchor="middle">CoinGecko API</text>
+            <text class="sub" x="105" y="116" text-anchor="middle">markets · coins/{id}</text>
+          </g>
+          <g class="node" data-id="fetcher" tabindex="0" role="button" aria-label="fetcher: open details">
+            <rect class="box" x="240" y="66" width="140" height="68" rx="5"></rect>
+            <text class="title" x="310" y="96" text-anchor="middle">fetcher</text>
+            <text class="sub" x="310" y="116" text-anchor="middle">every 30 s / 60 s</text>
+          </g>
+          <g class="node pg" data-id="apicalls" tabindex="0" role="button" aria-label="Postgres raw.api_calls: open details">
+            <rect class="box" x="450" y="56" width="300" height="88" rx="5"></rect>
+            <text class="title" x="600" y="90" text-anchor="middle">Postgres · raw.api_calls</text>
+            <text class="sub" x="600" y="112" text-anchor="middle">1 row per HTTP call · pre-dedup</text>
+            <text class="sub" x="600" y="128" text-anchor="middle">failed calls included</text>
+          </g>
+          <g class="node" data-id="exporter" tabindex="0" role="button" aria-label="exporter: open details">
+            <rect class="box" x="830" y="66" width="140" height="68" rx="5"></rect>
+            <text class="title" x="900" y="96" text-anchor="middle">exporter</text>
+            <text class="sub" x="900" y="116" text-anchor="middle">batch every 15 s</text>
+          </g>
+          <g class="node pg" data-id="state" tabindex="0" role="button" aria-label="Postgres pipeline state tables: open details">
+            <rect class="box" x="240" y="196" width="730" height="40" rx="5"></rect>
+            <text class="title" x="258" y="221">Postgres · pipeline.*</text>
+            <text class="sub" x="430" y="221">export_batches · dedup_claims · consumer_batches</text>
+          </g>
+          <g class="node ext" data-id="init" tabindex="0" role="button" aria-label="etl init: open details">
+            <rect class="box" x="30" y="296" width="150" height="84" rx="5"></rect>
+            <text class="title" x="105" y="326" text-anchor="middle">etl init</text>
+            <text class="sub" x="105" y="346" text-anchor="middle">runs once: tables</text>
+            <text class="sub" x="105" y="362" text-anchor="middle">topic · buckets</text>
+          </g>
+          <g class="node" data-id="transformer" tabindex="0" role="button" aria-label="transformer, two replicas: open details">
+            <rect class="box" x="246" y="302" width="150" height="84" rx="5" opacity="0.6"></rect>
+            <rect class="box" x="240" y="296" width="150" height="84" rx="5"></rect>
+            <text class="title" x="315" y="326" text-anchor="middle">transformer ×2</text>
+            <text class="sub" x="315" y="346" text-anchor="middle">validate · clean</text>
+            <text class="sub" x="315" y="362" text-anchor="middle">dedup · normalize</text>
+          </g>
+          <g class="node" data-id="redpanda" tabindex="0" role="button" aria-label="Redpanda topic coingecko.raw: open details">
+            <rect class="box" x="450" y="290" width="300" height="96" rx="5"></rect>
+            <text class="title" x="466" y="310">Redpanda · coingecko.raw</text>
+            <g aria-hidden="true">
+              <line class="part" x1="494" y1="324" x2="736" y2="324"></line><text class="plabel" x="470" y="327">p0</text>
+              <line class="part" x1="494" y1="334" x2="736" y2="334"></line><text class="plabel" x="470" y="337">p1</text>
+              <line class="part" x1="494" y1="344" x2="736" y2="344"></line><text class="plabel" x="470" y="347">p2</text>
+              <line class="part" x1="494" y1="354" x2="736" y2="354"></line><text class="plabel" x="470" y="357">p3</text>
+              <line class="part" x1="494" y1="364" x2="736" y2="364"></line><text class="plabel" x="470" y="367">p4</text>
+              <line class="part" x1="494" y1="374" x2="736" y2="374"></line><text class="plabel" x="470" y="377">p5</text>
+            </g>
+          </g>
+          <g class="node" data-id="publisher" tabindex="0" role="button" aria-label="publisher: open details">
+            <rect class="box" x="830" y="296" width="140" height="68" rx="5"></rect>
+            <text class="title" x="900" y="326" text-anchor="middle">publisher</text>
+            <text class="sub" x="900" y="346" text-anchor="middle">1 line → 1 message</text>
+          </g>
+          <g class="node" data-id="b-processed" tabindex="0" role="button" aria-label="processed bucket: open details">
+            <rect class="box" x="60" y="500" width="240" height="88" rx="5"></rect>
+            <rect class="stripe" x="60" y="500" width="240" height="5" rx="2" style="fill: var(--processed)"></rect>
+            <text class="title" x="76" y="530">s3://processed</text>
+            <text class="sub" x="76" y="550">./data/processed</text>
+            <text class="sub" x="76" y="568">clean rows + flags</text>
+          </g>
+          <g class="node" data-id="b-rejected" tabindex="0" role="button" aria-label="rejected bucket: open details">
+            <rect class="box" x="320" y="500" width="180" height="88" rx="5"></rect>
+            <rect class="stripe" x="320" y="500" width="180" height="5" rx="2" style="fill: var(--rejected)"></rect>
+            <text class="title" x="336" y="530">s3://rejected</text>
+            <text class="sub" x="336" y="550">./data/rejected</text>
+            <text class="sub" x="336" y="568">rule rejects + reason</text>
+          </g>
+          <g class="node" data-id="b-dlq" tabindex="0" role="button" aria-label="dlq bucket: open details">
+            <rect class="box" x="520" y="500" width="160" height="88" rx="5"></rect>
+            <rect class="stripe" x="520" y="500" width="160" height="5" rx="2" style="fill: var(--dlq)"></rect>
+            <text class="title" x="536" y="530">s3://dlq</text>
+            <text class="sub" x="536" y="550">./data/dlq</text>
+            <text class="sub" x="536" y="568">bad records · alert</text>
+          </g>
+          <g class="node" data-id="b-raw" tabindex="0" role="button" aria-label="raw bucket: open details">
+            <rect class="box" x="830" y="500" width="310" height="88" rx="5"></rect>
+            <rect class="stripe" x="830" y="500" width="310" height="5" rx="2" style="fill: var(--raw)"></rect>
+            <text class="title" x="846" y="530">s3://raw</text>
+            <text class="sub" x="846" y="550">./data/raw</text>
+            <text class="sub" x="846" y="568">1 JSONL object per export batch</text>
+          </g>
+          <g class="node obs" data-id="obs" tabindex="0" role="button" aria-label="Observability: open details">
+            <rect class="box" x="30" y="632" width="1140" height="34" rx="5"></rect>
+            <text class="sub" x="46" y="654">every long-running etl service · /healthz /readyz /metrics on :8080 → Prometheus → Grafana · Redpanda Console for the topic · slog JSON to logs/</text>
+          </g>
+        </svg>
+      </div>
+      <p class="scroll-hint">Scroll the diagram sideways to see every component.</p>
+      <figcaption>Solid arrows carry data; dashed arrows read and write pipeline state in Postgres. Packets show relative traffic: most records reach processed, a few are rejected by cleaning rules, broken records are rare. About half of the markets responses are CDN repeats; they still land in raw and are dropped as duplicates in the transformer. Schema codes on this page: S0 is CoinGecko's response, S1 the raw event envelope, S2 a processed row, S3 a rejected or dlq record. TX1 and TX2 are the transformer's two Postgres transactions per batch: TX1 plans the batch and claims keys, TX2 marks it written.</figcaption>
+    </figure>
+    <div class="cards" id="cards" role="group" aria-label="Components" tabindex="-1"></div>
+  </section>
+
+  <!-- ================= WALKTHROUGH ================= -->
+  <section class="block" id="walkthrough" aria-labelledby="h-walk">
+    <div class="section-head">
+      <div class="eyebrow">Recorded on 2026-10-10</div>
+      <h2 id="h-walk">One snapshot, end to end</h2>
+      <p class="muted">Three polls of <code>/coins/markets</code> travel through the pipeline. Poll B got the same cached bytes as poll A; poll C carries the next snapshot. Prices, timestamps, cache headers and payload hashes come from those recordings, which asked for the top 10 coins (<code>per_page=10</code>) to keep them short; the pipeline asks for 100. Ids, sequence numbers and offsets are illustrative. For brevity, all three polls and the bitcoin <code>/coins/{id}</code> call between them travel in one export batch and one consumer batch, as after a short stall. At the normal cadence (export every 15 s, fetch wait 5 s) each call travels alone, and the deduplication decisions are the same.</p>
+    </div>
+    <div class="btn-row">
+      <button class="btn" id="walk-prev" type="button">← Previous</button>
+      <button class="btn" id="walk-next" type="button">Next →</button>
+      <button class="btn" id="walk-play" type="button">Play</button>
+      <span class="muted text-sm" id="walk-pos" role="status"></span>
+    </div>
+    <div class="walk">
+      <ol class="steps" id="steps"></ol>
+      <div class="panel stage" id="stage"></div>
+    </div>
+  </section>
+
+  <!-- ================= TIME ================= -->
+  <section class="block" id="time" aria-labelledby="h-time">
+    <div class="section-head">
+      <h2 id="h-time">Time model</h2>
+      <p class="muted">An event is a source snapshot. About every 60 seconds CoinGecko recomputes its coins in one pass and gives every recomputed coin the same <code>last_updated</code>; a coin it skips keeps its older stamp. <code>snapshot_at</code> is the newest stamp in a response. Pick a scenario to see which times exist and which one becomes the event time.</p>
+    </div>
+    <div class="btn-row" role="group" aria-label="Time scenarios" id="time-tabs"></div>
+    <div class="panel" style="display:grid;gap:14px">
+      <div class="timeline-wrap hscroll" id="timeline" aria-hidden="true"></div>
+      <ol class="tl-list" id="timeline-list"></ol>
+      <div id="time-text" class="grid-2"></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Field</th><th>Source</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><code>snapshot_at</code></td><td>Derived: max <code>last_updated</code> in a markets response; the document's <code>last_updated</code> for <code>/coins/{id}</code></td><td>When CoinGecko assembled the snapshot. Event time, part of every natural key, and the partition date.</td></tr>
+          <tr><td><code>source_updated_at</code></td><td>API <code>last_updated</code> of the coin</td><td>When CoinGecko last recomputed this coin. Lags <code>snapshot_at</code> by hours for stale coins.</td></tr>
+          <tr><td><code>fetched_at</code></td><td>Ours, in <code>raw.api_calls</code></td><td>When we polled. Lineage: reachable from any processed row through <code>_event_id</code>.</td></tr>
+          <tr><td><code>last_traded_at</code>, <code>last_fetch_at</code></td><td>API, tickers only</td><td>Last trade on the exchange; when CoinGecko fetched the exchange's data.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ================= DATA MODEL ================= -->
+  <section class="block" id="data" aria-labelledby="h-data">
+    <div class="section-head">
+      <h2 id="h-data">Data model</h2>
+      <p class="muted">One <code>/coins/{id}</code> document becomes a parent row and three child datasets: maps keyed by currency turn into rows, arrays and maps of objects become child tables. Select a dataset to see its columns. Counts such as 223 of 250 come from a top-250 sample taken on 2026-10-10.</p>
+    </div>
+    <div class="dm-grid">
+      <figure class="panel dm">
+        <div class="hscroll">
+          <svg viewBox="0 0 660 420" role="group" aria-label="Datasets. The markets endpoint produces market_snapshot. The coin detail endpoint produces coin_snapshot as the parent of coin_market_by_currency, ticker and coin_contract, joined on coin_id and snapshot_at." id="dm-svg">
+            <defs>
+              <marker id="dm-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path></marker>
+            </defs>
+            <g aria-hidden="true">
+              <g class="src"><rect x="20" y="20" width="250" height="44" rx="5"></rect><text x="36" y="47">GET /coins/markets · every 30 s</text></g>
+              <g class="src"><rect x="330" y="20" width="310" height="44" rx="5"></rect><text x="346" y="47">GET /coins/{id} · 1 coin per minute</text></g>
+              <path class="rel" d="M145 64 V112" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
+              <path class="rel" d="M485 64 V112" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
+              <path class="rel" d="M485 186 V214 H130 V244" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
+              <path class="rel" d="M485 186 V244" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
+              <path class="rel" d="M485 214 H560 V330" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
+              <text class="rlabel" x="200" y="208">1 : 63</text>
+              <text class="rlabel" x="493" y="236">1 : 100</text>
+              <text class="rlabel" x="568" y="290">1 : ≤36</text>
+            </g>
+            <g class="ds" data-ds="market_snapshot" tabindex="0" role="button" aria-label="market_snapshot dataset">
+              <rect x="20" y="116" width="250" height="70" rx="5"></rect>
+              <text class="title" x="36" y="144">market_snapshot</text>
+              <text class="sub" x="36" y="164">coin_id · snapshot_at · 100 rows</text>
+            </g>
+            <g class="ds" data-ds="coin_snapshot" tabindex="0" role="button" aria-label="coin_snapshot dataset, the parent">
+              <rect x="345" y="116" width="280" height="70" rx="5"></rect>
+              <text class="title" x="361" y="144">coin_snapshot</text>
+              <text class="sub" x="361" y="164">parent · coin_id · snapshot_at · 1 row</text>
+            </g>
+            <g class="ds" data-ds="coin_market_by_currency" tabindex="0" role="button" aria-label="coin_market_by_currency dataset">
+              <rect x="20" y="248" width="230" height="70" rx="5"></rect>
+              <text class="title" x="36" y="276">coin_market_by_currency</text>
+              <text class="sub" x="36" y="296">+ currency · 63 rows</text>
+            </g>
+            <g class="ds" data-ds="ticker" tabindex="0" role="button" aria-label="ticker dataset">
+              <rect x="290" y="248" width="230" height="70" rx="5"></rect>
+              <text class="title" x="306" y="276">ticker</text>
+              <text class="sub" x="306" y="296">+ exchange · base · target</text>
+            </g>
+            <g class="ds" data-ds="coin_contract" tabindex="0" role="button" aria-label="coin_contract dataset">
+              <rect x="420" y="334" width="220" height="70" rx="5"></rect>
+              <text class="title" x="436" y="362">coin_contract</text>
+              <text class="sub" x="436" y="382">+ platform_id · up to 36 rows</text>
+            </g>
+          </svg>
+        </div>
+        <p class="scroll-hint">Scroll the diagram sideways to see every dataset.</p>
+        <figcaption>Children join the parent on <code>(coin_id, snapshot_at)</code>. Row counts are per snapshot of one coin, measured on bitcoin and USD Coin.</figcaption>
+      </figure>
+      <div class="panel" id="ds-panel"></div>
+    </div>
+    <div class="rules">
+      <div class="panel">
+        <h3>Normalize every row</h3>
+        <ul>
+          <li><code>""</code> and <code>[]</code> become <code>null</code>. CoinGecko marks a missing value four ways: <code>null</code>, <code>""</code>, <code>[]</code> or no key at all.</li>
+          <li>Timestamps become RFC 3339 UTC with milliseconds: <code>2026-10-10T10:07:55.000Z</code>. <code>genesis_date</code> stays a date.</li>
+          <li>Money and quantities become decimal strings, never float64. Values pass 2<sup>53</sup>: bitcoin's market cap in VND is <code>"43083803721443304"</code>.</li>
+          <li>Symbols upper-case, EVM addresses lower-case. <code>roi</code> (null in 223 of 250 rows) flattens to <code>roi_times</code>, <code>roi_currency</code>, <code>roi_pct</code>.</li>
+          <li>Dropped as unneeded: images, descriptions, links, sparklines, <code>trade_url</code>, <code>token_info_url</code> and duplicated fields such as <code>coin_mcap_usd</code>.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Reject to <code>rejected/</code></h3>
+        <ul>
+          <li><code>missing_id</code>: no coin id.</li>
+          <li><code>null_price</code>, <code>nonpositive_price</code>.</li>
+          <li><code>empty_platform</code>: bitcoin ships <code>platforms: {"": ""}</code>.</li>
+          <li><code>empty_record</code>: every metric is null.</li>
+          <li><code>snapshot_conflict</code>: same natural key, different content.</li>
+        </ul>
+      </div>
+      <div class="panel">
+        <h3>Flag and keep</h3>
+        <ul>
+          <li><code>is_stale</code>: <code>snapshot_at − source_updated_at</code> &gt; 10 min; tickers: the upstream flag or a last trade older than 1 h.</li>
+          <li><code>is_inactive</code>: zero volume (14 coins in the top 250, mostly tokenized money-market and bond funds).</li>
+          <li><code>is_anomaly</code>: price outside <code>[low_24h, high_24h]</code> (3 coins in the top 250); tickers: the upstream flag or more than 2% from the coin's median.</li>
+          <li>Thresholds are configuration: <code>ETL_STALE_AFTER</code>, <code>ETL_TICKER_STALE_AFTER</code>, <code>ETL_TICKER_ANOMALY_PCT</code>.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= GUARANTEES ================= -->
+  <section class="block" id="guarantees" aria-labelledby="h-guar">
+    <div class="section-head">
+      <h2 id="h-guar">Delivery guarantees</h2>
+      <p class="muted">Every hop is at-least-once. The processed zone still holds each record once, because every step can run again safely: deterministic keys, ledgers in Postgres and write-once objects. Deduplication happens once, in the transformer; idempotency happens at every write.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Hop</th><th>Mechanism</th><th>If the step runs again</th></tr></thead>
+        <tbody>
+          <tr><td>fetcher → <code>api_calls</code></td><td>Primary key <code>(event_id, fetched_at)</code>, <code>ON CONFLICT DO NOTHING</code></td><td>No row is inserted twice. A crash before the commit loses one poll, visible in metrics.</td></tr>
+          <tr><td>exporter → <code>raw/</code></td><td>xid8 cursor and the <code>export_batches</code> ledger; PUT with <code>If-None-Match: *</code></td><td>Same object, byte for byte: a 412 with an equal checksum counts as done.</td></tr>
+          <tr><td>publisher → topic</td><td>Lease from the ledger; idempotent producer, <code>acks=all</code></td><td>The batch is published again with the same <code>event_id</code>s; the transformer drops the copies.</td></tr>
+          <tr><td>transformer → <code>processed/</code></td><td>Batch manifest, deduplication claims, write-once objects, offset commit after the write</td><td>Same decisions and the same bytes: a 412 with an equal checksum.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid-2">
+      <div class="panel sim">
+        <div class="section-head">
+          <h3>Deduplication decision</h3>
+          <p class="muted text-md">Each record claims its natural key in <code>pipeline.dedup_claims</code>; the first claim wins. Choose what arrived to compare it with the stored claim. Ids and offsets are illustrative.</p>
+        </div>
+        <div class="btn-row" id="dedup-tabs" role="group" aria-label="Duplicate scenarios"></div>
+        <div id="dedup-view"></div>
+      </div>
+      <div class="panel sim">
+        <div class="section-head">
+          <h3>Topic partitions</h3>
+          <p class="muted text-md">Redpanda speaks the Kafka protocol, so Kafka terms apply. Partitions give ordering and parallelism; they do not split traffic by endpoint. The producer hashes each message key with murmur2 (Kafka's default partitioner), so every repeat of the same data lands on the same partition and deduplication sees it in offset order.</p>
+        </div>
+        <div class="parts" id="parts"></div>
+        <p class="muted text-sm">Six partitions, five keys and two consumers using the cooperative-sticky assignor, which moves only the partitions that change owner during a rebalance (one possible assignment shown). bitcoin hashes to the same partition as coins_markets, so only four partitions get data and at most four consumers can be busy. To scale out, publish one message per coin, which gives 100 keys.</p>
+      </div>
+    </div>
+
+    <div class="panel sim lifecycle">
+      <div class="section-head">
+        <h3>Transformer batch and crash points</h3>
+        <p class="muted text-md">One in-flight batch per partition: a contiguous offset range <code>[F..L]</code>. Select a crash point to see what is left behind and how the next owner recovers.</p>
+      </div>
+      <div class="btn-row">
+        <button class="btn" id="naive-toggle" type="button" aria-pressed="false">Compare with the naive rule</button>
+        <span class="muted text-sm">The naive rule drops every record whose key is already claimed.</span>
+      </div>
+      <div class="hscroll" id="lc-wrap">
+        <svg viewBox="0 0 980 190" role="group" aria-label="Batch steps: input checks, TX1, PUT objects, TX2, commit offset, with five crash points." id="lc-svg"></svg>
+      </div>
+      <p class="scroll-hint">Scroll sideways for crash points C3, C4 and Z.</p>
+      <div id="crash-view"></div>
+      <p class="note">Integration tests with testcontainers (Postgres, Redpanda, versitygw) crash after TX1 and after partial PUTs, run a zombie consumer and a publisher replay, and assert no loss and no duplicates in <code>processed/</code>. Out-of-order Postgres commits are tested against the exporter cursor.</p>
+    </div>
+  </section>
+
+  <!-- ================= SCHEMAS ================= -->
+  <section class="block" id="schemas" aria-labelledby="h-sch">
+    <div class="section-head">
+      <h2 id="h-sch">Schemas</h2>
+      <p class="muted">JSON Schema 2020-12 files live in <code>schemas/</code>, are embedded into the binary with <code>go:embed</code> and validated with <code>santhosh-tekuri/jsonschema/v6</code>. The major version sits in the file name, the <code>$id</code>, <code>schema_version</code> on every record and the <code>v=</code> path segment of processed data.</p>
+    </div>
+    <div class="schema-cards">
+      <div class="panel"><div class="sid">S0 · source response</div><div><code>source/coingecko/coins_markets.v1.json</code>, <code>coin.v1.json</code></div><p class="muted text-sm">Permissive: only fields the transform reads are required and typed; extra fields pass, and nulls are allowed where observed. CoinGecko stopped returning <code>community_data</code> and <code>developer_data</code> on 2026-08-28; drift must not stop the pipeline.</p><span class="strict">checked in the transformer</span></div>
+      <div class="panel"><div class="sid">S1 · raw event</div><div><code>pipeline/raw_event.v1.json</code></div><p class="muted text-sm">Strict. One API call: the <code>api_calls</code> row, the raw JSONL line and the message value are the same bytes. <code>outcome = ok</code> requires a payload, its sha256 and an idempotency key.</p><span class="strict">fetcher · exporter · publisher · transformer</span></div>
+      <div class="panel"><div class="sid">S2 · processed row</div><div><code>processed/&lt;dataset&gt;.v1.json</code></div><p class="muted text-sm">Strict, one per dataset, including the <code>_</code> lineage columns. A row that fails never reaches <code>processed/</code>.</p><span class="strict">transformer output</span></div>
+      <div class="panel"><div class="sid">S3 · rejected and dlq records</div><div><code>pipeline/rejected_record.v1.json</code>, <code>dlq_record.v1.json</code></div><p class="muted text-sm">Strict. One dlq record shape for every stage. <code>error_class</code> is checked against a regex rather than a fixed list, so a new class needs no schema change and is still safe as a metric label.</p><span class="strict">all writers of rejected and dlq</span></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Stage</th><th>Checks</th><th>On failure</th></tr></thead>
+        <tbody>
+          <tr><td>fetcher, before INSERT</td><td>S1 envelope only; the payload is not inspected</td><td>Not inserted. ERROR log and <code class="wrap">etl_schema_validations_total{stage="fetch",result="fail"}</code>: this is our bug. No dedicated alert; if it persists, the stale-data alert fires.</td></tr>
+          <tr><td>exporter, publisher</td><td>S1 per line</td><td><span class="pill dlq">dlq</span> stage <code>export</code> or <code>publish</code>; the line is not passed on.</td></tr>
+          <tr><td>transformer, input</td><td>strict JSON, S1, <code>sha256(payload) = payload_sha256</code>, then S0</td><td><span class="pill dlq">dlq</span> <code>decode_error</code>, <code>schema_violation</code>, <code>integrity_error</code>, <code>source_schema_violation</code>, or <code>transform_error</code> when a payload passes S0 but cannot be transformed. After a schema fix, raw objects are republished.</td></tr>
+          <tr><td>transformer, output</td><td>S2 per row</td><td><span class="pill dlq">dlq</span> <code>output_schema_violation</code>; never written to processed.</td></tr>
+          <tr><td>writing rejected or dlq</td><td>S3 (rejected or dlq record schema)</td><td>ERROR log with the original bytes in base64.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Rollout of a compatible schema change: the transformer first, then publisher, exporter and fetcher. CI checks that the new version still accepts every fixture of the previous one. A breaking change gets <code>v2</code> files, handled side by side in the same topic by dispatching on <code>schema_version</code>.</p>
+  </section>
+
+  <!-- ================= STORAGE ================= -->
+  <section class="block" id="storage" aria-labelledby="h-sto">
+    <div class="section-head">
+      <h2 id="h-sto">Storage</h2>
+      <p class="muted">versitygw serves <code>./data</code> over the S3 API; every bucket is a directory and every object a plain file, so <code>cat</code> works on the host. Postgres holds the raw call log and the pipeline state. Select a file to see a line from it; ids, batch numbers and offsets are illustrative.</p>
+    </div>
+    <div class="grid-2">
+      <div class="panel tree" id="tree">
+        <details open>
+          <summary>data/</summary>
+          <details open><summary><span class="dot" style="--c: var(--raw)"></span>raw/</summary>
+            <details open><summary>source=coingecko/</summary>
+              <details open><summary>ingest_date=2026-10-10/</summary>
+                <div class="file"><button type="button" data-file="raw" aria-pressed="false">batch=<wbr>00000000000000000042.jsonl</button></div>
+              </details>
+            </details>
+          </details>
+          <details open><summary><span class="dot" style="--c: var(--processed)"></span>processed/</summary>
+            <details open><summary>dataset=market_snapshot/</summary>
+              <details open><summary>v=1/</summary>
+                <details open><summary>event_date=2026-10-10/</summary>
+                  <div class="file"><button type="button" data-file="processed" aria-pressed="false">coingecko.raw+0+<wbr>00000000000000001200.jsonl</button></div>
+                </details>
+              </details>
+            </details>
+            <details><summary>dataset=coin_snapshot/, coin_market_by_currency/, ticker/, coin_contract/</summary>
+              <div class="file muted">same layout: v=1/event_date=…/&lt;topic&gt;+&lt;partition&gt;+&lt;first offset&gt;.jsonl</div>
+            </details>
+          </details>
+          <details open><summary><span class="dot" style="--c: var(--rejected)"></span>rejected/</summary>
+            <details open><summary>dataset=coin_contract/</summary>
+              <details open><summary>event_date=2026-10-10/</summary>
+                <div class="file"><button type="button" data-file="rejected" aria-pressed="false">coingecko.raw+0+<wbr>00000000000000001200.jsonl</button></div>
+              </details>
+            </details>
+          </details>
+          <details open><summary><span class="dot" style="--c: var(--dlq)"></span>dlq/</summary>
+            <details open><summary>stage=transform/</summary>
+              <details open><summary>date=2026-10-10/</summary>
+                <div class="file"><button type="button" data-file="dlq" aria-pressed="false">coingecko.raw+0+<wbr>00000000000000001200.jsonl</button></div>
+              </details>
+            </details>
+            <details><summary>stage=export/, stage=publish/</summary>
+              <div class="file muted">export+batch+&lt;20-digit batch_id&gt;.jsonl and publish+batch+&lt;20-digit batch_id&gt;.jsonl, one object per batch. stage=transform/ holds the transform_input and transform_output records of one consumer batch.</div>
+            </details>
+          </details>
+        </details>
+        <details><summary>.s3meta/ <span class="muted">· versitygw sidecar metadata (gitignored)</span></summary></details>
+        <details><summary>logs/ <span class="muted">· &lt;service&gt;/etl.log, &lt;container id&gt;/transformer/etl.log</span></summary></details>
+      </div>
+      <div class="panel" id="file-view" style="display:grid;gap:10px;align-content:start"></div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Postgres table</th><th>Holds</th><th>Retention</th></tr></thead>
+        <tbody>
+          <tr><td><code>raw.api_calls</code></td><td>Every HTTP call with the response body as <code>json</code> (byte-exact), partitioned daily by <code>fetched_at</code>.</td><td>Never dropped by the pipeline: failed calls are not exported and live only here. Production: drop old daily partitions with pg_partman.</td></tr>
+          <tr><td><code>pipeline.export_batches</code></td><td>Ledger of raw objects: row range, object key, checksum, export and publish status, publish lease.</td><td>Not pruned; the raw zone is append-only.</td></tr>
+          <tr><td><code>pipeline.dedup_claims</code></td><td>First position, <code>event_id</code>, idempotency key and content hash per natural key, partitioned by <code>event_date</code>.</td><td>At least 30 days, longer than the 7-day topic retention. Not pruned locally; production drops old partitions with pg_partman.</td></tr>
+          <tr><td><code>pipeline.consumer_batches</code></td><td>Manifest of transformer batches: offset range, object keys, checksums, counts, planned or written. An EXCLUDE constraint (Postgres rejects a row whose range overlaps an existing one) forbids overlapping offset ranges.</td><td>At least 30 days (not pruned locally).</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="note">Persistence: <code>./data</code>, <code>./.s3meta</code> and <code>./logs</code> are bind mounts; Postgres and Redpanda keep their data in the named volumes <code>pgdata</code> and <code>redpanda</code>. <code>make down</code> keeps everything; <code>docker compose down -v</code> deletes the named volumes. Keep <code>./data</code> and <code>./.s3meta</code> together: the write-once check reads the stored sha256 from the sidecar. The README lists the same mounts as <code>docker run -v</code> commands.</p>
+  </section>
+
+  <!-- ================= OPERATIONS ================= -->
+  <section class="block" id="operations" aria-labelledby="h-ops">
+    <div class="section-head">
+      <h2 id="h-ops">Operations</h2>
+      <p class="muted"><code>make up</code> builds one image and starts the stack. Startup order comes from healthchecks: infrastructure first, then a single idempotent <code>etl init</code>, then the services. <code>make demo</code> waits and prints file counts, the duplicate share and links.</p>
+    </div>
+    <figure class="panel boot">
+      <div class="hscroll" tabindex="0" role="region" aria-label="Startup order diagram">
+        <svg viewBox="0 0 900 214" role="img" aria-label="Startup order: postgres, redpanda and versitygw become healthy, etl init runs to completion, then fetcher, exporter, publisher and two transformers start.">
+          <defs><marker id="boot-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path></marker></defs>
+          <text class="col-title" x="20" y="24">1 · service_healthy</text>
+          <text class="col-title" x="330" y="24">2 · completed_successfully</text>
+          <text class="col-title" x="620" y="24">3 · long-running</text>
+          <g class="b"><rect x="20" y="40" width="230" height="40" rx="5"></rect><text x="34" y="65">postgres:18.6 · pg_isready</text></g>
+          <g class="b"><rect x="20" y="100" width="230" height="40" rx="5"></rect><text x="34" y="125">redpanda v26.2.4 · rpk health</text></g>
+          <g class="b"><rect x="20" y="160" width="230" height="40" rx="5"></rect><text x="34" y="185">versitygw v1.8.0 · /health</text></g>
+          <g class="b init"><rect x="330" y="80" width="210" height="80" rx="5"></rect><text x="346" y="108">etl init</text><text x="346" y="128" style="fill: var(--muted)">migrate · partitions</text><text x="346" y="146" style="fill: var(--muted)">topic · buckets</text></g>
+          <path class="arr" d="M250 60 H290 V110 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M250 120 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M250 180 H290 V130 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <g class="b go"><rect x="620" y="30" width="250" height="34" rx="5"></rect><text x="634" y="52">etl fetcher</text></g>
+          <g class="b go"><rect x="620" y="74" width="250" height="34" rx="5"></rect><text x="634" y="96">etl exporter</text></g>
+          <g class="b go"><rect x="620" y="118" width="250" height="34" rx="5"></rect><text x="634" y="140">etl publisher</text></g>
+          <g class="b go"><rect x="620" y="162" width="250" height="34" rx="5"></rect><text x="634" y="184">etl transformer ×2</text></g>
+          <path class="arr" d="M540 120 H580 V47 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M580 91 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M580 135 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M580 120 V179 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+        </svg>
+      </div>
+      <figcaption>Also running: prometheus, grafana and redpanda-console. On first start Redpanda reads <code>deploy/redpanda/bootstrap.yaml</code>, which turns topic auto-creation off, so only <code>etl init</code> creates topics.</figcaption>
+    </figure>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Open on the host</th><th>Address</th><th>What you see</th></tr></thead>
+        <tbody>
+          <tr><td>Grafana</td><td><code>localhost:3000</code></td><td>Provisioned dashboard: records per stage, freshness, end-to-end latency, duplicate share, rejects, DLQ, consumer lag, API status codes, export lag with S3 PUT results, schema validations.</td></tr>
+          <tr><td>Prometheus</td><td><code>localhost:9090</code></td><td>Scrapes the etl services, both transformer replicas included; six alert rules with promtool unit tests.</td></tr>
+          <tr><td>Redpanda Console</td><td><code>localhost:8081</code></td><td>Topic <code>coingecko.raw</code>, messages with headers, consumer group lag.</td></tr>
+          <tr><td>S3 API</td><td><code>localhost:7070</code></td><td>versitygw; the same bytes are plain files under <code>./data</code>.</td></tr>
+          <tr><td>Kafka protocol</td><td><code>localhost:19092</code></td><td>External listener for tools on the host.</td></tr>
+          <tr><td>Postgres</td><td><code>localhost:5432</code></td><td><code>raw.api_calls</code> and <code>pipeline.*</code>.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="metric-list">
+      <div class="panel"><h3>every stage</h3><ul>
+        <li><code>etl_schema_validations_total{stage,schema,result}</code><span>Validations by stage and schema, result pass or fail. The fail share of coins_markets.v1 and coin.v1 drives the source-schema alert.</span></li>
+        <li><code>etl_schema_violations_total{stage,schema,keyword}</code><span>Which JSON Schema keyword failed: required, type, pattern.</span></li>
+      </ul></div>
+      <div class="panel"><h3>fetcher</h3><ul>
+        <li><code>etl_api_requests_total{endpoint,status}</code><span>Calls by result; 429 and 5xx stand out here.</span></li>
+        <li><code>etl_api_request_duration_seconds{endpoint}</code><span>Latency of each call.</span></li>
+        <li><code>etl_api_rate_limited_total</code><span>429 responses; each starts a cooldown.</span></li>
+        <li><code>etl_last_success_timestamp_seconds{endpoint}</code><span>Drives the stale-data alert, per endpoint.</span></li>
+        <li><code>etl_source_data_age_seconds{endpoint}</code><span><code>fetched_at − last_updated</code>: how old CoinGecko's data was when we got it.</span></li>
+      </ul></div>
+      <div class="panel"><h3>exporter · publisher</h3><ul>
+        <li><code>etl_export_lag_seconds</code><span>Age of the oldest unexported row; a long transaction shows up here.</span></li>
+        <li><code>etl_export_batches_total{result}</code><span>Export batches by result: exported or error.</span></li>
+        <li><code>etl_s3_put_total{result}</code><span>created, exists (a 412 with an equal checksum), mismatch, error.</span></li>
+        <li><code>etl_published_records_total</code><span>Messages produced, plus franz-go client metrics as <code>etl_publisher_*</code>.</span></li>
+      </ul></div>
+      <div class="panel"><h3>transformer</h3><ul>
+        <li><code>etl_records_total{dataset,outcome}</code><span>written, duplicate, rejected, dlq.</span></li>
+        <li><code>etl_dedup_dropped_total{reason}</code><span>replay, duplicate_response, duplicate_record.</span></li>
+        <li><code>etl_rejected_total{reason}</code>, <code>etl_dlq_total{stage,error_class}</code><span>Why rows left the processed path.</span></li>
+        <li><code>etl_consumer_lag_records{partition}</code><span>Messages waiting per partition.</span></li>
+        <li><code>etl_batch_duration_seconds</code>, <code>etl_e2e_latency_seconds</code><span>Batch time and poll-to-processed latency.</span></li>
+      </ul></div>
+      <div class="panel"><h3>Alerts</h3>
+        <ul class="alerts">
+          <li>No successful poll for more than 2 minutes.</li>
+          <li>Records appeared in <code>dlq/</code>.</li>
+          <li>More than 5% of responses fail S0 over 15 minutes: the upstream format changed.</li>
+          <li>Export lag above 5 minutes.</li>
+          <li>Consumer lag growing for 10 minutes.</li>
+          <li>Frequent 429 responses.</li>
+        </ul>
+      </div>
+    </div>
+    <p class="note">Logs: <code>log/slog</code> JSON in UTC with <code>service</code>, <code>stage</code>, <code>event_id</code> and <code>batch</code>, written to <code>logs/&lt;service&gt;/etl.log</code> and stdout. The two transformer replicas share <code>./logs</code>, so each writes <code>logs/&lt;container id&gt;/transformer/etl.log</code> and no file has two writers.</p>
+  </section>
+
+  <!-- ================= DECISIONS ================= -->
+  <section class="block" id="decisions" aria-labelledby="h-dec">
+    <div class="section-head">
+      <h2 id="h-dec">Decisions</h2>
+      <p class="muted">What was decided, why, and what was considered and rejected. Filter by area; open a row for the reasoning.</p>
+    </div>
+    <div class="btn-row" id="dec-filter" role="group" aria-label="Filter decisions by area"></div>
+    <div class="dec-list" id="dec-list"></div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <div>Data provided by CoinGecko.</div>
+  <div>Source of truth: <code>docs/superpowers/specs/2026-10-10-coingecko-etl-design.md</code> and <code>docs/superpowers/plans/2026-10-10-coingecko-etl.md</code>. This page is updated with every architecture change.</div>
+</footer>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-labelledby="drawer-title" hidden>
+  <header>
+    <div class="eyebrow" id="drawer-kicker"></div>
+    <h2 id="drawer-title"></h2>
+    <button class="close" id="drawer-close" type="button" aria-label="Close details">×</button>
+  </header>
+  <div class="body" id="drawer-body" tabindex="0"></div>
+</aside>
+<p class="sr-only" id="sr-status" role="status"></p>
+
+<script>
+(function () {
+  "use strict";
+  var mq = window.matchMedia ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
+  var reduceMotion = !!(mq && mq.matches);
+  var ready = false;
+  function $(sel, root) { return (root || document).querySelector(sel); }
+  function $all(sel, root) { return Array.prototype.slice.call((root || document).querySelectorAll(sel)); }
+  function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
+  function announce(t) { if (ready) $("#sr-status").textContent = t; }
+
+  /* ------------------------------------------------------------------ components */
+  var C = {
+    coingecko: {
+      kicker: "External source", title: "CoinGecko API", role: "Market data source, polled without a key by default.",
+      sections: [
+        ["Endpoints", "<ul><li><code>/coins/markets</code> every 30 s: top 100 by market cap in USD, <code>precision=full</code>, 1h/24h/7d changes. A flat 30-second time series.</li><li><code>/coins/{id}</code> once a minute, rotating over bitcoin, ethereum, tether and usd-coin, 15 s after the markets call. Deep nesting: 23 maps over 63 currencies, 100 tickers with nested objects, contracts per chain.</li></ul>"],
+        ["Observed behaviour", "<ul><li>All coins are recomputed in one pass every 60 s and share one <code>last_updated</code>; a coin the pass skips keeps its older stamp.</li><li>The CDN caches <code>/coins/markets</code> for 60 s (<code>s-maxage=60</code>; <code>/coins/{id}</code> for 30 s), so about half of the 30-second markets polls return byte-identical bodies.</li><li>The keyless limit is 10–30 calls a minute per IP; a 429 with <code>Retry-After: 60</code> arrived on the 6th call within 27 s.</li><li>Values exceed 2<sup>53</sup>, and a missing value arrives as <code>null</code>, <code>\"\"</code>, <code>[]</code> or no key at all.</li></ul>"],
+        ["Budget", "<p>About 3 calls a minute, one request in flight. An optional <code>COINGECKO_API_KEY</code> sends <code>x-cg-demo-api-key</code>: 100 calls a minute and 10,000 a month, which lasts about 2.3 days at this rate.</p>"]
+      ],
+      chips: ["Data provided by CoinGecko"]
+    },
+    fetcher: {
+      kicker: "etl fetcher · 1 replica", title: "fetcher", role: "Transport only: polls, wraps the response in an event, inserts one row per call.",
+      sections: [
+        ["What it does", "<ul><li>Two schedules: markets every 30 s, coin detail every 60 s at a 15 s offset.</li><li>A limiter allows one request in flight and at least 15 s between request starts. A 429 starts a cooldown of <code>Retry-After</code> (60 s if missing); 5xx and timeouts back off 2 s × 2<sup>n−1</sup>, capped at 60 s, with jitter.</li><li>A tick is skipped, never queued, while the limiter cools down.</li></ul>"],
+        ["The event it builds (S1)", "<ul><li><code>event_id</code>: UUIDv7. <code>fetched_at</code>: UTC milliseconds.</li><li><code>outcome</code>: <code>ok</code>, <code>http_error</code> or <code>network_error</code>. A 200 whose body is not strict JSON (duplicate keys, invalid UTF-8, a bare <code>null</code>) is an <code>http_error</code>.</li><li><code>payload</code> verbatim, <code>payload_sha256</code>, and <code>idempotency_key = sha256(source | endpoint | params | payload_sha256)</code>.</li><li>HTTP metadata: status, latency, <code>Date</code>, <code>Age</code>, <code>cf-cache-status</code>, <code>ETag</code>, <code>Retry-After</code>.</li></ul>"],
+        ["No business logic", "<p>The payload is not validated here. Only the S1 envelope is checked before the INSERT. A violation means a bug in our code: the row is not inserted, an ERROR is logged and <code>etl_schema_validations_total{stage=\"fetch\"}</code> counts it. Source-schema checks live in the transformer.</p>"],
+        ["Code", "<p><code>internal/coingecko</code> (client, limiter) and <code>internal/fetcher</code>. The fetcher also creates daily partitions at start and every hour.</p>"]
+      ],
+      chips: ["etl_api_requests_total", "etl_api_rate_limited_total", "etl_last_success_timestamp_seconds", "etl_source_data_age_seconds"]
+    },
+    apicalls: {
+      kicker: "Postgres 18.6 · schema raw", title: "raw.api_calls", role: "Every HTTP call, before any deduplication, including failures.",
+      sections: [
+        ["Shape", "<ul><li>One row per call, partitioned by day on <code>fetched_at</code>. Primary key <code>(event_id, fetched_at)</code>.</li><li><code>payload</code> is <code>json</code>, not <code>jsonb</code>: <code>json</code> keeps the exact bytes, so <code>payload_sha256</code> can be checked at every later hop. <code>jsonb</code> would reorder keys.</li><li><code>idempotency_key</code> is a plain, non-unique column. CDN repeats share it.</li><li><code>ingest_txid xid8</code> defaults to <code>pg_current_xact_id()</code>, the id of the inserting transaction, and drives the exporter cursor.</li></ul>"],
+        ["Inspecting failures", "<pre tabindex=\"0\">SELECT fetched_at, endpoint, http-&gt;&gt;'status', error\nFROM raw.api_calls\nWHERE outcome &lt;&gt; 'ok'\nORDER BY fetched_at DESC;</pre><p>Source-schema violations are not here: they are found in <code>dlq/</code>.</p>"],
+        ["Raw duplicates", "<pre tabindex=\"0\">SELECT idempotency_key, count(*)\nFROM raw.api_calls\nWHERE outcome = 'ok'\nGROUP BY 1 HAVING count(*) &gt; 1;</pre>"]
+      ],
+      chips: ["CHECK ((outcome = 'ok') = (payload IS NOT NULL))"]
+    },
+    exporter: {
+      kicker: "etl exporter · 1 active instance", title: "exporter", role: "Moves new rows into one immutable raw JSONL object per batch.",
+      sections: [
+        ["Cursor", "<p>xid8 is Postgres's 64-bit transaction id; every raw row records the id of the transaction that inserted it. The cursor walks <code>(ingest_txid, seq)</code> only below <code>pg_snapshot_xmin(pg_current_snapshot())</code>, the oldest transaction still running. An identity watermark loses rows when transactions commit out of order (reproduced on 18.6); this bound can stall behind a long transaction but never skips a row.</p>"],
+        ["Steps", "<ol><li>Short claim transaction: insert the range into <code>pipeline.export_batches</code>; the object key comes from the batch id.</li><li>Read the range, serialize deterministic JSONL (each line is the S1 event, payload embedded verbatim), validate each line.</li><li>PUT with <code>If-None-Match: *</code> and <code>x-amz-meta-sha256</code>. On 412, HEAD and compare checksums.</li><li>Mark the batch <code>exported</code>.</li></ol><p>No transaction is held across S3 I/O. Only <code>outcome = ok</code> rows are exported.</p>"],
+        ["Single instance", "<p><code>pg_try_advisory_lock</code> on a dedicated connection, held for the life of the process. A second exporter retries every 5 s for a minute, exits, and compose restarts it, so it stands by until the lock frees.</p>"]
+      ],
+      chips: ["etl_export_lag_seconds", "etl_export_batches_total", "etl_s3_put_total"]
+    },
+    state: {
+      kicker: "Postgres 18.6 · schema pipeline", title: "pipeline.*", role: "State that must survive crashes, be shared by replicas and change atomically.",
+      sections: [
+        ["Tables", "<ul><li><code>export_batches</code>: one row per raw object. Range, object key, checksum, status, publish lease and <code>published_at</code>.</li><li><code>dedup_claims</code>: first position, <code>event_id</code>, idempotency key and content hash per natural key. Partitioned by <code>event_date</code>.</li><li><code>consumer_batches</code>: the transformer's batch manifest. An EXCLUDE constraint over <code>int8range(first_offset, last_offset)</code> forbids overlapping ranges: Postgres rejects a row whose range overlaps an existing one.</li></ul>"],
+        ["Why Postgres", "<p>Broker offsets cannot answer \"was key X seen\". S3 can only guard single objects. In-memory state is lost on a rebalance: in a live test, one rebalance made the transformer write two records a second time. Postgres is already in the stack and gives transactions and constraints.</p>"],
+        ["Guards", "<p><code>idle_in_transaction_session_timeout = 60s</code> and <code>transaction_timeout = 5min</code> bound how long any transaction can hold back the exporter.</p>"]
+      ],
+      chips: ["kept ≥ 30 days", "TX1 · TX2"]
+    },
+    publisher: {
+      kicker: "etl publisher · 1 replica", title: "publisher", role: "Turns each raw line into one message, unchanged.",
+      sections: [
+        ["Lease", "<pre tabindex=\"0\">UPDATE pipeline.export_batches\nSET publish_lease_until = now() + '2 min'\nWHERE batch_id = (SELECT batch_id ...\n  FOR UPDATE SKIP LOCKED LIMIT 1)\nRETURNING batch_id, object_key;</pre><p>Leases let several publishers run without stepping on each other.</p>"],
+        ["Produce", "<ul><li>GET the object and validate each line against S1 (failures go to <code>dlq/</code>, stage <code>publish</code>).</li><li>Key <code>coins_markets</code> or the coin id; the value is the line itself.</li><li>Headers: <code>event_id</code>, <code>idempotency_key</code>, <code>schema</code>, <code>raw_object</code>, <code>line_no</code>.</li><li>Idempotent producer, <code>acks=all</code>, zstd. <code>published_at</code> is set after a successful flush.</li></ul>"],
+        ["Crash", "<p>A crash before the mark republishes the whole object once the lease expires. The copies carry the same <code>event_id</code>s; the transformer drops them.</p>"]
+      ],
+      chips: ["etl_published_records_total", "kprom (franz-go Prometheus metrics)"]
+    },
+    redpanda: {
+      kicker: "Redpanda v26.2.4 · Kafka protocol", title: "Redpanda", role: "Replayable log with per-key ordering and consumer groups.",
+      sections: [
+        ["Topic", "<ul><li><code>coingecko.raw</code>: 6 partitions, retention 7 days. No version suffix: the version travels in every message (<code>schema_version</code>, <code>schema</code> header).</li><li>Auto-creation is off, set by <code>deploy/redpanda/bootstrap.yaml</code> on first start; only <code>etl init</code> creates topics.</li></ul>"],
+        ["Why Redpanda", "<p>The same Kafka protocol in one C++ binary without a JVM: lighter, faster to start. The franz-go code runs unchanged against Apache Kafka, MSK or Confluent Cloud. Its main gap, the Kafka Connect ecosystem, is not used here.</p>"],
+        ["Run mode", "<p>Image <code>redpandadata/redpanda:v26.2.4</code> in dev-container mode with one core and 1 GB. Internal listener <code>redpanda:9092</code>, host listener <code>localhost:19092</code>. Redpanda Console on <code>localhost:8081</code>.</p>"]
+      ],
+      chips: ["6 partitions", "7 days", "BSL 1.1 (source-available)"]
+    },
+    transformer: {
+      kicker: "etl transformer · 2 replicas", title: "transformer", role: "Checks, cleans, deduplicates and normalizes; writes processed, rejected and dlq objects.",
+      sections: [
+        ["Consumer", "<p>Group <code>coingecko-transformer</code> on franz-go with manual commits. <code>BlockRebalanceOnPoll</code> holds a rebalance until the polled batch is committed; the cooperative-sticky assignor moves only the partitions that change owner. A fetch waits for at least 1 MiB or 5 s, and a poll takes at most 500 records. One in-flight batch per partition.</p>"],
+        ["Batch", "<ol><li>Input checks without the database: strict JSON, S1, checksum, S0.</li><li>TX1: plan the offset range in the manifest, transform, claim natural keys, decide, validate S2, store object keys and checksums.</li><li>PUT every object with <code>If-None-Match: *</code>.</li><li>TX2: mark the batch written.</li><li>Commit offset <code>L+1</code> synchronously.</li></ol>"],
+        ["Recovery", "<p>On partition assignment it looks up the manifest batch that covers the committed offset: written means skip past it, planned means reprocess exactly that range.</p>"],
+        ["Deterministic output", "<p>The output depends only on the input: the transform reads no clock and uses no random ordering. <code>_processed_at</code> is the manifest's <code>planned_at</code>, so a retried batch produces identical files.</p>"]
+      ],
+      chips: ["etl_records_total", "etl_dedup_dropped_total", "etl_consumer_lag_records", "etl_e2e_latency_seconds"]
+    },
+    init: {
+      kicker: "etl init · one-shot", title: "etl init", role: "Brings Postgres, the topic and the buckets to the expected state, then exits.",
+      sections: [
+        ["Order", "<ol><li>goose migrations (a Go SQL migration tool; embedded SQL, advisory lock) and daily partitions for today−1 … today+3.</li><li>Topic <code>coingecko.raw</code> through kadm (franz-go's admin client): 6 partitions, 7-day retention. If it exists, its partition count and <code>retention.ms</code> must match, or init fails.</li><li>Buckets raw, processed, rejected, dlq. HeadBucket comes first: versitygw answers CreateBucket with 500 for a directory that exists on disk but was not created through the gateway.</li></ol>"],
+        ["Idempotent", "<p>Running it twice changes nothing. Each dependency is retried for up to 60 s with backoff. Compose starts it after postgres, redpanda and versitygw are healthy, and every service waits for it to complete successfully.</p>"]
+      ]
+    },
+    obs: {
+      kicker: "Every long-running service", title: "Observability", role: "Health, metrics and logs on every long-running etl service.",
+      sections: [
+        ["Endpoints on :8080", "<ul><li><code>/healthz</code>: the process is alive.</li><li><code>/readyz</code>: its dependencies answer within 2 s; otherwise 503 with the failing checks as JSON.</li><li><code>/metrics</code>: Prometheus format. Pipeline metrics start with <code>etl_</code> (the publisher adds franz-go client metrics as <code>etl_publisher_*</code>), next to the standard <code>go_*</code> and <code>process_*</code> series.</li></ul>"],
+        ["Stack", "<p>Prometheus <code>v3.15.0</code> scrapes fetcher, exporter, publisher and both transformer replicas (found through Docker DNS) and evaluates six alert rules. Grafana <code>13.2.3</code> starts with a provisioned dashboard and anonymous viewer access. Distroless images have no curl, so compose healthchecks call <code>etl healthcheck</code>.</p>"],
+        ["Logs", "<p><code>log/slog</code> JSON in UTC, to <code>logs/&lt;service&gt;/etl.log</code> and stdout; the transformer replicas write <code>logs/&lt;container id&gt;/transformer/etl.log</code>. The logs cover API success and failure, transformation errors and data saved, as the assignment asks.</p>"]
+      ]
+    },
+    "b-raw": {
+      kicker: "Bucket · ./data/raw", title: "s3://raw", role: "Immutable JSONL objects, one per export batch; every line is an S1 event.",
+      sections: [
+        ["Key", "<p><code>source=coingecko/ingest_date=&lt;claim date&gt;/batch=&lt;20-digit batch id&gt;.jsonl</code></p>"],
+        ["Append-only", "<p><code>If-None-Match: *</code> tells S3 to create the object only if the key is unused; if it exists, the answer is 412 Precondition Failed and nothing is overwritten. The writer then compares the stored sha256. Replaying a range means publishing these objects again; the transformer deduplicates.</p>"]
+      ]
+    },
+    "b-processed": {
+      kicker: "Bucket · ./data/processed", title: "s3://processed", role: "Clean, normalized rows with flags, once per natural key.",
+      sections: [
+        ["Key", "<p><code>dataset=&lt;name&gt;/v=1/event_date=&lt;date of snapshot_at&gt;/coingecko.raw+&lt;partition&gt;+&lt;first offset&gt;.jsonl</code>. The name follows the Confluent S3 sink convention and is what makes a retried batch land on the same object.</p>"],
+        ["Datasets", "<p><code>market_snapshot</code>, <code>coin_snapshot</code>, <code>coin_market_by_currency</code>, <code>ticker</code>, <code>coin_contract</code>. The <code>v=</code> segment keeps files of different schema versions apart for lake readers.</p>"]
+      ]
+    },
+    "b-rejected": {
+      kicker: "Bucket · ./data/rejected", title: "s3://rejected", role: "Records removed by cleaning rules, each with its reason and lineage.",
+      sections: [
+        ["Reasons", "<p><code>missing_id</code>, <code>null_price</code>, <code>nonpositive_price</code>, <code>empty_platform</code>, <code>empty_record</code>, <code>snapshot_conflict</code>.</p>"],
+        ["Expected outcome", "<p>Rejects are data quality outcomes, counted in <code>etl_rejected_total{reason}</code>. They go through the same claims as processed rows, so CDN repeats do not multiply them.</p>"]
+      ]
+    },
+    "b-dlq": {
+      kicker: "Bucket · ./data/dlq", title: "s3://dlq", role: "Records that broke a stage: bad input, or an output row that fails S2. A person needs to look; an alert fires.",
+      sections: [
+        ["One record shape", "<p>Every stage writes the same record (schema S3, <code>dlq_record.v1.json</code>): <code>stage</code>, <code>error_class</code>, up to 20 <code>violations</code>, an <code>origin</code> (postgres, s3 or kafka), <code>original_base64</code> and <code>occurred_at</code>.</p>"],
+        ["Deterministic", "<p><code>occurred_at</code> comes from the batch (claimed, exported or planned time), never the clock, and violations are sorted. A retried batch writes the same bytes, so write-once still holds.</p>"],
+        ["Why a bucket", "<p>Two of the three writers run before the broker. A dlq topic would also sit outside the batch manifest and could collect duplicates on retries.</p>"]
+      ]
+    }
+  };
+  var CARD_ORDER = ["coingecko", "fetcher", "apicalls", "exporter", "state", "b-raw", "publisher", "redpanda", "transformer", "b-processed", "b-rejected", "b-dlq", "init", "obs"];
+
+  /* ------------------------------------------------------------------ drawer */
+  var drawer = $("#drawer"), scrim = $("#scrim"), lastFocus = null, closeTimer = null;
+  function setInert(on) { $all("body > .wrap, body > .toc, body > footer").forEach(function (el) { el.inert = on; }); }
+  function openDrawer(id, trigger) {
+    var c = C[id]; if (!c) return;
+    lastFocus = trigger || document.activeElement;
+    $("#drawer-kicker").textContent = c.kicker;
+    $("#drawer-title").textContent = c.title;
+    var html = "<p>" + c.role + "</p>";
+    c.sections.forEach(function (s) { html += "<div><h3>" + s[0] + "</h3>" + s[1] + "</div>"; });
+    if (c.chips && c.chips.length) {
+      html += "<div><h3>Signals</h3><div class=\"chips\">" + c.chips.map(function (x) { return "<span class=\"pill accent\">" + esc(x) + "</span>"; }).join("") + "</div></div>";
+    }
+    $("#drawer-body").innerHTML = html;
+    $("#drawer-body").scrollTop = 0;
+    if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; }
+    drawer.hidden = false; scrim.hidden = false;
+    setInert(true);
+    document.documentElement.style.overflow = "hidden";
+    requestAnimationFrame(function () { drawer.classList.add("open"); scrim.classList.add("open"); });
+    $("#drawer-close").focus({ preventScroll: true });
+    litNode(id, true);
+  }
+  function closeDrawer() {
+    if (drawer.hidden) return;
+    drawer.classList.remove("open"); scrim.classList.remove("open");
+    litNode(null, false);
+    document.documentElement.style.overflow = "";
+    setInert(false);
+    if (closeTimer) clearTimeout(closeTimer);
+    closeTimer = setTimeout(function () { drawer.hidden = true; scrim.hidden = true; closeTimer = null; }, reduceMotion ? 0 : 280);
+    if (lastFocus && lastFocus.focus) lastFocus.focus({ preventScroll: true });
+  }
+  $("#drawer-close").addEventListener("click", closeDrawer);
+  scrim.addEventListener("click", closeDrawer);
+  document.addEventListener("keydown", function (e) {
+    if (e.key === "Escape") closeDrawer();
+    if (e.key === "Tab" && !drawer.hidden) {
+      var f = $all("button, [href], [tabindex]:not([tabindex='-1'])", drawer);
+      if (!f.length) return;
+      var first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
+  /* ------------------------------------------------------------------ pipeline svg */
+  var pipe = $("#pipe");
+  function litNode(id, on) {
+    $all(".node", pipe).forEach(function (n) { n.classList.toggle("lit", !!on && n.getAttribute("data-id") === id); });
+    $all(".edge", pipe).forEach(function (e) {
+      e.classList.toggle("lit", !!on && (e.getAttribute("data-a") === id || e.getAttribute("data-b") === id));
+    });
+  }
+  $all(".node", pipe).forEach(function (n) {
+    var id = n.getAttribute("data-id");
+    n.addEventListener("click", function () { openDrawer(id, n); });
+    n.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openDrawer(id, n); } });
+    n.addEventListener("mouseenter", function () { if (drawer.hidden) litNode(id, true); });
+    n.addEventListener("mouseleave", function () { if (drawer.hidden) litNode(null, false); });
+    n.addEventListener("focus", function () { if (drawer.hidden) litNode(id, true); });
+    n.addEventListener("blur", function () { if (drawer.hidden) litNode(null, false); });
+  });
+
+  var animBtn = $("#anim-toggle"), animPaused = false;
+  function setAnim(paused) {
+    animPaused = paused;
+    try { if (paused) pipe.pauseAnimations(); else pipe.unpauseAnimations(); } catch (e) { /* SMIL unavailable */ }
+    animBtn.textContent = paused ? "Play animation" : "Pause animation";
+  }
+  animBtn.addEventListener("click", function () { setAnim(!animPaused); });
+  if (reduceMotion) {
+    try { pipe.setCurrentTime(1.6); } catch (e) { /* ignore */ }
+    setAnim(true);
+  }
+  if (mq && mq.addEventListener) {
+    mq.addEventListener("change", function (e) { reduceMotion = e.matches; setAnim(e.matches); });
+  }
+
+  var cards = $("#cards");
+  CARD_ORDER.forEach(function (id) {
+    var c = C[id];
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "card";
+    b.innerHTML = "<span class=\"name\">" + esc(c.title) + "<span>" + esc(c.kicker.split(" · ")[0]) + "</span></span><span class=\"role\">" + esc(c.role) + "</span>";
+    b.addEventListener("click", function () { openDrawer(id, b); });
+    cards.appendChild(b);
+  });
+
+  /* ------------------------------------------------------------------ walkthrough */
+  var HOPS = ["CoinGecko", "fetcher", "raw.api_calls", "exporter", "s3://raw", "publisher", "coingecko.raw", "transformer", "pipeline.*", "s3://processed"];
+  var STEPS = [
+    {
+      t: "Poll", w: "10:02:33 UTC", on: [0, 1],
+      p: "The fetcher calls <code>/coins/markets</code>. CoinGecko's CDN has no copy yet (<code>cf-cache-status: MISS</code>), so the response is fresh: every coin carries the snapshot stamp <code>10:01:51.000Z</code>, except figure-heloc, which CoinGecko last recomputed at <code>07:55:52</code>.",
+      a: "<span class=\"k\">GET</span> /api/v3/coins/markets?vs_currency=usd&amp;order=market_cap_desc&amp;per_page=10\n    &amp;page=1&amp;price_change_percentage=1h,24h,7d&amp;sparkline=true&amp;precision=full\n<span class=\"c\">-- the recorded request; the fetcher sends per_page=100&amp;sparkline=false</span>\n\n<span class=\"c\">HTTP/2 200</span>\ndate: Sat, 10 Oct 2026 10:02:33 GMT\ncache-control: max-age=30, public, must-revalidate, s-maxage=60\ncf-cache-status: <span class=\"s\">MISS</span>\n\n[{\"id\":\"bitcoin\",\"symbol\":\"btc\",\"current_price\":82800,\n  \"market_cap\":1663680829681,\"total_volume\":22361942086,\n  \"high_24h\":83398,\"low_24h\":82229,\"price_change_percentage_24h\":0.25599,\n  \"last_updated\":\"<span class=\"k\">2026-10-10T10:01:51.000Z</span>\", ...},\n ...\n {\"id\":\"figure-heloc\",\"current_price\":1.001,\n  \"price_change_percentage_24h\":null,\n  \"last_updated\":\"<span class=\"w\">2026-10-10T07:55:52.000Z</span>\", ...}]",
+      cap: "Recorded response A. sha256 of the body: 1350ae15534a2a76…"
+    },
+    {
+      t: "Store the call", w: "raw.api_calls", on: [1, 2],
+      p: "One row per call, before any deduplication. The body goes into a <code>json</code> column byte for byte, next to its sha256. Five seconds later the bitcoin <code>/coins/{id}</code> call adds its own row. 34 seconds after poll A, poll B gets the same bytes from the CDN cache (<code>HIT</code>, <code>age: 34</code>): another row with a new <code>event_id</code> and the same <code>idempotency_key</code>. Raw keeps both.",
+      a: "<span class=\"c\">-- poll A</span>\nseq              1077\nevent_id         01a12543-a844-7cc2-9a51-3f1f2b9d8e11   <span class=\"c\">UUIDv7, 10:02:33.412Z</span>\nendpoint         coins_markets\nfetched_at       2026-10-10T10:02:33.412Z\noutcome          ok\nhttp             {\"status\":200,\"cf_cache_status\":\"MISS\",\"age_s\":null,...}\npayload_sha256   <span class=\"k\">1350ae15534a2a76…</span>\nidempotency_key  sha256(coingecko | coins_markets | params | 1350ae15…)\npayload          [{\"id\":\"bitcoin\",...}]                <span class=\"c\">json, byte-exact</span>\n\n<span class=\"c\">-- 10:02:38, /coins/bitcoin</span>\nseq 1078 · endpoint coin_detail · snapshot 10:01:51\n\n<span class=\"c\">-- poll B, 10:03:07, cf-cache-status: HIT, age: 34</span>\nseq 1079 · new event_id · payload_sha256 <span class=\"k\">1350ae15534a2a76…</span> · same idempotency_key\n\n<span class=\"c\">-- poll C, 10:03:43, cf-cache-status: EXPIRED</span>\nseq 1080 · payload_sha256 <span class=\"s\">02bb4dce488316d6…</span> · snapshot 10:02:51",
+      cap: "Columns follow schema S1. A 429 or a timeout would be a row with outcome http_error or network_error and no payload."
+    },
+    {
+      t: "Export a batch", w: "every 15 s", on: [2, 3, 4],
+      p: "The exporter claims the next range of committed rows below the oldest running transaction, records it as batch 42, writes one JSONL object with <code>If-None-Match: *</code> and marks the batch exported. Each line is the S1 event with the payload embedded verbatim.",
+      a: "<span class=\"c\">-- pipeline.export_batches</span>\nbatch_id 42 · rows 1077..1080 · status exported\nobject_key source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\n\n<span class=\"k\">PUT</span> /raw/source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\nIf-None-Match: *\nx-amz-meta-sha256: 7c41…\n<span class=\"s\">200 OK</span>\n\n<span class=\"c\">-- line 1 (poll A)</span>\n{\"schema_version\":1,\"event_id\":\"01a12543-a844-…\",\"idempotency_key\":\"…\",\n \"source\":\"coingecko\",\"endpoint\":\"coins_markets\",\"request\":{...},\n \"fetched_at\":\"2026-10-10T10:02:33.412Z\",\"outcome\":\"ok\",\"http\":{...},\n \"error\":null,\"payload_sha256\":\"1350ae15…\",\"payload\":[{\"id\":\"bitcoin\",...}]}",
+      cap: "A retry of the same batch writes the same bytes: the storage answers 412 and the checksums match."
+    },
+    {
+      t: "Publish", w: "lease → produce", on: [4, 5, 6],
+      p: "The publisher leases batch 42, reads the object over S3, checks each line against S1 and produces it unchanged. All markets messages share the key <code>coins_markets</code>; bitcoin's key hashes to the same partition, so all four messages land on partition 0 in order.",
+      a: "topic      coingecko.raw\nkeys       coins_markets, bitcoin   <span class=\"c\">murmur2 % 6 = 0 for both</span>\npartition  0\noffsets    <span class=\"k\">1200</span> poll A · <span class=\"k\">1201</span> /coins/bitcoin · <span class=\"k\">1202</span> poll B · <span class=\"k\">1203</span> poll C\nheaders    event_id, idempotency_key,\n           schema = …/pipeline/raw_event.v1.json,\n           raw_object = source=coingecko/…/batch=…42.jsonl, line_no\nvalue      the raw line, byte for byte",
+      cap: "Idempotent producer, acks=all. published_at is set only after the flush."
+    },
+    {
+      t: "Plan the batch", w: "partition 0 · [1200..1203]", on: [6, 7, 8],
+      p: "A transformer replica owns partition 0 and polls offsets 1200 to 1203. Input checks run first without the database: strict JSON, S1, the payload checksum and S0. All four pass. TX1 opens and records the range as planned.",
+      a: "<span class=\"c\">-- checks per message</span>\nstrict JSON                        <span class=\"s\">ok</span>\nS1 raw_event.v1                    <span class=\"s\">ok</span>\nsha256(payload) = payload_sha256   <span class=\"s\">ok</span>\nS0 coins_markets.v1 / coin.v1      <span class=\"s\">ok</span>\n\n<span class=\"c\">-- TX1</span>\nINSERT INTO pipeline.consumer_batches\n  (topic_id, kafka_partition, first_offset, last_offset, status)\nVALUES ('…', 0, 1200, 1203, 'planned');",
+      cap: "If a row with this start already exists, the stored range wins over the polled one."
+    },
+    {
+      t: "Transform", w: "snapshot_at = max(last_updated)", on: [7],
+      p: "Each markets response becomes market_snapshot rows. Messages A and B give snapshot <code>10:01:51.000Z</code>; message C gives <code>10:02:51.000Z</code>. figure-heloc's own stamp is about two hours older than either snapshot, so both of its rows are flagged stale and kept. The bitcoin document at offset 1201 becomes rows in the four coin datasets.",
+      a: "<span class=\"c\">-- excerpt: bitcoin and figure-heloc only</span>\nbitcoin       snapshot_at 2026-10-10T10:01:51.000Z  price \"82800\"   is_stale false\nfigure-heloc  snapshot_at 2026-10-10T10:01:51.000Z  price \"1.001\"   <span class=\"w\">is_stale true</span>\n              source_updated_at 07:55:52.000Z → 2 h 6 min behind\n\n<span class=\"c\">-- message C</span>\nbitcoin       snapshot_at 2026-10-10T10:02:51.000Z  price \"82795\"\nfigure-heloc  snapshot_at 2026-10-10T10:02:51.000Z  <span class=\"w\">is_stale true</span>",
+      cap: "Money is written as decimal strings; percentages stay numbers."
+    },
+    {
+      t: "Deduplicate", w: "claims in pipeline.dedup_claims", on: [7, 8],
+      p: "Every record claims its natural key; the first claim wins. Records from message B find claims that point to message A with the same content hash, so they are dropped. Message C carries a new snapshot, so its keys are new, including figure-heloc's.",
+      a: "<span class=\"c\">-- excerpt</span>\n<span class=\"c\">record key                                    offset  decision</span>\nmarket_snapshot | bitcoin|…T10:01:51.000Z      1200    <span class=\"s\">write</span>\nmarket_snapshot | bitcoin|…T10:01:51.000Z      1202    <span class=\"w\">drop · duplicate_response</span>\nmarket_snapshot | bitcoin|…T10:02:51.000Z      1203    <span class=\"s\">write</span>\nmarket_snapshot | figure-heloc|…T10:01:51.000Z 1200    <span class=\"s\">write</span> (is_stale)\nmarket_snapshot | figure-heloc|…T10:02:51.000Z 1203    <span class=\"s\">write</span> (is_stale)",
+      cap: "duplicate_response is only a metric label: the content hash matches, and the claim came from a message with the same idempotency_key."
+    },
+    {
+      t: "Write and commit", w: "PUT · TX2 · offset 1204", on: [7, 8, 9],
+      p: "The rows are serialized in offset order with <code>_processed_at</code> taken from the manifest, written once, the batch is marked written, and offset 1204 is committed. A crash anywhere in this step replays the same range into the same object.",
+      a: "<span class=\"k\">PUT</span> /processed/dataset=market_snapshot/v=1/event_date=2026-10-10/\n    coingecko.raw+0+00000000000000001200.jsonl\nIf-None-Match: *            <span class=\"s\">200 OK</span>\n\n{\"coin_id\":\"bitcoin\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\"symbol\":\"BTC\",\n \"name\":\"Bitcoin\",\"vs_currency\":\"usd\",\"market_cap_rank\":1,\"price\":\"82800\",\n \"market_cap\":\"1663680829681\",\"fdv\":\"1663680829681\",\"total_volume\":\"22361942086\",\n \"high_24h\":\"83398\",\"low_24h\":\"82229\",\"price_change_24h\":\"211.42\",\n \"price_change_pct_1h\":0.0036,\"price_change_pct_24h\":0.25599,...,\n \"source_updated_at\":\"2026-10-10T10:01:51.000Z\",\"is_stale\":false,\n \"is_inactive\":false,\"is_anomaly\":false,\n \"_event_id\":\"01a12543-a844-…\",\"_raw_object\":\"source=coingecko/…/batch=…42.jsonl\",\n \"_kafka_partition\":0,\"_kafka_offset\":1200,\"_schema_version\":1,\n \"_processed_at\":\"2026-10-10T10:03:52.204Z\"}\n\nUPDATE pipeline.consumer_batches SET status = 'written' ...;   <span class=\"c\">TX2</span>\ncommit offset 1204",
+      cap: "The object holds one row per coin for each new snapshot: messages A and C each add a full set (10 rows in the recording, 100 at per_page=100), message B adds none. The excerpt shows bitcoin."
+    }
+  ];
+  var stepIdx = 0, playTimer = null;
+  var stepsEl = $("#steps"), stageEl = $("#stage");
+  STEPS.forEach(function (s, i) {
+    var li = document.createElement("li");
+    li.innerHTML = "<button type=\"button\"><span class=\"n\">" + (i + 1) + "</span><span><span class=\"t\">" + s.t + "</span><span class=\"w\">" + s.w + "</span></span></button>";
+    li.firstChild.addEventListener("click", function () { stopPlay(); showStep(i); revealStage(); });
+    stepsEl.appendChild(li);
+  });
+  function revealStage() {
+    var r = stageEl.getBoundingClientRect();
+    if (r.top < 0 || r.top > window.innerHeight * 0.6) stageEl.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+  }
+  function showStep(i) {
+    stepIdx = (i + STEPS.length) % STEPS.length;
+    var s = STEPS[stepIdx];
+    $all("button", stepsEl).forEach(function (b, j) { if (j === stepIdx) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current"); });
+    var hops = HOPS.map(function (h, j) { return "<span class=\"" + (s.on.indexOf(j) >= 0 ? "on" : "") + "\">" + h + "</span>"; }).join("<i>›</i>");
+    stageEl.innerHTML = "<div class=\"hops\" aria-hidden=\"true\">" + hops + "</div>" +
+      "<h3>" + (stepIdx + 1) + ". " + s.t + " <span class=\"mono muted\" style=\"font-weight:400\">· " + s.w + "</span></h3><p>" + s.p + "</p>" +
+      "<figure><pre tabindex=\"0\">" + s.a + "</pre><figcaption>" + s.cap + "</figcaption></figure>";
+    stageEl.classList.remove("fade-in"); void stageEl.offsetWidth; stageEl.classList.add("fade-in");
+    $("#walk-pos").textContent = "Step " + (stepIdx + 1) + " of " + STEPS.length + ": " + s.t;
+  }
+  function stopPlay() {
+    if (playTimer) { clearInterval(playTimer); playTimer = null; }
+    $("#walk-play").textContent = "Play";
+  }
+  $("#walk-prev").addEventListener("click", function () { stopPlay(); showStep(stepIdx - 1); revealStage(); });
+  $("#walk-next").addEventListener("click", function () { stopPlay(); showStep(stepIdx + 1); revealStage(); });
+  $("#walk-play").addEventListener("click", function () {
+    if (playTimer) { stopPlay(); return; }
+    $("#walk-play").textContent = "Pause";
+    revealStage();
+    playTimer = setInterval(function () { showStep(stepIdx + 1); }, 6500);
+  });
+  showStep(0);
+
+  /* ------------------------------------------------------------------ time model */
+  var TIME = [
+    {
+      label: "Two polls, one snapshot", from: "10:01:30", to: "10:04:00",
+      marks: [
+        { at: "10:01:51", label: "snapshot 1", val: "last_updated 10:01:51.000Z", c: "var(--accent)", lvl: -1 },
+        { at: "10:02:33", label: "poll A", val: "MISS · fresh body", c: "var(--processed)", lvl: 1 },
+        { at: "10:02:51", label: "snapshot 2", val: "last_updated 10:02:51.000Z", c: "var(--accent)", lvl: -1 },
+        { at: "10:03:07", label: "poll B", val: "HIT · age 34 · same bytes", c: "var(--raw)", lvl: 2 },
+        { at: "10:03:43", label: "poll C", val: "EXPIRED · snapshot 2", c: "var(--processed)", lvl: 1 }
+      ],
+      ranges: [{ from: "10:02:33", to: "10:03:33", label: "CDN cache · s-maxage=60", c: "var(--raw)", lx: "10:03:10", anchor: "start" }],
+      left: "<h3>What becomes an event</h3><p>Polls A and B returned identical bytes (sha256 <code>1350ae15…</code>): one snapshot, one set of rows. Poll C returned snapshot 2, a new event. Event time is <code>snapshot_at</code>, never the poll time.</p>",
+      right: "<h3>Why it matters</h3><p>Polling every 30 s against a 60 s refresh and a 60 s CDN cache yields about 50% repeats. Raw keeps them all; the transformer drops them by natural key.</p>"
+    },
+    {
+      label: "Stale coin", from: "07:40:00", to: "10:20:00",
+      marks: [
+        { at: "07:55:52", label: "figure-heloc recomputed", val: "source_updated_at", c: "var(--raw)", lvl: -1, anchor: "start" },
+        { at: "10:01:51", label: "snapshot 1", val: "row 1 · is_stale", c: "var(--accent)", lvl: 1, anchor: "end" },
+        { at: "10:02:51", label: "snapshot 2", val: "row 2 · is_stale", c: "var(--accent)", lvl: -1, anchor: "end" }
+      ],
+      ranges: [{ from: "07:55:52", to: "10:01:51", label: "2 h 6 min, over the 10 min threshold", c: "var(--raw)" }],
+      left: "<h3>Two rows, both valid</h3><p>The price stays 1.001 in both snapshots, but each snapshot is a new statement by the source: at 10:02:51 CoinGecko still reports it. The keys differ by <code>snapshot_at</code>, so deduplication keeps both.</p>",
+      right: "<h3>Flagged and kept</h3><p><code>is_stale = snapshot_at − source_updated_at &gt; 10 min</code>. Readers decide whether to use stale prices; the row stays in processed.</p>"
+    },
+    {
+      label: "Where each time comes from", from: "09:59:30", to: "10:03:00",
+      marks: [
+        { at: "10:00:40", label: "CoinGecko fetched exchanges", val: "last_fetch_at", c: "var(--state)", lvl: 1, anchor: "end" },
+        { at: "10:00:45", label: "trade on CoinUp", val: "after the fetch: clock skew", c: "var(--dlq)", lvl: -1, anchor: "start" },
+        { at: "10:01:51", label: "snapshot", val: "last_updated → snapshot_at", c: "var(--accent)", lvl: 2 },
+        { at: "10:02:38", label: "CDN answered · we polled", val: "Date header · fetched_at", c: "var(--processed)", lvl: -2, anchor: "end" }
+      ],
+      ranges: [{ from: "09:40:53", to: "10:00:51", label: "trades: 09:40:53 to 10:00:51", c: "var(--muted)", lx: "09:59:31", anchor: "start" }],
+      left: "<h3>The chain for bitcoin</h3><p>Trades happen on exchanges, CoinGecko fetches tickers, recomputes the coin, the CDN serves the document, we poll. Recorded from <code>/coins/bitcoin</code> on 2026-10-10.</p>",
+      right: "<h3>Clocks disagree</h3><p>89 of the 100 tickers report a trade after CoinGecko's fetch at 10:00:40, for example CoinUp at 10:00:45. Times from different systems are stored as fields; no logic depends on their order.</p>"
+    }
+  ];
+  function secs(hms) { var p = hms.split(":").map(Number); return p[0] * 3600 + p[1] * 60 + (p[2] || 0); }
+  function fmt(s) { var h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + (x ? ":" + String(x).padStart(2, "0") : ""); }
+  function renderTimeline(sc) {
+    var W = 980, H = 280, L = 40, R = W - 40, axisY = 140;
+    var a = secs(sc.from), b = secs(sc.to), span = b - a;
+    function X(t) { var v = Math.min(Math.max(secs(t), a), b); return L + (v - a) / span * (R - L); }
+    var out = "<svg viewBox=\"0 0 " + W + " " + H + "\" focusable=\"false\">", labels = "";
+    out += "<line class=\"tl-axis\" x1=\"" + L + "\" y1=\"" + axisY + "\" x2=\"" + R + "\" y2=\"" + axisY + "\"></line>";
+    var step = span > 3600 ? 1800 : span > 900 ? 300 : 30;
+    for (var t = Math.ceil(a / step) * step; t <= b; t += step) {
+      var x = L + (t - a) / span * (R - L);
+      out += "<line x1=\"" + x + "\" y1=\"" + (axisY - 4) + "\" x2=\"" + x + "\" y2=\"" + (axisY + 4) + "\" stroke=\"currentColor\"></line>";
+      labels += "<text class=\"tl-tick\" x=\"" + x + "\" y=\"" + (axisY + 20) + "\" text-anchor=\"middle\">" + fmt(t) + "</text>";
+    }
+    sc.ranges.forEach(function (r) {
+      var x1 = X(r.from), x2 = X(r.to);
+      out += "<rect class=\"tl-range\" x=\"" + x1 + "\" y=\"" + (axisY - 7) + "\" width=\"" + Math.max(2, x2 - x1) + "\" height=\"14\" rx=\"3\" style=\"fill:" + r.c + "\"></rect>";
+      var lx = r.lx ? X(r.lx) : Math.max(L + 150, (x1 + x2) / 2);
+      labels += "<text class=\"tl-tick\" x=\"" + lx + "\" y=\"" + (axisY + 36) + "\" text-anchor=\"" + (r.anchor || "middle") + "\">" + esc(r.label) + "</text>";
+    });
+    var LEVEL = { "-2": axisY - 100, "-1": axisY - 52, "1": axisY + 62, "2": axisY + 108 };
+    sc.marks.forEach(function (m) {
+      var x = X(m.at), lvl = m.lvl || 1, up = lvl < 0, ly = LEVEL[String(lvl)];
+      var anchor = m.anchor || (x < L + 80 ? "start" : x > R - 80 ? "end" : "middle");
+      out += "<g class=\"tl-mark\"><line x1=\"" + x + "\" y1=\"" + axisY + "\" x2=\"" + x + "\" y2=\"" + (up ? ly + 14 : ly - 16) + "\" stroke=\"" + m.c + "\" stroke-dasharray=\"3 3\"></line>";
+      out += "<circle cx=\"" + x + "\" cy=\"" + axisY + "\" r=\"6\" style=\"fill:" + m.c + "\"></circle></g>";
+      labels += "<g class=\"tl-mark\"><text class=\"lbl\" x=\"" + x + "\" y=\"" + (up ? ly - 6 : ly) + "\" text-anchor=\"" + anchor + "\">" + esc(m.label) + " · " + m.at + "</text>";
+      labels += "<text class=\"val\" x=\"" + x + "\" y=\"" + (up ? ly + 8 : ly + 15) + "\" text-anchor=\"" + anchor + "\">" + esc(m.val) + "</text></g>";
+    });
+    return out + labels + "</svg>";
+  }
+  var timeTabs = $("#time-tabs");
+  function showTime(i) {
+    var sc = TIME[i];
+    $all("button", timeTabs).forEach(function (b, j) { b.setAttribute("aria-pressed", j === i ? "true" : "false"); });
+    $("#timeline").innerHTML = renderTimeline(sc);
+    $("#timeline-list").innerHTML = sc.marks.slice().sort(function (p, q) { return secs(p.at) - secs(q.at); }).map(function (m) {
+      return "<li><span class=\"mono\">" + m.at + "</span> " + esc(m.label) + ": " + esc(m.val) + "</li>";
+    }).join("");
+    $("#time-text").innerHTML = "<div class=\"stack\">" + sc.left + "</div><div class=\"stack\">" + sc.right + "</div>";
+    announce("Time scenario: " + sc.label);
+  }
+  TIME.forEach(function (sc, i) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = sc.label;
+    b.addEventListener("click", function () { showTime(i); });
+    timeTabs.appendChild(b);
+  });
+  showTime(0);
+
+  /* ------------------------------------------------------------------ data model */
+  var DS = {
+    market_snapshot: {
+      src: "/coins/markets", rows: "100 per snapshot", key: ["coin_id", "snapshot_at"],
+      fields: ["coin_id", "snapshot_at", "symbol", "name", "vs_currency", "market_cap_rank", "price", "market_cap", "fdv", "total_volume", "high_24h", "low_24h", "price_change_24h", "price_change_pct_1h", "price_change_pct_24h", "price_change_pct_7d", "market_cap_change_24h", "market_cap_change_pct_24h", "circulating_supply", "total_supply", "max_supply", "ath", "ath_change_pct", "ath_at", "atl", "atl_change_pct", "atl_at", "roi_times", "roi_currency", "roi_pct", "source_updated_at", "is_stale", "is_inactive", "is_anomaly"],
+      note: "A flat row per coin. <code>roi</code> is flattened; money columns are decimal strings."
+    },
+    coin_snapshot: {
+      src: "/coins/{id} scalars", rows: "1 per snapshot", key: ["coin_id", "snapshot_at"],
+      fields: ["coin_id", "snapshot_at", "symbol", "name", "categories", "hashing_algorithm", "genesis_date", "market_cap_rank", "circulating_supply", "total_supply", "max_supply", "max_supply_infinite", "source_updated_at", "is_stale"],
+      note: "The parent row; children join on <code>(coin_id, snapshot_at)</code>. For bitcoin: SHA-256, genesis 2009-01-03."
+    },
+    coin_market_by_currency: {
+      src: "23 market_data maps × 63 currencies", rows: "63 per snapshot", key: ["coin_id", "currency", "snapshot_at"],
+      fields: ["coin_id", "currency", "snapshot_at", "price", "market_cap", "fdv", "total_volume", "high_24h", "low_24h", "ath", "ath_change_pct", "ath_at", "atl", "atl_change_pct", "atl_at", "price_change_24h", "price_change_pct_1h", "price_change_pct_24h", "price_change_pct_7d", "price_change_pct_14d", "price_change_pct_30d", "price_change_pct_60d", "price_change_pct_200d", "price_change_pct_1y", "market_cap_change_24h", "market_cap_change_pct_24h", "is_inactive", "is_anomaly"],
+      note: "The maps are zipped on the currency key into long rows. Bitcoin's <code>market_cap</code> in VND, 43083803721443304, is above 2<sup>53</sup>, beyond the integers float64 can hold exactly, so money is a decimal string."
+    },
+    ticker: {
+      src: "tickers[] · up to 100 per coin", rows: "100 per snapshot", key: ["coin_id", "exchange_id", "base", "target", "snapshot_at"],
+      fields: ["coin_id", "exchange_id", "base", "target", "snapshot_at", "exchange_name", "has_trading_incentive", "base_coin_id", "target_coin_id", "last", "volume", "last_usd", "last_btc", "last_eth", "volume_usd", "volume_btc", "volume_eth", "bid_ask_spread_pct", "trust_score", "ticker_timestamp", "last_traded_at", "last_fetch_at", "upstream_is_stale", "upstream_is_anomaly", "is_stale", "is_anomaly"],
+      note: "<code>market</code> becomes <code>exchange_id</code> and <code>exchange_name</code>; <code>converted_last</code> and <code>converted_volume</code> become <code>_usd</code>, <code>_btc</code>, <code>_eth</code> columns. Anomaly: more than 2% from the coin's median <code>last_usd</code>."
+    },
+    coin_contract: {
+      src: "platforms + detail_platforms", rows: "up to 36 per snapshot", key: ["coin_id", "platform_id", "snapshot_at"],
+      fields: ["coin_id", "platform_id", "snapshot_at", "contract_address", "decimal_place"],
+      note: "Two maps zipped on the chain key. USD Coin has 36 chains, e.g. ethereum <code>0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48</code> with 6 decimals. Bitcoin's <code>{\"\": \"\"}</code> goes to rejected as <code>empty_platform</code>."
+    }
+  };
+  var TECH = ["_event_id", "_raw_object", "_kafka_partition", "_kafka_offset", "_schema_version", "_processed_at"];
+  function showDS(name) {
+    var d = DS[name];
+    $all(".ds", $("#dm-svg")).forEach(function (g) {
+      var on = g.getAttribute("data-ds") === name;
+      g.classList.toggle("sel", on); g.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    var f = d.fields.map(function (x) {
+      var cls = d.key.indexOf(x) >= 0 ? "key" : /^(is_|upstream_is_)/.test(x) ? "flag" : "";
+      return "<code class=\"" + cls + "\">" + x + "</code>";
+    }).join("");
+    $("#ds-panel").innerHTML = "<div class=\"stack fade-in\" style=\"gap:10px\"><div class=\"eyebrow\">" + esc(d.src) + " · " + esc(d.rows) + "</div><h3 class=\"mono\">" + name + "</h3><p class=\"text-md\">" + d.note + "</p><div class=\"fields\">" + f + "</div><div class=\"muted text-sm\">Lineage columns on every row:</div><div class=\"fields\">" + TECH.map(function (x) { return "<code>" + x + "</code>"; }).join("") + "</div><p class=\"muted text-sm\">Highlighted: the natural key. Amber: flags. The content hash used for deduplication covers business fields only, never the lineage columns.</p></div>";
+    announce(name + ", " + d.fields.length + " columns");
+  }
+  $all(".ds", $("#dm-svg")).forEach(function (g) {
+    var n = g.getAttribute("data-ds");
+    g.addEventListener("click", function () { showDS(n); });
+    g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); showDS(n); } });
+  });
+  showDS("market_snapshot");
+
+  /* ------------------------------------------------------------------ deduplication simulator */
+  var STORED = { pos: "p0 · offset 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" };
+  var DEDUP = [
+    { label: "Redelivery after a crash", inc: { pos: "p0 · offset 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Write", c: "var(--processed)", why: "The claim points to this record's own position. It is the first sight, delivered again after a crash between TX1 and the commit. Writing it again produces the same bytes in the same object." },
+    { label: "Publisher replay", inc: { pos: "p0 · offset 1310 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · replay", c: "var(--muted)", why: "Another position, the same content hash and the same event_id: the publisher sent batch 42 again after its lease expired." },
+    { label: "CDN repeat", inc: { pos: "p0 · offset 1202 · #0", event: "01a12544-2c98-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · duplicate_response", c: "var(--muted)", why: "Another position and event_id, the same content hash, and the claiming message had the same idempotency_key: poll B received poll A's cached bytes." },
+    { label: "Same record, other response", inc: { pos: "p0 · offset 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "c71e…" }, verdict: "Drop · duplicate_record", c: "var(--muted)", why: "The same snapshot of the same coin came inside a different response, for example after per_page changed. The content is the same, so it is a duplicate." },
+    { label: "Same key, other content", inc: { pos: "p0 · offset 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "5b90…" }, verdict: "Reject · snapshot_conflict", c: "var(--rejected)", why: "The key exists and the content differs. The first version stays in processed; this one goes to rejected with its reason, and a metric counts it. It means the snapshot assumption broke." }
+  ];
+  var dedupTabs = $("#dedup-tabs");
+  function cell(a, b) {
+    var same = a === b;
+    return "<dd class=\"" + (same ? "same" : "diff") + "\"><span class=\"mk\" aria-hidden=\"true\">" + (same ? "=" : "≠") + "</span>" + esc(a) + "<span class=\"sr-only\">" + (same ? ", same as stored" : ", differs") + "</span></dd>";
+  }
+  function showDedup(i) {
+    var s = DEDUP[i], inc = s.inc;
+    $all("button", dedupTabs).forEach(function (b, j) { b.setAttribute("aria-pressed", j === i ? "true" : "false"); });
+    $("#dedup-view").innerHTML = "<div class=\"sim fade-in\"><div class=\"mono muted text-sm\">key: market_snapshot | bitcoin|2026-10-10T10:01:51.000Z</div>" +
+      "<div class=\"cmp\"><div class=\"side\"><div class=\"eyebrow\" style=\"margin-bottom:8px\">Stored claim</div><dl>" +
+      "<dt>position</dt><dd>" + STORED.pos + "</dd><dt>event_id</dt><dd>" + STORED.event + "</dd><dt>idempotency_key</dt><dd>" + STORED.idem + "</dd><dt>content hash</dt><dd>" + STORED.hash + "</dd></dl></div>" +
+      "<div class=\"side\"><div class=\"eyebrow\" style=\"margin-bottom:8px\">Incoming record</div><dl>" +
+      "<dt>position</dt>" + cell(inc.pos, STORED.pos) + "<dt>event_id</dt>" + cell(inc.event, STORED.event) + "<dt>idempotency_key</dt>" + cell(inc.idem, STORED.idem) + "<dt>content hash</dt>" + cell(inc.hash, STORED.hash) + "</dl></div></div>" +
+      "<div class=\"verdict\"><span class=\"tag\" style=\"--c:" + s.c + "\">" + s.verdict + "</span><span class=\"text-md\">" + s.why + "</span></div></div>";
+    announce(s.label + ": " + s.verdict);
+  }
+  DEDUP.forEach(function (s, i) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = s.label;
+    b.addEventListener("click", function () { showDedup(i); });
+    dedupTabs.appendChild(b);
+  });
+  showDedup(0);
+
+  /* ------------------------------------------------------------------ partitions */
+  var PARTS = [
+    { p: 0, keys: ["coins_markets", "bitcoin"], owner: "transformer-1" },
+    { p: 1, keys: ["tether"], owner: "transformer-1" },
+    { p: 2, keys: ["ethereum"], owner: "transformer-1" },
+    { p: 3, keys: [], owner: "transformer-2" },
+    { p: 4, keys: ["usd-coin"], owner: "transformer-2" },
+    { p: 5, keys: [], owner: "transformer-2" }
+  ];
+  $("#parts").innerHTML = PARTS.map(function (r) {
+    var bar = r.keys.length ? "<div class=\"bar\">" + r.keys.map(function (k) { return "<span>" + k + "</span>"; }).join("") + "</div>" : "<div class=\"bar empty\">no keys hash here</div>";
+    return "<div class=\"prow\"><span>p" + r.p + "</span>" + bar + "<span class=\"owner\">" + r.owner + "</span></div>";
+  }).join("");
+
+  /* ------------------------------------------------------------------ crash explorer */
+  var LC = [
+    { x: 20, w: 150, t: "Input checks", s: "no database" },
+    { x: 210, w: 190, t: "TX1", s: "plan · transform · claims" },
+    { x: 440, w: 150, t: "PUT objects", s: "If-None-Match: *" },
+    { x: 630, w: 130, t: "TX2", s: "status = written" },
+    { x: 800, w: 160, t: "Commit offset", s: "L+1, synchronous" }
+  ];
+  var CRASH = [
+    { x: 190, label: "C1", title: "Before TX1 commits", left: "Nothing durable for this batch.", rec: "The new owner polls from the committed offset and starts a fresh batch; its offset range does not have to match the lost one.", naive: null },
+    { x: 420, label: "C2", title: "After TX1, before any PUT", left: "Manifest row planned for [1200..1203] and claims that point to these offsets.", rec: "The new owner finds the planned range, reprocesses exactly it, sees claims that point to its own positions, makes the same decisions and writes the same bytes. PUT returns 200.", naive: "The naive rule sees every key already claimed and drops all records. The batch is lost for good. The position check exists to prevent this." },
+    { x: 515, label: "C3", title: "After some PUTs", left: "Some objects exist; the manifest is still planned.", rec: "Missing objects get 200; existing ones get 412 and their sha256 matches the manifest, which counts as done.", naive: "The naive rule drops every record of the planned range, because TX1 already claimed their keys. Objects written before the crash survive; the missing ones are never written." },
+    { x: 780, label: "C4", title: "After TX2, before the offset commit", left: "Manifest written; the committed offset still points at 1200.", rec: "The new owner sees that the covering batch is written, seeks to 1204 and commits.", naive: null },
+    { x: 605, label: "Z", title: "Zombie and new owner on the same range", left: "A zombie is a consumer that lost the partition in a rebalance but has not noticed yet. For a moment two consumers believe they own partition 0.", rec: "Both take the range from the manifest and build identical bytes. The first PUT wins, the second gets 412 with an equal checksum, and the zombie's offset commit is rejected.", naive: "If the zombie dies after its TX1, the new owner finds every key claimed and drops the whole range under the naive rule. Nothing reaches processed." }
+  ];
+  var naive = false, crashSel = 1;
+  function drawLC() {
+    var svg = $("#lc-svg"), out = "<defs><marker id=\"lc-arr\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"7\" markerHeight=\"7\" orient=\"auto\"><path d=\"M0,0 L10,5 L0,10 z\" fill=\"currentColor\"></path></marker></defs>";
+    LC.forEach(function (s, i) {
+      out += "<g class=\"lc-step\" aria-hidden=\"true\"><rect x=\"" + s.x + "\" y=\"50\" width=\"" + s.w + "\" height=\"60\" rx=\"5\"></rect><text x=\"" + (s.x + 12) + "\" y=\"76\">" + s.t + "</text><text class=\"s2\" x=\"" + (s.x + 12) + "\" y=\"96\">" + s.s + "</text></g>";
+      if (i < LC.length - 1) out += "<path class=\"lc-arrow\" aria-hidden=\"true\" d=\"M" + (s.x + s.w) + " 80 H" + (LC[i + 1].x - 4) + "\" marker-end=\"url(#lc-arr)\" style=\"color: var(--muted)\"></path>";
+    });
+    CRASH.forEach(function (c, i) {
+      var z = c.label === "Z", y = z ? 150 : 24;
+      out += "<g class=\"crash\" data-i=\"" + i + "\" tabindex=\"0\" role=\"button\" aria-pressed=\"false\" aria-label=\"Crash point " + c.label + ": " + esc(c.title) + "\">" +
+        "<line x1=\"" + c.x + "\" y1=\"" + (z ? 112 : 37) + "\" x2=\"" + c.x + "\" y2=\"" + (z ? 137 : 48) + "\" style=\"stroke: var(--dlq)\" stroke-dasharray=\"2 2\"></line>" +
+        "<circle class=\"hit\" cx=\"" + c.x + "\" cy=\"" + y + "\" r=\"20\"></circle>" +
+        "<circle class=\"dot\" cx=\"" + c.x + "\" cy=\"" + y + "\" r=\"13\"></circle><text x=\"" + c.x + "\" y=\"" + (y + 4) + "\" text-anchor=\"middle\">" + c.label + "</text></g>";
+    });
+    svg.innerHTML = out;
+    $all(".crash", svg).forEach(function (g) {
+      var i = Number(g.getAttribute("data-i"));
+      g.addEventListener("click", function () { crashSel = i; markCrash(); showCrash(); });
+      g.addEventListener("keydown", function (e) { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); crashSel = i; markCrash(); showCrash(); } });
+    });
+  }
+  function markCrash() {
+    $all(".crash", $("#lc-svg")).forEach(function (g) {
+      var on = Number(g.getAttribute("data-i")) === crashSel;
+      g.classList.toggle("sel", on); g.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+  }
+  function revealCrash() {
+    var wrap = $("#lc-wrap"), sel = $("#lc-svg .crash.sel");
+    if (!sel || wrap.scrollWidth <= wrap.clientWidth) return;
+    var r = sel.getBoundingClientRect(), w = wrap.getBoundingClientRect();
+    if (r.left < w.left || r.right > w.right) wrap.scrollLeft += (r.left + r.width / 2) - (w.left + w.width / 2);
+  }
+  function showCrash() {
+    var c = CRASH[crashSel], bad = naive && c.naive;
+    var outcome = bad
+      ? "<span class=\"pill dlq\">loss: yes</span><span class=\"pill\">duplicates: no</span>"
+      : "<span class=\"pill processed\">loss: no</span><span class=\"pill processed\">duplicates: no</span>";
+    var head = bad ? "With the naive rule" : (naive ? "Same under the naive rule" : "Recovery");
+    $("#crash-view").innerHTML = "<div class=\"grid-2 fade-in\" style=\"gap:14px\"><div class=\"stack\"><div class=\"eyebrow\">" + c.label + " · left behind</div><h4>" + esc(c.title) + "</h4><p class=\"text-md\">" + esc(c.left) + "</p></div>" +
+      "<div class=\"stack\" style=\"gap:8px\"><div class=\"eyebrow\">" + head + "</div><p class=\"text-md\">" + esc(bad ? c.naive : c.rec) + "</p><div class=\"outcome\">" + outcome + "</div></div></div>";
+    announce(c.label + ", " + c.title + (bad ? ": data lost under the naive rule" : ": no loss, no duplicates"));
+  }
+  $("#naive-toggle").addEventListener("click", function () {
+    naive = !naive;
+    this.setAttribute("aria-pressed", naive ? "true" : "false");
+    if (naive) crashSel = 1;
+    markCrash(); showCrash(); revealCrash();
+  });
+  drawLC(); markCrash(); showCrash();
+  requestAnimationFrame(revealCrash);
+
+  /* ------------------------------------------------------------------ storage files */
+  var FILES = {
+    raw: { title: "raw · batch 42", c: "var(--raw)", body: "{\"schema_version\":1,\"event_id\":\"01a12543-a844-7cc2-9a51-3f1f2b9d8e11\",\n \"idempotency_key\":\"…\",\"source\":\"coingecko\",\"endpoint\":\"coins_markets\",\n \"request\":{\"path\":\"/coins/markets\",\"params\":{\"order\":\"market_cap_desc\",...}},\n \"fetched_at\":\"2026-10-10T10:02:33.412Z\",\"outcome\":\"ok\",\n \"http\":{\"status\":200,\"latency_ms\":412,\"date\":\"Sat, 10 Oct 2026 10:02:33 GMT\",\n         \"age_s\":null,\"cf_cache_status\":\"MISS\",\"etag\":\"W/\\\"c4924cc4…\\\"\",\"retry_after_s\":null},\n \"error\":null,\"payload_sha256\":\"1350ae15534a2a76…\",\n \"payload\":[{\"id\":\"bitcoin\",\"symbol\":\"btc\",\"current_price\":82800,...}]}", note: "One line per API call, the S1 event. The payload sits inside verbatim." },
+    processed: { title: "processed · market_snapshot", c: "var(--processed)", body: "{\"coin_id\":\"figure-heloc\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\n \"symbol\":\"FIGR_HELOC\",\"name\":\"Figure Heloc\",\"vs_currency\":\"usd\",\"market_cap_rank\":9,\n \"price\":\"1.001\",\"market_cap\":\"23748077381\",\"fdv\":\"23748077381\",\n \"total_volume\":\"697180498\",\"high_24h\":\"1.035\",\"low_24h\":\"1.001\",\n \"price_change_24h\":null,\"price_change_pct_1h\":0.005,\"price_change_pct_24h\":null,...,\n \"source_updated_at\":\"2026-10-10T07:55:52.000Z\",\"is_stale\":true,\n \"is_inactive\":false,\"is_anomaly\":false,\"_event_id\":\"01a12543-a844-…\",\n \"_raw_object\":\"source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\",\n \"_kafka_partition\":0,\"_kafka_offset\":1200,\"_schema_version\":1,\n \"_processed_at\":\"2026-10-10T10:03:52.204Z\"}", note: "This row is stale, so is_stale is true and the row stays in processed. Money is a string; the 24h change is null because CoinGecko sent null." },
+    rejected: { title: "rejected · coin_contract", c: "var(--rejected)", body: "{\"schema_version\":1,\"dataset\":\"coin_contract\",\"reason\":\"empty_platform\",\n \"record_key\":\"bitcoin||2026-10-10T10:01:51.000Z\",\"event_date\":\"2026-10-10\",\n \"record\":{\"coin_id\":\"bitcoin\",\"platform_id\":\"\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\n   \"contract_address\":\"\",\"decimal_place\":null,...},\n \"_event_id\":\"01a12543-bd0b-…\",\n \"_raw_object\":\"source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\",\n \"_kafka_partition\":0,\"_kafka_offset\":1201,\"_processed_at\":\"2026-10-10T10:03:52.204Z\"}", note: "From the bitcoin /coins/{id} call at offset 1201. Bitcoin has no contracts; CoinGecko still sends an empty platform entry." },
+    dlq: { title: "dlq · stage=transform", c: "var(--dlq)", body: "{\"schema_version\":1,\"stage\":\"transform_output\",\"error_class\":\"output_schema_violation\",\n \"error\":\"processed row fails its schema\",\n \"violations\":[{\"instance_location\":\"/price\",\n   \"keyword_location\":\"…/processed/market_snapshot.v1.json#/properties/price/type\",\n   \"message\":\"got null, want string\"}],\n \"origin\":{\"kind\":\"kafka\",\"topic\":\"coingecko.raw\",\"partition\":0,\"offset\":1203,\n           \"dataset\":\"market_snapshot\",\"record_key\":\"bitcoin|2026-10-10T10:02:51.000Z\"},\n \"original_base64\":\"e30=\",\"occurred_at\":\"2026-10-10T10:03:52.204Z\"}", note: "A hypothetical failure, shaped as in the schema tests. In practice a null price is a reject, not a dlq entry; this shows the record format. transform_input and transform_output records of one batch share one object." }
+  };
+  function showFile(k) {
+    var f = FILES[k];
+    $all(".file button", $("#tree")).forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-file") === k ? "true" : "false"); });
+    $("#file-view").innerHTML = "<div class=\"fade-in stack\" style=\"gap:10px\"><span class=\"pill\" style=\"--c:" + f.c + ";justify-self:start\">" + esc(f.title) + "</span><pre tabindex=\"0\">" + esc(f.body) + "</pre><p class=\"muted text-sm\">" + esc(f.note) + "</p></div>";
+    announce("Showing " + f.title);
+  }
+  $all(".file button", $("#tree")).forEach(function (b) { b.addEventListener("click", function () { showFile(b.getAttribute("data-file")); }); });
+  showFile("processed");
+
+  /* ------------------------------------------------------------------ decisions */
+  var DEC = [
+    { area: "Storage", topic: "Object storage", d: "versitygw, posix backend: plain files under ./data, S3 API on :7070.", why: "The assignment asks for data/raw and data/processed on disk; we also want the services to use the S3 API, as in production. versitygw does both and honours If-None-Match (a 412; exactly one winner among 20 parallel writers).", alt: "Local filesystem writes from Go: not the production code path, and create-if-absent plus checksum checks would be hand-built in every writer. MinIO: repository archived on 2026-04-24, official images no longer pullable, and its own on-disk format (xl.meta) instead of plain files. rclone serve s3: silently ignores If-None-Match." },
+    { area: "Data", topic: "Raw table", d: "One table raw.api_calls, one row per HTTP call, failures included.", why: "Postgres is where failed calls are inspected with SQL. Splitting responses into entities belongs to the transformer, so the fetcher stays a transport.", alt: "Two tables, one per call and one per entity: a second write path in the fetcher with no reader that needs it." },
+    { area: "Data", topic: "Event semantics", d: "An event is a source snapshot; snapshot_at is the newest last_updated in a response.", why: "A stale coin seen in two snapshots is two valid statements by the source. Two polls served by the same cached response are one.", alt: "Poll time as event time: every CDN repeat would be a new event. A coin's own last_updated as the key: stale coins would collapse into one row." },
+    { area: "Delivery", topic: "Deduplication", d: "One mechanism: natural record key, first claim wins, in the transformer.", why: "Record-level claims cover CDN repeats, replays and redeliveries. replay, duplicate_response and duplicate_record are metric labels, not separate logic.", alt: "A second, call-level deduplication by idempotency_key: redundant once records are claimed. idempotency_key stays as an informational column." },
+    { area: "Delivery", topic: "Pipeline state", d: "Postgres schema pipeline: export_batches, dedup_claims, consumer_batches.", why: "State must survive crashes, be shared by replicas and change atomically with the batch plan.", alt: "Broker offsets only: cannot answer \"was key X seen\". S3 conditional writes only: guard single objects, not multi-object batches. In-memory cache: lost on rebalance (reproduced). Kafka Streams: JVM-only, and exactly-once only from Kafka to Kafka. goka: no transactions spanning state and output." },
+    { area: "Delivery", topic: "Exporter cursor", d: "(ingest_txid, seq) bounded by the oldest running transaction.", why: "It stalls behind long transactions and never skips a row; transaction timeouts and the export-lag alert bound the stall.", alt: "Identity watermark: loses rows when commits arrive out of order (reproduced on 18.6). An outbox flag updated on every raw row: rewrites raw rows. Debezium CDC: the production option, a heavier stack." },
+    { area: "Platform", topic: "Message broker", d: "Redpanda v26.2.4, Kafka protocol, franz-go client.", why: "A replayable log, per-key ordering and consumer groups in one C++ binary without a JVM. The same code runs on Apache Kafka, MSK or Confluent Cloud.", alt: "NATS JetStream and Pulsar: viable with caveats. RabbitMQ classic queues, Redis Streams, SQS and Pub/Sub: no offset replay or per-key ordering." },
+    { area: "Platform", topic: "Topic name", d: "coingecko.raw, no version suffix.", why: "The version travels in every message (schema_version and the schema header); breaking changes are handled in the same topic by dispatching on version.", alt: "coingecko.raw.v1 with a new topic per breaking change: useful with many independent consumers, redundant here." },
+    { area: "Platform", topic: "Schemas", d: "JSON Schema 2020-12 in the repo, embedded with go:embed; no schema registry.", why: "One producer and one consumer in one repository; a schema change ships as a redeploy, and CI checks backward compatibility against old fixtures.", alt: "A schema registry: a production note. Its binary prefix with the schema id would also break byte equality between raw lines and messages." },
+    { area: "Delivery", topic: "Fetcher scope", d: "Transport only; S0 validation lives in the transformer.", why: "No business logic on the write path into Postgres. Broken payloads are found in dlq and can be replayed after a schema fix.", alt: "Validate S0 in the fetcher and store a flag: duplicated checks and a flag column nobody needs once the transformer validates." },
+    { area: "Operations", topic: "Bootstrapping", d: "One idempotent etl init for migrations, partitions, topic and buckets.", why: "Infrastructure state is described in code in one place and can run any number of times.", alt: "Postgres init scripts: run once on an empty volume, with no versions. A separate shell container for topics: one more moving part." },
+    { area: "Operations", topic: "DLQ location", d: "The dlq bucket, not a topic.", why: "Two of the three writers run before the broker, and dlq objects use the same write-once naming as the batch, so retries cannot duplicate them.", alt: "A dlq topic: easy to replay, but outside the batch manifest. A small replay command can be added if needed." },
+    { area: "Operations", topic: "Logs", d: "logs/<service>/etl.log plus stdout; transformer replicas write logs/<container id>/transformer/etl.log.", why: "No two processes append to one file through Docker Desktop's file sharing.", alt: "One shared logs/etl.log: literal to the assignment, but interleaved lines are possible. A log shipper: another container." },
+    { area: "Data", topic: "Cleaning", d: "Empty records to rejected with a reason; questionable records kept with flags.", why: "Readers keep stale and anomalous rows and decide; nothing disappears silently.", alt: "Dropping questionable rows: stale coins would vanish from the time series." },
+    { area: "Data", topic: "Numbers", d: "Money and quantities as decimal strings; percentages as numbers.", why: "Bitcoin's market cap in VND, 43083803721443304, is above 2^53, where float64 can no longer hold every integer (at this size it steps by 8). This value happens to survive; the next may not. Decimal strings keep every digit.", alt: "Numbers as-is: precision would depend on the reader (JavaScript, float64 in pandas)." }
+  ];
+  var AREAS = ["All", "Storage", "Data", "Delivery", "Platform", "Operations"];
+  var decFilter = $("#dec-filter"), decArea = "All";
+  function renderDec() {
+    $("#dec-list").innerHTML = DEC.filter(function (r) { return decArea === "All" || r.area === decArea; }).map(function (r) {
+      return "<details class=\"dec-row\"><summary><span class=\"topic\">" + esc(r.topic) + "</span><span>" + esc(r.d) + "</span><span class=\"more\">" + esc(r.area) + " ▾</span></summary>" +
+        "<div class=\"why\"><p><b>Why.</b> " + esc(r.why) + "</p><p class=\"muted\"><b>Considered.</b> " + esc(r.alt) + "</p></div></details>";
+    }).join("");
+  }
+  AREAS.forEach(function (a) {
+    var b = document.createElement("button");
+    b.type = "button"; b.className = "btn"; b.textContent = a;
+    b.setAttribute("aria-pressed", a === decArea ? "true" : "false");
+    b.addEventListener("click", function () {
+      decArea = a;
+      $all("button", decFilter).forEach(function (x) { x.setAttribute("aria-pressed", x.textContent === a ? "true" : "false"); });
+      renderDec();
+      announce("Decisions: " + a);
+    });
+    decFilter.appendChild(b);
+  });
+  renderDec();
+
+  /* ------------------------------------------------------------------ tables as cards on phones */
+  $all(".table-wrap table").forEach(function (t) {
+    var heads = $all("thead th", t).map(function (th) { return th.textContent; });
+    t.setAttribute("role", "table");
+    $all("tr", t).forEach(function (tr) { tr.setAttribute("role", "row"); });
+    $all("thead th", t).forEach(function (th) { th.setAttribute("role", "columnheader"); });
+    $all("tbody td", t).forEach(function (td) { td.setAttribute("role", "cell"); td.setAttribute("data-label", heads[td.cellIndex] || ""); });
+  });
+
+  /* ------------------------------------------------------------------ section bar */
+  var links = $all(".toc a"), tocList = $(".toc ul");
+  function setCurrent(id) {
+    links.forEach(function (a) {
+      if (a.getAttribute("href") !== "#" + id) { a.removeAttribute("aria-current"); return; }
+      a.setAttribute("aria-current", "true");
+      var ur = tocList.getBoundingClientRect(), ar = a.getBoundingClientRect();
+      if (ar.left < ur.left || ar.right > ur.right) tocList.scrollBy({ left: ar.left - ur.left - 8, behavior: reduceMotion ? "auto" : "smooth" });
+    });
+  }
+  setCurrent("pipeline");
+  if ("IntersectionObserver" in window) {
+    var io = new IntersectionObserver(function (entries) {
+      entries.forEach(function (en) { if (en.isIntersecting) setCurrent(en.target.id); });
+    }, { rootMargin: "-45% 0px -50% 0px" });
+    $all("section.block").forEach(function (s) { io.observe(s); });
+  }
+  ready = true;
+})();
+</script>
