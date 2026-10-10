@@ -1,0 +1,28 @@
+HTTP/2 200 
+date: Sat, 10 Oct 2026 10:08:22 GMT
+content-type: application/json; charset=utf-8
+server: cloudflare
+x-frame-options: SAMEORIGIN
+x-xss-protection: 0
+x-content-type-options: nosniff
+x-permitted-cross-domain-policies: none
+referrer-policy: strict-origin-when-cross-origin
+x-data-source: 2.0
+cache-control: max-age=30, public, must-revalidate, s-maxage=60
+access-control-allow-origin: *
+access-control-allow-methods: POST, PUT, DELETE, GET, OPTIONS
+access-control-request-method: *
+access-control-allow-headers: Origin, X-Requested-With, Content-Type, Accept, Authorization
+access-control-expose-headers: link, per-page, total
+vary: Accept-Encoding, Origin
+content-encoding: gzip
+etag: W/"1de1799250b217695858b98693ec1d9e"
+x-request-id: 9a288318-ca3a-49bb-a06f-448d05a7ef05
+x-runtime: 0.028000
+content-security-policy-report-only: script-src https://accounts.google.com/gsi/client; frame-src https://accounts.google.com/gsi/; connect-src https://accounts.google.com/gsi/;
+strict-transport-security: max-age=600
+strict-transport-security: max-age=15724800; includeSubdomains
+cf-cache-status: MISS
+cf-ray: a484d2cb9912c1b4-BUD
+alt-svc: h3=":443"; ma=86400
+

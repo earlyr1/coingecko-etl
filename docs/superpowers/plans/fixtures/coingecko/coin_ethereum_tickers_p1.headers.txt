@@ -1,0 +1,31 @@
+HTTP/2 200 
+date: Sat, 10 Oct 2026 10:02:55 GMT
+content-type: application/json; charset=utf-8
+server: cloudflare
+x-frame-options: SAMEORIGIN
+x-xss-protection: 0
+x-content-type-options: nosniff
+x-permitted-cross-domain-policies: none
+referrer-policy: strict-origin-when-cross-origin
+x-data-source: 2.0
+link: <https://api.coingecko.com/api/v3/coins/ethereum/tickers?page=24>; rel="last", <https://api.coingecko.com/api/v3/coins/ethereum/tickers?page=2>; rel="next"
+per-page: 100
+total: 2321
+cache-control: max-age=30, public, must-revalidate, s-maxage=60
+access-control-allow-origin: *
+access-control-allow-methods: POST, PUT, DELETE, GET, OPTIONS
+access-control-request-method: *
+access-control-allow-headers: Origin, X-Requested-With, Content-Type, Accept, Authorization
+access-control-expose-headers: link, per-page, total
+vary: Accept-Encoding, Origin
+content-encoding: gzip
+etag: W/"6f4fc5471eafdbfcc1dfdfd12bc8f95a"
+x-request-id: eced0890-58dc-49b6-8cea-14f3a9b222b8
+x-runtime: 0.027605
+content-security-policy-report-only: script-src https://accounts.google.com/gsi/client; frame-src https://accounts.google.com/gsi/; connect-src https://accounts.google.com/gsi/;
+strict-transport-security: max-age=600
+strict-transport-security: max-age=15724800; includeSubdomains
+cf-cache-status: EXPIRED
+cf-ray: a484cacdebb01cfa-BUD
+alt-svc: h3=":443"; ma=86400
+
