@@ -213,7 +213,7 @@ JSON Schema draft 2020-12 files in `schemas/`, embedded with `go:embed`, compile
 
 | Stage | Schema | On failure |
 |---|---|---|
-| fetcher, before INSERT | S1 (envelope only; the payload is not inspected) | Reject (our bug): ERROR log, alert |
+| fetcher, before INSERT | S1 (envelope only; the payload is not inspected) | Reject (our bug): ERROR log and `etl_schema_validations_total{stage="fetch",result="fail"}`; no dedicated alert, a persistent failure trips the stale-data alert |
 | exporter, publisher | S1 | Write to `dlq/`, do not pass on |
 | transformer, input | S1, then the payload against S0 | `dlq/` (`schema_violation` / `source_schema_violation`). After a schema fix, the raw objects are republished and reprocessed |
 | transformer, output | S2 | `dlq/`, never written to processed |
@@ -398,7 +398,7 @@ The naive rule "drop if the key was already claimed" loses every record of a bat
 
 ### 7.6 Partitions
 
-Partitions are the unit of ordering and parallelism, not endpoint separation. Keys put every repeat of the same data on one partition, so dedup decisions are made sequentially and deterministically. With 6 partitions: `coins_markets` and `bitcoin` → 0, `tether` → 1, `ethereum` → 2, `usd-coin` → 4 (the collision is harmless). At most 5 consumers can be busy; we run 2. Scaling path: split markets responses into per-coin messages (100 keys).
+Partitions are the unit of ordering and parallelism, not endpoint separation. Keys put every repeat of the same data on one partition, so dedup decisions are made sequentially and deterministically. With 6 partitions: `coins_markets` and `bitcoin` → 0, `tether` → 1, `ethereum` → 2, `usd-coin` → 4 (the collision is harmless). Five keys land on four partitions, so at most 4 consumers can be busy; we run 2. Scaling path: split markets responses into per-coin messages (100 keys).
 
 ### 7.7 Invariants (README)
 
