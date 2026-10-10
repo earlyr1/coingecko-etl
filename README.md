@@ -232,7 +232,7 @@ Every stage has a JSON Schema (draft 2020-12) in `schemas/`, embedded into the b
 | transformer, output | S2 | `s3://dlq` with class `output_schema_violation`; never written to processed |
 | writing rejected / dlq records | S3 | not written; ERROR log with the original bytes in base64 |
 
-`rejected/` is for records removed by a cleaning rule; `dlq/` means "something broke and a human is needed". After a schema fix, the raw objects are republished and reprocessed.
+`rejected/` is for records removed by a cleaning rule; `dlq/` means "something broke and a human is needed". After a schema fix, the raw objects are republished and reprocessed: a row that went to `dlq/` never claimed its deduplication key, so the republished copy is written, while the rows of the same message that were already written are dropped as replays.
 
 **Schema evolution.** Because schemas ship inside the binary, a schema change is a redeploy: consumers (transformer) first, then producers. A compatible change edits `<name>.v1.json` in place. The compatibility gate is the fixture contract test (`TestSchemaFixtures`, run by CI): the valid fixtures under `schemas/testdata/` are append-only and form the corpus every in-place change must keep accepting, together with the recorded CoinGecko responses that must keep passing S0. A breaking change, one that would reject an existing valid fixture, adds `<name>.v2.json` side by side. The topic stays `coingecko.raw`: the version travels in every message (`schema_version` and the `schema` header), so a v2-aware transformer dispatches on it.
 
@@ -261,7 +261,7 @@ The rejected alternative is an `exported` flag on `raw.api_calls` with `SELECT �
 
 The content hash covers business fields only, so the same record arriving in two messages matches even though its lineage columns differ. Broker offsets cannot answer "was key X seen?", S3 can only guard single objects, and in-memory state is lost on rebalance, which is why the claims live in Postgres.
 
-**Transformer batch.** A batch is a contiguous offset range of one partition. (1) Input checks without the database. (2) A short transaction records the range in `pipeline.consumer_batches` (`planned`), claims keys, decides, validates, and stores the object keys and checksums. (3) Objects are written with `If-None-Match: *`. (4) The batch is marked `written`. (5) The offset is committed. On partition assignment the manifest decides: `written` → skip past it, `planned` → reprocess exactly that range.
+**Transformer batch.** A batch is a contiguous offset range of one partition. (1) Input checks without the database. (2) A short transaction records the range in `pipeline.consumer_batches` (`planned`), validates the rows against their dataset schema (a row that fails goes to `dlq/` without claiming its key), claims the keys of the other rows, decides, and stores the object keys and checksums. (3) Objects are written with `If-None-Match: *`. (4) The batch is marked `written`. (5) The offset is committed. On partition assignment the manifest decides: `written` → skip past it, `planned` → reprocess exactly that range.
 
 If a key already holds different bytes (412 with another checksum), or a re-planned batch would store other checksums than the manifest, the transformer halts that partition in place: it stops fetching it, commits nothing, keeps reporting its growing lag, keeps the other partitions and `/metrics` running, and `ETLObjectChecksumMismatch` fires until a human resolves the conflict and restarts the transformer.
 

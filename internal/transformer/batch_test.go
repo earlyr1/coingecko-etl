@@ -469,6 +469,24 @@ func TestProcessBatch(t *testing.T) {
 		b := batchOf(t, "test.outputschema", []event.RawEvent{ev})
 		delete(b.Messages[0].Headers, queue.HeaderRawObject)
 		before := promtest.ToFloat64(d.Metrics.DLQ.WithLabelValues(stageOutput, classOutputSchema))
+		// Validation runs before the claims and is deterministic: a re-plan
+		// of the same batch stores the same objects.
+		p1, err := planBatch(ctx, d, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p2, err := planBatch(ctx, d, b)
+		if err != nil {
+			t.Fatalf("re-plan: %v", err)
+		}
+		if len(p1.objects) != len(p2.objects) {
+			t.Fatalf("re-plan built %d objects, first plan %d", len(p2.objects), len(p1.objects))
+		}
+		for i := range p1.objects {
+			if p1.objects[i].Key != p2.objects[i].Key || !bytes.Equal(p1.objects[i].Body, p2.objects[i].Body) {
+				t.Fatalf("re-plan object %d differs: %s vs %s", i, p1.objects[i].Key, p2.objects[i].Key)
+			}
+		}
 		if _, err := ProcessBatch(ctx, d, b); err != nil {
 			t.Fatal(err)
 		}
@@ -492,6 +510,30 @@ func TestProcessBatch(t *testing.T) {
 		}
 		if unwritable != wantRejected {
 			t.Errorf("unwritable = %d, want %d (the rejected rows)", unwritable, wantRejected)
+		}
+
+		// Only rows bound for processed/ or rejected/ claim keys (spec §7.3):
+		// the rows that failed S2 hold no claim, the cleaning-rule rejects do.
+		var claimed, claimedProcessed int
+		if err := d.Pool.QueryRow(ctx, `SELECT count(*), count(*) FILTER (WHERE dataset = 'market_snapshot' AND record_key NOT LIKE 'bitcoin|%')
+			FROM pipeline.dedup_claims WHERE topic_id = $1 AND kafka_offset = 100`, b.TopicID).Scan(&claimed, &claimedProcessed); err != nil {
+			t.Fatal(err)
+		}
+		if claimedProcessed != 0 || claimed != wantRejected {
+			t.Fatalf("claims at offset 100: %d, of rows that failed S2: %d; want %d (the rejects) and 0", claimed, claimedProcessed, wantRejected)
+		}
+
+		// The documented remedy works: republishing the message (here with its
+		// header restored) writes the rows to processed/ instead of dropping
+		// them as replays.
+		again := message(t, 0, 101, ev)
+		res, err := ProcessBatch(ctx, d, Batch{TopicID: b.TopicID, Topic: b.Topic, Partition: 0, Messages: []Message{again}})
+		if err != nil || !res.Written {
+			t.Fatalf("republished batch = %+v, %v", res, err)
+		}
+		got = e.countLines(t, e.objects(t, b.TopicID, 0, 101))
+		if got[s3.BucketProcessed] != wantProcessed {
+			t.Fatalf("republished lines = %v, want %d processed", got, wantProcessed)
 		}
 	})
 

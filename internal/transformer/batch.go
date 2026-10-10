@@ -380,11 +380,16 @@ func planBatch(ctx context.Context, d Deps, b Batch) (*plan, error) {
 		}
 	}
 
-	// 2b. Transform.
+	// 2b. Transform. 2c. Validate the rows bound for processed/ against S2
+	// before any claim: validation is pure, so a re-plan decides the same,
+	// and a row that fails goes to dlq without claiming its key. Only rows
+	// bound for processed/ or rejected/ claim keys (spec §7.3), so a
+	// republish after a schema fix can still write the row.
 	type candidate struct {
 		msg Message
-		ev  event.RawEvent
 		rec transform.Record
+		lin transform.Lineage
+		row []byte // transform.RowJSON(rec, lin)
 	}
 	var cands []candidate
 	var claims []dedup.Claim
@@ -401,7 +406,32 @@ func planBatch(ctx context.Context, d Deps, b Batch) (*plan, error) {
 			idem = *g.ev.IdempotencyKey
 		}
 		for _, r := range out {
-			cands = append(cands, candidate{g.msg, g.ev, r})
+			lin := transform.Lineage{
+				EventID: g.ev.EventID, RawObject: g.msg.Headers[queue.HeaderRawObject],
+				Partition: b.Partition, Offset: g.msg.Offset, SchemaVer: processedSchemaVersion, ProcessedAt: c.processedAt,
+			}
+			row, err := transform.RowJSON(r, lin)
+			if err != nil {
+				return nil, fmt.Errorf("serialize %s %s: %w", r.Dataset, r.Key, err)
+			}
+			if r.Zone == transform.ZoneProcessed {
+				schemaID := transform.SchemaIDFor(r.Dataset)
+				vs, err := d.Reg.Validate(schemaID, row)
+				if err == nil {
+					observeValidation(d.Metrics, stageOutput, r.Dataset+".v1", vs)
+					if len(vs) > 0 {
+						err = errors.New("processed row violates " + schemaID)
+					}
+				}
+				if err != nil {
+					c.toDLQ(dlqRow{Stage: stageOutput, ErrorClass: classOutputSchema, Error: err.Error(), Violations: vs,
+						Origin:         dlqOrigin{EventID: g.ev.EventID, Dataset: r.Dataset, RecordKey: r.Key},
+						OriginalBase64: base64.StdEncoding.EncodeToString(row)},
+						g.msg.Offset, r.Ordinal)
+					continue
+				}
+			}
+			cands = append(cands, candidate{msg: g.msg, rec: r, lin: lin, row: row})
 			claims = append(claims, dedup.Claim{
 				Dataset: r.Dataset, Key: r.Key, EventDate: r.EventDate,
 				Pos:     dedup.Position{TopicID: b.TopicID, Partition: b.Partition, Offset: g.msg.Offset, Ordinal: r.Ordinal},
@@ -410,13 +440,11 @@ func planBatch(ctx context.Context, d Deps, b Batch) (*plan, error) {
 		}
 	}
 
-	// 2c. Claim natural keys and decide.
+	// 2d. Claim natural keys and decide.
 	outcomes, err := dedup.ClaimAndDecide(ctx, tx, claims)
 	if err != nil {
 		return nil, err
 	}
-
-	// 2d. Serialize; validate processed rows against S2.
 	for i, cand := range cands {
 		r := cand.rec
 		switch outcomes[i].Decision {
@@ -427,35 +455,12 @@ func planBatch(ctx context.Context, d Deps, b Batch) (*plan, error) {
 		case dedup.Conflict:
 			r.Zone, r.Reason = transform.ZoneRejected, reasonSnapshotConflict
 		}
-		lin := transform.Lineage{
-			EventID: cand.ev.EventID, RawObject: cand.msg.Headers[queue.HeaderRawObject],
-			Partition: b.Partition, Offset: cand.msg.Offset, SchemaVer: processedSchemaVersion, ProcessedAt: c.processedAt,
-		}
-		row, err := transform.RowJSON(r, lin)
-		if err != nil {
-			return nil, fmt.Errorf("serialize %s %s: %w", r.Dataset, r.Key, err)
-		}
 		if r.Zone == transform.ZoneRejected {
-			c.toRejected(r, lin, row)
-			continue
-		}
-		schemaID := transform.SchemaIDFor(r.Dataset)
-		vs, err := d.Reg.Validate(schemaID, row)
-		if err == nil {
-			observeValidation(d.Metrics, stageOutput, r.Dataset+".v1", vs)
-			if len(vs) > 0 {
-				err = errors.New("processed row violates " + schemaID)
-			}
-		}
-		if err != nil {
-			c.toDLQ(dlqRow{Stage: stageOutput, ErrorClass: classOutputSchema, Error: err.Error(), Violations: vs,
-				Origin:         dlqOrigin{EventID: cand.ev.EventID, Dataset: r.Dataset, RecordKey: r.Key},
-				OriginalBase64: base64.StdEncoding.EncodeToString(row)},
-				cand.msg.Offset, r.Ordinal)
+			c.toRejected(r, cand.lin, cand.row)
 			continue
 		}
 		c.counts.Written[r.Dataset]++
-		c.add(groupKey{s3.BucketProcessed, fmt.Sprintf("dataset=%s/v=1/event_date=%s", r.Dataset, r.EventDate)}, cand.msg.Offset, r.Ordinal, row)
+		c.add(groupKey{s3.BucketProcessed, fmt.Sprintf("dataset=%s/v=1/event_date=%s", r.Dataset, r.EventDate)}, cand.msg.Offset, r.Ordinal, cand.row)
 	}
 	if len(c.dlq) > 0 {
 		k := groupKey{s3.BucketDLQ, fmt.Sprintf("stage=%s/date=%s", dlqPathStage, xtime.FormatDate(rng.plannedAt))}

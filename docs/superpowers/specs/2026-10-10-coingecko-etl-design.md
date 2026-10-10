@@ -375,8 +375,8 @@ franz-go: `DisableAutoCommit`, `BlockRebalanceOnPoll`, cooperative-sticky balanc
 2. **TX1 (milliseconds, no network I/O):**
    a. Insert the range into `consumer_batches` (`planned`). The EXCLUDE constraint forbids overlap; if a row with this start exists, use its stored range instead of the polled one.
    b. Transform passing messages into dataset records (cleaning rules §6.4).
-   c. Insert claims; read them back; decide per record (§7.3).
-   d. Validate records against S2 (failures → `dlq`).
+   c. Validate the records bound for `processed/` against S2 (failures → `dlq`, without a claim, so a republish after a schema fix still writes them).
+   d. Insert claims for the records bound for `processed/` or `rejected/`; read them back; decide per record (§7.3).
    e. Build objects per (zone, dataset, event_date), serialized deterministically (records by offset then ordinal, fixed field order, `_processed_at = planned_at`). Store object keys, checksums and counts on the manifest row; if stored checksums from a previous attempt differ, alert and stop (non-determinism).
    COMMIT.
 3. **PUT** each object with `If-None-Match: *` and `x-amz-meta-sha256`. 200 → done; 412 → HEAD and compare checksum (equal → done, different → alert and stop); 5xx / network → retry with backoff, never commit the offset.
