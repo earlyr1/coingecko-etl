@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+      - name: gofmt
+        run: |
+          unformatted="$(gofmt -l .)"
+          if [ -n "$unformatted" ]; then echo "gofmt needed on:"; echo "$unformatted"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.14.0
+
+  test:
+    # GitHub-hosted Ubuntu runners ship a Docker daemon, so the
+    # testcontainers-based integration tests (Postgres, Redpanda, versitygw)
+    # run here instead of skipping. -p 2 limits how many packages start
+    # containers at the same time.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: "1.27"
+      - name: go test -race
+        run: go test -race -p 2 -count=1 -timeout 15m ./...
+
+  deploy-config:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: docker compose config
+        run: docker compose config -q
+      - name: promtool check config and alert unit tests
+        run: make alerts-test
+      - name: dashboard is valid JSON
+        run: jq empty deploy/grafana/dashboards/etl.json
+
+  image:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          tags: coingecko-etl:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

@@ -1,0 +1,30 @@
+version: "2"
+
+linters:
+  # The "standard" set: errcheck, govet, ineffassign, staticcheck, unused.
+  default: standard
+  settings:
+    errcheck:
+      # Errors that cannot be acted on: closing read bodies, listeners and
+      # files on cleanup, rolling back a transaction after Commit (a no-op),
+      # and printing usage text to stdout/stderr.
+      exclude-functions:
+        - (io.Closer).Close
+        - (net.Listener).Close
+        - (*database/sql.DB).Close
+        - (github.com/jackc/pgx/v5.Tx).Rollback
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
+        - io.Copy
+  exclusions:
+    rules:
+      # Deferred cleanup in tests (closing a connection, releasing an
+      # advisory lock): the test has already passed or failed by then.
+      - path: _test\.go
+        linters: [errcheck]
+        source: '^\s*defer '
+
+formatters:
+  enable:
+    - gofmt
