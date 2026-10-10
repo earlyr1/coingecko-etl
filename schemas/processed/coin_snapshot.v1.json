@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/processed/coin_snapshot.v1.json",
+  "title": "coin_snapshot v1: scalar attributes of one /coins/{id} snapshot (parent of the other detail datasets)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "coin_id", "snapshot_at", "symbol", "name", "categories", "hashing_algorithm", "genesis_date",
+    "market_cap_rank", "circulating_supply", "total_supply", "max_supply", "max_supply_infinite",
+    "source_updated_at", "is_stale",
+    "_event_id", "_raw_object", "_kafka_partition", "_kafka_offset", "_schema_version", "_processed_at"
+  ],
+  "properties": {
+    "coin_id": { "type": "string", "minLength": 1 },
+    "snapshot_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" },
+    "symbol": { "type": ["string", "null"], "minLength": 1 },
+    "name": { "type": ["string", "null"], "minLength": 1 },
+    "categories": {
+      "type": ["array", "null"],
+      "minItems": 1,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "hashing_algorithm": { "type": ["string", "null"], "minLength": 1 },
+    "genesis_date": {
+      "anyOf": [
+        { "type": "string", "format": "date", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$" },
+        { "type": "null" }
+      ]
+    },
+    "market_cap_rank": { "type": ["integer", "null"], "minimum": 1 },
+    "circulating_supply": { "$ref": "#/$defs/decimal_or_null" },
+    "total_supply": { "$ref": "#/$defs/decimal_or_null" },
+    "max_supply": { "$ref": "#/$defs/decimal_or_null" },
+    "max_supply_infinite": { "type": ["boolean", "null"] },
+    "source_updated_at": { "$ref": "#/$defs/timestamp_or_null" },
+    "is_stale": { "type": "boolean" },
+    "_event_id": { "$ref": "../common/defs.v1.json#/$defs/uuid" },
+    "_raw_object": { "type": "string", "minLength": 1 },
+    "_kafka_partition": { "type": "integer", "minimum": 0 },
+    "_kafka_offset": { "type": "integer", "minimum": 0 },
+    "_schema_version": { "const": 1 },
+    "_processed_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }
+  },
+  "$defs": {
+    "decimal_or_null": {
+      "anyOf": [{ "$ref": "../common/defs.v1.json#/$defs/decimal_string" }, { "type": "null" }]
+    },
+    "timestamp_or_null": {
+      "anyOf": [{ "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }, { "type": "null" }]
+    }
+  }
+}

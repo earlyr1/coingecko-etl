@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/processed/ticker.v1.json",
+  "title": "ticker v1: one exchange ticker from tickers[] of /coins/{id}",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "coin_id", "exchange_id", "base", "target", "snapshot_at", "exchange_name", "has_trading_incentive",
+    "base_coin_id", "target_coin_id", "last", "volume", "last_usd", "last_btc", "last_eth",
+    "volume_usd", "volume_btc", "volume_eth", "bid_ask_spread_pct", "trust_score",
+    "ticker_timestamp", "last_traded_at", "last_fetch_at",
+    "upstream_is_stale", "upstream_is_anomaly", "is_stale", "is_anomaly",
+    "_event_id", "_raw_object", "_kafka_partition", "_kafka_offset", "_schema_version", "_processed_at"
+  ],
+  "properties": {
+    "coin_id": { "type": "string", "minLength": 1 },
+    "exchange_id": { "type": "string", "minLength": 1 },
+    "base": { "type": "string", "minLength": 1 },
+    "target": { "type": "string", "minLength": 1 },
+    "snapshot_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" },
+    "exchange_name": { "type": ["string", "null"], "minLength": 1 },
+    "has_trading_incentive": { "type": ["boolean", "null"] },
+    "base_coin_id": { "type": ["string", "null"], "minLength": 1 },
+    "target_coin_id": { "type": ["string", "null"], "minLength": 1 },
+    "last": { "$ref": "#/$defs/decimal_or_null" },
+    "volume": { "$ref": "#/$defs/decimal_or_null" },
+    "last_usd": { "$ref": "#/$defs/decimal_or_null" },
+    "last_btc": { "$ref": "#/$defs/decimal_or_null" },
+    "last_eth": { "$ref": "#/$defs/decimal_or_null" },
+    "volume_usd": { "$ref": "#/$defs/decimal_or_null" },
+    "volume_btc": { "$ref": "#/$defs/decimal_or_null" },
+    "volume_eth": { "$ref": "#/$defs/decimal_or_null" },
+    "bid_ask_spread_pct": { "type": ["number", "null"] },
+    "trust_score": { "type": ["string", "null"], "minLength": 1 },
+    "ticker_timestamp": { "$ref": "#/$defs/timestamp_or_null" },
+    "last_traded_at": { "$ref": "#/$defs/timestamp_or_null" },
+    "last_fetch_at": { "$ref": "#/$defs/timestamp_or_null" },
+    "upstream_is_stale": { "type": ["boolean", "null"] },
+    "upstream_is_anomaly": { "type": ["boolean", "null"] },
+    "is_stale": { "type": "boolean" },
+    "is_anomaly": { "type": "boolean" },
+    "_event_id": { "$ref": "../common/defs.v1.json#/$defs/uuid" },
+    "_raw_object": { "type": "string", "minLength": 1 },
+    "_kafka_partition": { "type": "integer", "minimum": 0 },
+    "_kafka_offset": { "type": "integer", "minimum": 0 },
+    "_schema_version": { "const": 1 },
+    "_processed_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }
+  },
+  "$defs": {
+    "decimal_or_null": {
+      "anyOf": [{ "$ref": "../common/defs.v1.json#/$defs/decimal_string" }, { "type": "null" }]
+    },
+    "timestamp_or_null": {
+      "anyOf": [{ "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }, { "type": "null" }]
+    }
+  }
+}

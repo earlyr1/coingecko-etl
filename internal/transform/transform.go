@@ -18,7 +18,7 @@ func Transform(ev event.RawEvent, rules Rules) ([]Record, error) {
 	case event.EndpointMarkets:
 		return transformMarkets(ev, rules)
 	case event.EndpointCoinDetail:
-		return nil, fmt.Errorf("transform: endpoint %q not implemented", ev.Endpoint)
+		return transformDetail(ev, rules)
 	default:
 		return nil, fmt.Errorf("transform: unknown endpoint %q", ev.Endpoint)
 	}

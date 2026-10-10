@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/processed/coin_market_by_currency.v1.json",
+  "title": "coin_market_by_currency v1: the 23 market_data maps of /coins/{id} zipped on one currency",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "coin_id", "currency", "snapshot_at", "price", "market_cap", "fdv", "total_volume", "high_24h", "low_24h",
+    "ath", "ath_change_pct", "ath_at", "atl", "atl_change_pct", "atl_at",
+    "price_change_24h", "price_change_pct_1h", "price_change_pct_24h", "price_change_pct_7d",
+    "price_change_pct_14d", "price_change_pct_30d", "price_change_pct_60d", "price_change_pct_200d",
+    "price_change_pct_1y", "market_cap_change_24h", "market_cap_change_pct_24h",
+    "is_inactive", "is_anomaly",
+    "_event_id", "_raw_object", "_kafka_partition", "_kafka_offset", "_schema_version", "_processed_at"
+  ],
+  "properties": {
+    "coin_id": { "type": "string", "minLength": 1 },
+    "currency": { "type": "string", "pattern": "^[a-z0-9]{2,10}$" },
+    "snapshot_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" },
+    "price": { "$ref": "../common/defs.v1.json#/$defs/decimal_string" },
+    "market_cap": { "$ref": "#/$defs/decimal_or_null" },
+    "fdv": { "$ref": "#/$defs/decimal_or_null" },
+    "total_volume": { "$ref": "#/$defs/decimal_or_null" },
+    "high_24h": { "$ref": "#/$defs/decimal_or_null" },
+    "low_24h": { "$ref": "#/$defs/decimal_or_null" },
+    "ath": { "$ref": "#/$defs/decimal_or_null" },
+    "ath_change_pct": { "type": ["number", "null"] },
+    "ath_at": { "$ref": "#/$defs/timestamp_or_null" },
+    "atl": { "$ref": "#/$defs/decimal_or_null" },
+    "atl_change_pct": { "type": ["number", "null"] },
+    "atl_at": { "$ref": "#/$defs/timestamp_or_null" },
+    "price_change_24h": { "$ref": "#/$defs/decimal_or_null" },
+    "price_change_pct_1h": { "type": ["number", "null"] },
+    "price_change_pct_24h": { "type": ["number", "null"] },
+    "price_change_pct_7d": { "type": ["number", "null"] },
+    "price_change_pct_14d": { "type": ["number", "null"] },
+    "price_change_pct_30d": { "type": ["number", "null"] },
+    "price_change_pct_60d": { "type": ["number", "null"] },
+    "price_change_pct_200d": { "type": ["number", "null"] },
+    "price_change_pct_1y": { "type": ["number", "null"] },
+    "market_cap_change_24h": { "$ref": "#/$defs/decimal_or_null" },
+    "market_cap_change_pct_24h": { "type": ["number", "null"] },
+    "is_inactive": { "type": "boolean" },
+    "is_anomaly": { "type": "boolean" },
+    "_event_id": { "$ref": "../common/defs.v1.json#/$defs/uuid" },
+    "_raw_object": { "type": "string", "minLength": 1 },
+    "_kafka_partition": { "type": "integer", "minimum": 0 },
+    "_kafka_offset": { "type": "integer", "minimum": 0 },
+    "_schema_version": { "const": 1 },
+    "_processed_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }
+  },
+  "$defs": {
+    "decimal_or_null": {
+      "anyOf": [{ "$ref": "../common/defs.v1.json#/$defs/decimal_string" }, { "type": "null" }]
+    },
+    "timestamp_or_null": {
+      "anyOf": [{ "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }, { "type": "null" }]
+    }
+  }
+}

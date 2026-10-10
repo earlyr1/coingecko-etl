@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/processed/coin_contract.v1.json",
+  "title": "coin_contract v1: one platform/contract of /coins/{id} (platforms + detail_platforms)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "coin_id", "platform_id", "snapshot_at", "contract_address", "decimal_place",
+    "_event_id", "_raw_object", "_kafka_partition", "_kafka_offset", "_schema_version", "_processed_at"
+  ],
+  "properties": {
+    "coin_id": { "type": "string", "minLength": 1 },
+    "platform_id": { "type": "string", "minLength": 1 },
+    "snapshot_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" },
+    "contract_address": { "type": "string", "minLength": 1 },
+    "decimal_place": { "type": ["integer", "null"], "minimum": 0 },
+    "_event_id": { "$ref": "../common/defs.v1.json#/$defs/uuid" },
+    "_raw_object": { "type": "string", "minLength": 1 },
+    "_kafka_partition": { "type": "integer", "minimum": 0 },
+    "_kafka_offset": { "type": "integer", "minimum": 0 },
+    "_schema_version": { "const": 1 },
+    "_processed_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }
+  }
+}
