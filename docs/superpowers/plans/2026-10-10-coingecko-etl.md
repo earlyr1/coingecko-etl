@@ -17,7 +17,7 @@
 - Images: `postgres:18.6`, `redpandadata/redpanda:v26.2.4`, `versity/versitygw:v1.8.0`, `redpandadata/console:v3.12.0`, runtime `gcr.io/distroless/static-debian13:nonroot`, builder `golang:1.27`.
 - Postgres volume mount path is `/var/lib/postgresql` (never `/var/lib/postgresql/data`). Healthcheck `pg_isready -h 127.0.0.1`.
 - versitygw runs the posix backend with `--sidecar` metadata outside the gateway root; buckets `raw`, `processed`, `rejected`, `dlq` are directories under `./data`.
-- Topic `coingecko.raw.v1`, 6 partitions, retention 7 days, auto-create off. Message key: `coins_markets` for markets, the coin id for detail.
+- Topic `coingecko.raw`, 6 partitions, retention 7 days, auto-create off. Message key: `coins_markets` for markets, the coin id for detail.
 - Timestamps everywhere: RFC 3339 UTC with milliseconds, e.g. `2026-10-10T10:07:55.000Z` (`xtime.Format`).
 - Money and quantities are decimal strings in plain notation (no exponent); percentages and ratios are JSON numbers. Never decode money through float64.
 - Postgres `raw.api_calls.payload` is type `json` (byte-exact), never `jsonb`.
@@ -107,7 +107,7 @@ type Config struct {
     S3SecretKey        string        // ETL_S3_SECRET_KEY, default "etlsecret123"
     S3Region           string        // ETL_S3_REGION, default "us-east-1"
     Brokers            []string      // ETL_BROKERS (comma-separated), default "localhost:19092"
-    Topic              string        // ETL_TOPIC, default "coingecko.raw.v1"
+    Topic              string        // ETL_TOPIC, default "coingecko.raw"
     TopicPartitions    int32         // ETL_TOPIC_PARTITIONS, default 6
     TopicRetention     time.Duration // ETL_TOPIC_RETENTION, default 168h
     PipelineEpoch      string        // ETL_PIPELINE_EPOCH (uuid), default "00000000-0000-0000-0000-000000000001"
@@ -389,7 +389,7 @@ type Config struct {
     S3SecretKey        string        // ETL_S3_SECRET_KEY, default "etlsecret123"
     S3Region           string        // ETL_S3_REGION, default "us-east-1"
     Brokers            []string      // ETL_BROKERS (comma-separated), default "localhost:19092"
-    Topic              string        // ETL_TOPIC, default "coingecko.raw.v1"
+    Topic              string        // ETL_TOPIC, default "coingecko.raw"
     TopicPartitions    int32         // ETL_TOPIC_PARTITIONS, default 6
     TopicRetention     time.Duration // ETL_TOPIC_RETENTION, default 168h
     PipelineEpoch      string        // ETL_PIPELINE_EPOCH (uuid), default "00000000-0000-0000-0000-000000000001"
@@ -727,7 +727,7 @@ func TestLoadDefaults(t *testing.T) {
 		S3SecretKey:         "etlsecret123",
 		S3Region:            "us-east-1",
 		Brokers:             []string{"localhost:19092"},
-		Topic:               "coingecko.raw.v1",
+		Topic:               "coingecko.raw",
 		TopicPartitions:     6,
 		TopicRetention:      168 * time.Hour,
 		PipelineEpoch:       "00000000-0000-0000-0000-000000000001",
@@ -915,7 +915,7 @@ type Config struct {
 	S3SecretKey         string        // ETL_S3_SECRET_KEY, default "etlsecret123"
 	S3Region            string        // ETL_S3_REGION, default "us-east-1"
 	Brokers             []string      // ETL_BROKERS (comma-separated), default "localhost:19092"
-	Topic               string        // ETL_TOPIC, default "coingecko.raw.v1"
+	Topic               string        // ETL_TOPIC, default "coingecko.raw"
 	TopicPartitions     int32         // ETL_TOPIC_PARTITIONS, default 6
 	TopicRetention      time.Duration // ETL_TOPIC_RETENTION, default 168h
 	PipelineEpoch       string        // ETL_PIPELINE_EPOCH (uuid), default "00000000-0000-0000-0000-000000000001"
@@ -951,7 +951,7 @@ func Load(service string) (Config, error) {
 		S3SecretKey:         p.str("ETL_S3_SECRET_KEY", "etlsecret123"),
 		S3Region:            p.str("ETL_S3_REGION", "us-east-1"),
 		Brokers:             p.list("ETL_BROKERS", "localhost:19092"),
-		Topic:               p.str("ETL_TOPIC", "coingecko.raw.v1"),
+		Topic:               p.str("ETL_TOPIC", "coingecko.raw"),
 		TopicPartitions:     p.int32("ETL_TOPIC_PARTITIONS", 6),
 		TopicRetention:      p.duration("ETL_TOPIC_RETENTION", 168*time.Hour, false),
 		PipelineEpoch:       p.uuid("ETL_PIPELINE_EPOCH", "00000000-0000-0000-0000-000000000001"),
@@ -3314,49 +3314,49 @@ Create the fixture files below with exactly this content (one file per block):
 `schemas/testdata/pipeline/dlq_record.v1/invalid/error_class_uppercase.json`:
 ```json
 {"expect":{"instance_location":"/error_class","keyword":"pattern"},
- "doc":{"schema_version":1,"stage":"transform_input","error_class":"SchemaViolation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"SchemaViolation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/invalid/occurred_at_no_millis.json`:
 ```json
 {"expect":{"instance_location":"/occurred_at","keyword":"pattern"},
- "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30Z"}}
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/invalid/origin_extra_field.json`:
 ```json
 {"expect":{"instance_location":"/origin","keyword":"additionalProperties"},
- "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","host":"x","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","host":"x","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/invalid/original_not_base64.json`:
 ```json
 {"expect":{"instance_location":"/original_base64","keyword":"pattern"},
- "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"{}","occurred_at":"2026-10-10T10:08:30.512Z"}}
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"{}","occurred_at":"2026-10-10T10:08:30.512Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/invalid/too_many_violations.json`:
 ```json
 {"expect":{"instance_location":"/violations","keyword":"maxItems"},
- "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"}],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"},{"instance_location":"","keyword_location":"k","message":"m"}],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/invalid/unknown_origin_kind.json`:
 ```json
 {"expect":{"instance_location":"/origin/kind","keyword":"enum"},
- "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"redis","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"redis","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/invalid/unknown_stage.json`:
 ```json
 {"expect":{"instance_location":"/stage","keyword":"enum"},
- "doc":{"schema_version":1,"stage":"transform","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
+ "doc":{"schema_version":1,"stage":"transform","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/invalid/violation_missing_message.json`:
 ```json
 {"expect":{"instance_location":"/violations/0","keyword":"required"},
- "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[{"instance_location":"","keyword_location":"k"}],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[{"instance_location":"","keyword_location":"k"}],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/valid/decode_error_from_s3.json`:
@@ -3371,7 +3371,7 @@ Create the fixture files below with exactly this content (one file per block):
 
 `schemas/testdata/pipeline/dlq_record.v1/valid/schema_violation.json`:
 ```json
-{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[{"instance_location":"/fetched_at","keyword_location":"https://schemas.cg-etl.internal/common/defs.v1.json#/$defs/utc_timestamp/pattern","message":"'2026-10-10T10:02:33+00:00' does not match pattern"}],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815,"event_id":"0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11"},"original_base64":"eyJzY2hlbWFfdmVyc2lvbiI6MX0=","occurred_at":"2026-10-10T10:08:30.512Z"}
+{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[{"instance_location":"/fetched_at","keyword_location":"https://schemas.cg-etl.internal/common/defs.v1.json#/$defs/utc_timestamp/pattern","message":"'2026-10-10T10:02:33+00:00' does not match pattern"}],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815,"event_id":"0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11"},"original_base64":"eyJzY2hlbWFfdmVyc2lvbiI6MX0=","occurred_at":"2026-10-10T10:08:30.512Z"}
 ```
 
 `schemas/testdata/pipeline/dlq_record.v1/valid/export_with_seq.json` (the exporter's origin carries the `raw.api_calls.seq` of the row):
@@ -3381,7 +3381,7 @@ Create the fixture files below with exactly this content (one file per block):
 
 `schemas/testdata/pipeline/dlq_record.v1/valid/transform_output.json` (a processed row that failed S2; `error` is optional free text):
 ```json
-{"schema_version":1,"stage":"transform_output","error_class":"output_schema_violation","error":"processed row fails its schema","violations":[{"instance_location":"/price","keyword_location":"https://schemas.cg-etl.internal/processed/market_snapshot.v1.json#/properties/price/type","message":"got null, want string"}],"origin":{"kind":"kafka","topic":"coingecko.raw.v1","partition":0,"offset":815,"event_id":"0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11","dataset":"market_snapshot","record_key":"bitcoin|2026-10-10T10:07:55.000Z"},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}
+{"schema_version":1,"stage":"transform_output","error_class":"output_schema_violation","error":"processed row fails its schema","violations":[{"instance_location":"/price","keyword_location":"https://schemas.cg-etl.internal/processed/market_snapshot.v1.json#/properties/price/type","message":"got null, want string"}],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815,"event_id":"0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11","dataset":"market_snapshot","record_key":"bitcoin|2026-10-10T10:07:55.000Z"},"original_base64":"e30=","occurred_at":"2026-10-10T10:08:30.512Z"}
 ```
 
 `schemas/testdata/pipeline/raw_event.v1/invalid/bad_event_id.json`:
@@ -9302,7 +9302,7 @@ func TestQueueIntegration(t *testing.T) {
 	}
 	defer prod.Close()
 
-	const topic = "coingecko.raw.v1"
+	const topic = "coingecko.raw"
 	const retention = 168 * time.Hour
 
 	t.Run("EnsureTopic is idempotent", func(t *testing.T) {
@@ -9482,7 +9482,7 @@ Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>"
   ```
 
 Background for the engineer (spec §4.3, §7.1):
-- The publisher moves raw objects (one JSONL line = one S1 event = one API call) from `s3://raw` to the topic `coingecko.raw.v1`. Every message value is the raw line **byte for byte**. Downstream checks `sha256(payload)`, so the line is never re-encoded.
+- The publisher moves raw objects (one JSONL line = one S1 event = one API call) from `s3://raw` to the topic `coingecko.raw`. Every message value is the raw line **byte for byte**. Downstream checks `sha256(payload)`, so the line is never re-encoded.
 - **Lease protocol.** One `UPDATE … WHERE batch_id = (SELECT … FOR UPDATE SKIP LOCKED) RETURNING …` statement runs as its own short transaction. It picks the oldest batch with `status='exported'`, `published_at IS NULL` and a free or expired lease, and sets `publish_lease_until = now() + lease`. `SKIP LOCKED` lets several publishers work at once without blocking each other. No transaction is open during S3 or broker I/O.
 - **At-least-once.** The batch is marked `published_at = now()` only after every record is acknowledged. If a produce fails, or the process crashes before the mark, the lease expires and the batch is published again. The duplicate messages carry the same `event_id`, and the transformer drops them (spec §7.3).
 - **Invalid lines.** A line that is not JSON or fails S1 is not produced. It becomes a DLQ record (schema `pipeline/dlq_record.v1.json`), and all DLQ records of one batch go into one write-once object `dlq/stage=publish/date=<date>/publish+batch+<%020d batch_id>.jsonl`. Each DLQ record is validated against its own schema before it is written. If that validation fails, the record is logged at ERROR with the original bytes in base64 (spec §5.2). DLQ lines contain no clock reading or random id (`occurred_at` is the batch's `exported_at`), so a retried batch gets 412 with an equal checksum. If a retry still finds a different checksum (`s3.ErrChecksumMismatch`, possible only when a redeploy changed validator messages), the first object is kept and the batch continues.
@@ -9974,7 +9974,7 @@ import (
 	"coingecko-etl/schemas"
 )
 
-const itTopic = "coingecko.raw.v1"
+const itTopic = "coingecko.raw"
 
 type env struct {
 	pool    *pgxpool.Pool
@@ -13638,14 +13638,14 @@ func TestObjectKey(t *testing.T) {
 		want         string
 	}{
 		{s3.BucketProcessed, "dataset=ticker/v=1/event_date=2026-10-10",
-			"dataset=ticker/v=1/event_date=2026-10-10/coingecko.raw.v1+3+00000000000000001200.jsonl"},
+			"dataset=ticker/v=1/event_date=2026-10-10/coingecko.raw+3+00000000000000001200.jsonl"},
 		{s3.BucketRejected, "dataset=coin_contract/event_date=2026-10-10/",
-			"dataset=coin_contract/event_date=2026-10-10/coingecko.raw.v1+3+00000000000000001200.jsonl"},
+			"dataset=coin_contract/event_date=2026-10-10/coingecko.raw+3+00000000000000001200.jsonl"},
 		{s3.BucketDLQ, "stage=transform/date=2026-10-10",
-			"stage=transform/date=2026-10-10/coingecko.raw.v1+3+00000000000000001200.jsonl"},
+			"stage=transform/date=2026-10-10/coingecko.raw+3+00000000000000001200.jsonl"},
 	}
 	for _, c := range cases {
-		if got := ObjectKey(c.zone, c.prefix, "coingecko.raw.v1", 3, 1200); got != c.want {
+		if got := ObjectKey(c.zone, c.prefix, "coingecko.raw", 3, 1200); got != c.want {
 			t.Errorf("ObjectKey(%q, %q) = %q, want %q", c.zone, c.prefix, got, c.want)
 		}
 	}
@@ -15289,7 +15289,7 @@ func TestRunEndToEnd(t *testing.T) {
 	e := newEnv(t)
 	brokers := testutil.StartRedpanda(t)
 	ctx := context.Background()
-	const topic = "coingecko.raw.v1"
+	const topic = "coingecko.raw"
 
 	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...))
 	if err != nil {
@@ -15909,7 +15909,7 @@ func TestRunFailsWhenPostgresUnreachable(t *testing.T) {
 	cfg := config.Config{
 		PostgresDSN: "postgres://etl:etl@" + closedPort(t) + "/etl?sslmode=disable&connect_timeout=1",
 		Brokers:     []string{closedPort(t)},
-		Topic:       "coingecko.raw.v1", TopicPartitions: 6, TopicRetention: 168 * time.Hour,
+		Topic:       "coingecko.raw", TopicPartitions: 6, TopicRetention: 168 * time.Hour,
 		S3Endpoint: "http://" + closedPort(t), S3AccessKey: "etl", S3SecretKey: "etlsecret123", S3Region: "us-east-1",
 	}
 	err := Run(context.Background(), cfg, discardLogger())
@@ -16143,7 +16143,7 @@ func TestRunTwiceAgainstRealDependencies(t *testing.T) {
 		Service:         "init",
 		PostgresDSN:     dsn,
 		Brokers:         brokers,
-		Topic:           "coingecko.raw.v1",
+		Topic:           "coingecko.raw",
 		TopicPartitions: 6,
 		TopicRetention:  168 * time.Hour,
 		S3Endpoint:      endpoint,
@@ -17853,7 +17853,7 @@ flowchart LR
     E -->|"PUT If-None-Match: *"| RAW[("s3://raw<br/>./data/raw")]
     RAW --> P[etl publisher]
     PG -. "lease batch" .- P
-    P -->|"key = coins_markets / coin id"| K[["Redpanda<br/>coingecko.raw.v1<br/>6 partitions"]]
+    P -->|"key = coins_markets / coin id"| K[["Redpanda<br/>coingecko.raw<br/>6 partitions"]]
     K -->|consumer group| T["etl transformer x2<br/>validate, clean, dedup,<br/>normalize, validate"]
     T -->|claims + batch manifest| PG
     T --> PROC[("s3://processed<br/>./data/processed")]
@@ -17931,9 +17931,9 @@ The S3 gateway (versitygw, posix backend) stores every bucket as a directory and
 
 ```
 data/raw/source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl
-data/processed/dataset=ticker/v=1/event_date=2026-10-10/coingecko.raw.v1+3+00000000000000001200.jsonl
-data/rejected/dataset=coin_contract/event_date=2026-10-10/coingecko.raw.v1+0+00000000000000000815.jsonl
-data/dlq/stage=transform/date=2026-10-10/coingecko.raw.v1+0+00000000000000000815.jsonl
+data/processed/dataset=ticker/v=1/event_date=2026-10-10/coingecko.raw+3+00000000000000001200.jsonl
+data/rejected/dataset=coin_contract/event_date=2026-10-10/coingecko.raw+0+00000000000000000815.jsonl
+data/dlq/stage=transform/date=2026-10-10/coingecko.raw+0+00000000000000000815.jsonl
 ```
 
 Four ways to look at it:
@@ -17944,7 +17944,7 @@ Four ways to look at it:
   export AWS_ACCESS_KEY_ID=etl AWS_SECRET_ACCESS_KEY=etlsecret123 AWS_DEFAULT_REGION=us-east-1
   aws --endpoint-url http://localhost:7070 s3 ls s3://processed/ --recursive | head
   ```
-- **Redpanda Console** at <http://localhost:8081>: topic `coingecko.raw.v1`, messages with their headers (`event_id`, `idempotency_key`, `schema`, `raw_object`, `line_no`), and the `coingecko-transformer` consumer group with its lag.
+- **Redpanda Console** at <http://localhost:8081>: topic `coingecko.raw`, messages with their headers (`event_id`, `idempotency_key`, `schema`, `raw_object`, `line_no`), and the `coingecko-transformer` consumer group with its lag.
 - **Postgres** at `localhost:5432` (user, password and database `etl`): `raw.api_calls` holds every HTTP call; `pipeline.*` holds the ledgers.
   ```sql
   SELECT outcome, http->>'status' AS status, count(*) FROM raw.api_calls GROUP BY 1, 2;
@@ -18322,7 +18322,7 @@ Candidates: Apache Kafka 4.3 (KRaft), Redpanda, NATS JetStream, Apache Pulsar, R
 
 ## Decision
 
-Use the Kafka protocol with the franz-go client (`kgo`, `kadm`, `kprom`), and run Redpanda `v26.2.4` in dev-container mode (`--smp 1 --memory 1G`) locally. One topic, `coingecko.raw.v1`, 6 partitions, 7 days retention, created by `etl init`; broker-side topic auto-creation is off. Messages are keyed by `coins_markets` or the coin id.
+Use the Kafka protocol with the franz-go client (`kgo`, `kadm`, `kprom`), and run Redpanda `v26.2.4` in dev-container mode (`--smp 1 --memory 1G`) locally. One topic, `coingecko.raw`, 6 partitions, 7 days retention, created by `etl init`; broker-side topic auto-creation is off. Messages are keyed by `coins_markets` or the coin id.
 
 | Broker | Verdict |
 |---|---|

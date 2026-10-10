@@ -49,7 +49,7 @@ CoinGecko ──(markets every 30 s, /coins/{id} once a minute)──▶ fetcher
                                                               publisher (leases batches from the ledger, reads via S3)
                                                                   │ produce, key = endpoint / coin id
                                                                   ▼
-                                          Redpanda (Kafka API) topic coingecko.raw.v1 (6 partitions)
+                                          Redpanda (Kafka API) topic coingecko.raw (6 partitions)
                                                                   │ consumer group
                                                                   ▼
                      transformer ×2: validate → clean → dedup → normalize → validate
@@ -119,6 +119,7 @@ The design needs a replayable log, per-key ordering within partitions, and consu
 | Cleaning | Empty records → `rejected/`; questionable records kept with flags |
 | Fetcher scope | Transport only; source-schema (S0) validation lives in the transformer |
 | Schema distribution | Schemas embedded via `go:embed`; updates ship as redeploys; no schema registry |
+| Topic name | `coingecko.raw` without a version suffix: the version travels in every message (`schema_version`, `schema` header); breaking changes are handled in the same topic by dispatching on version |
 | Dedup content hash | Business fields only; excludes schema version and technical columns |
 
 ## 3. Source: CoinGecko
@@ -187,7 +188,7 @@ CREATE INDEX ON raw.api_calls (idempotency_key);
 
 - Leases one exported batch: `UPDATE … SET publish_lease_until = now() + '2 min' WHERE batch_id = (SELECT … FOR UPDATE SKIP LOCKED)`.
 - Streams the object, validates each line against S1 (failures go to `dlq/`), produces each line verbatim.
-- Topic `coingecko.raw.v1`, 6 partitions, retention 7 days. Key: `coins_markets` for markets, the coin id for detail. Headers: `event_id`, `idempotency_key`, `schema`, `raw_object`, `line_no`.
+- Topic `coingecko.raw`, 6 partitions, retention 7 days. Key: `coins_markets` for markets, the coin id for detail. Headers: `event_id`, `idempotency_key`, `schema`, `raw_object`, `line_no`.
 - Idempotent producer, `acks=all`. Marks `published_at` after a successful flush. A crash before the mark republishes the object; the transformer drops the copies.
 
 ### 4.4 Transformer → processed / rejected / dlq
@@ -274,9 +275,9 @@ Every row carries technical columns `_event_id`, `_raw_object`, `_kafka_partitio
 
 ```
 data/raw/source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl
-data/processed/dataset=ticker/v=1/event_date=2026-10-10/coingecko.raw.v1+3+00000000000000001200.jsonl
-data/rejected/dataset=coin_contract/event_date=2026-10-10/coingecko.raw.v1+0+00000000000000000815.jsonl
-data/dlq/stage=transform/date=2026-10-10/coingecko.raw.v1+0+00000000000000000815.jsonl
+data/processed/dataset=ticker/v=1/event_date=2026-10-10/coingecko.raw+3+00000000000000001200.jsonl
+data/rejected/dataset=coin_contract/event_date=2026-10-10/coingecko.raw+0+00000000000000000815.jsonl
+data/dlq/stage=transform/date=2026-10-10/coingecko.raw+0+00000000000000000815.jsonl
 ```
 
 `event_date` is the date of `snapshot_at`. Processed/rejected/dlq object names are topic + partition + first offset of the batch (the Confluent S3 sink convention), which makes writes idempotent.
