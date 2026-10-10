@@ -1,0 +1,2 @@
+{"expect":{"instance_location":"/original_base64","keyword":"pattern"},
+ "doc":{"schema_version":1,"stage":"transform_input","error_class":"schema_violation","violations":[],"origin":{"kind":"kafka","topic":"coingecko.raw","partition":0,"offset":815},"original_base64":"{}","occurred_at":"2026-10-10T10:08:30.512Z"}}

@@ -1,0 +1,79 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/pipeline/raw_event.v1.json",
+  "title": "S1 raw event: one CoinGecko HTTP call (raw.api_calls row = raw JSONL line = Kafka message value)",
+  "description": "STRICT. Mirrors event.RawEvent; every key is always present because the Go struct has no omitempty. payload is the upstream body verbatim and is validated separately against S0.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "event_id",
+    "idempotency_key",
+    "source",
+    "endpoint",
+    "request",
+    "fetched_at",
+    "outcome",
+    "http",
+    "error",
+    "payload_sha256",
+    "payload"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "event_id": { "$ref": "../common/defs.v1.json#/$defs/uuid" },
+    "idempotency_key": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "source": { "const": "coingecko" },
+    "endpoint": { "enum": ["coins_markets", "coin_detail"] },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "params"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^/" },
+        "params": {
+          "type": "object",
+          "additionalProperties": { "type": "string" }
+        }
+      }
+    },
+    "fetched_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" },
+    "outcome": { "enum": ["ok", "http_error", "network_error"] },
+    "http": {
+      "description": "null for network errors (no HTTP response).",
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["status", "latency_ms", "date", "age_s", "cf_cache_status", "etag", "retry_after_s"],
+      "properties": {
+        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "latency_ms": { "type": "integer", "minimum": 0 },
+        "date": { "type": ["string", "null"] },
+        "age_s": { "type": ["integer", "null"], "minimum": 0 },
+        "cf_cache_status": { "type": ["string", "null"] },
+        "etag": { "type": ["string", "null"] },
+        "retry_after_s": { "type": ["integer", "null"], "minimum": 0 }
+      }
+    },
+    "error": { "type": ["string", "null"] },
+    "payload_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
+    "payload": {
+      "description": "Upstream response body embedded verbatim (any JSON value); JSON null when the call failed."
+    }
+  },
+  "if": {
+    "properties": { "outcome": { "const": "ok" } },
+    "required": ["outcome"]
+  },
+  "then": {
+    "properties": {
+      "payload": { "not": { "type": "null" } },
+      "idempotency_key": { "$ref": "../common/defs.v1.json#/$defs/sha256_hex" },
+      "payload_sha256": { "$ref": "../common/defs.v1.json#/$defs/sha256_hex" }
+    }
+  },
+  "else": {
+    "properties": {
+      "payload": { "type": "null" }
+    }
+  }
+}

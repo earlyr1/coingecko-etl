@@ -1,0 +1,2 @@
+{"expect":{"instance_location":"/dataset","keyword":"enum"},
+ "doc":{"schema_version":1,"dataset":"markets","reason":"null_price","record_key":"x|2026-10-10T10:07:55.000Z","event_date":"2026-10-10","record":{},"_event_id":"0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11","_raw_object":"raw/k.jsonl","_kafka_partition":0,"_kafka_offset":815,"_processed_at":"2026-10-10T10:08:30.512Z"}}

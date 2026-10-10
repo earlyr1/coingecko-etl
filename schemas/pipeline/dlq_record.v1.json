@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/pipeline/dlq_record.v1.json",
+  "title": "S3 dead-letter record: input that broke a stage and needs a human (data/dlq/)",
+  "description": "STRICT. original_base64 carries the offending bytes unchanged (they may not be valid JSON).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "stage",
+    "error_class",
+    "violations",
+    "origin",
+    "original_base64",
+    "occurred_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "stage": { "enum": ["export", "publish", "transform_input", "transform_output"] },
+    "error_class": {
+      "description": "Low-cardinality class used as a metric label, e.g. decode_error, schema_violation, integrity_error, source_schema_violation, transform_error.",
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]{0,63}$"
+    },
+    "violations": {
+      "type": "array",
+      "maxItems": 20,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["instance_location", "keyword_location", "message"],
+        "properties": {
+          "instance_location": { "type": "string" },
+          "keyword_location": { "type": "string" },
+          "message": { "type": "string" }
+        }
+      }
+    },
+    "origin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["postgres", "s3", "kafka"] },
+        "topic": { "type": "string", "minLength": 1 },
+        "partition": { "type": "integer", "minimum": 0 },
+        "offset": { "type": "integer", "minimum": 0 },
+        "bucket": { "type": "string", "minLength": 1 },
+        "object_key": { "type": "string", "minLength": 1 },
+        "line_no": { "type": "integer", "minimum": 1 },
+        "batch_id": { "type": "integer", "minimum": 1 },
+        "seq": { "type": "integer", "minimum": 1 },
+        "event_id": { "type": "string" },
+        "dataset": { "type": "string", "minLength": 1 },
+        "record_key": { "type": "string", "minLength": 1 }
+      }
+    },
+    "error": { "description": "Optional human-readable error text (for example a Go error message).", "type": "string" },
+    "original_base64": { "type": "string", "pattern": "^[A-Za-z0-9+/]*={0,2}$" },
+    "occurred_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }
+  }
+}

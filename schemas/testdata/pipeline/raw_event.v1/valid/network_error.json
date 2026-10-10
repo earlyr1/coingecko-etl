@@ -1,0 +1,1 @@
+{"schema_version":1,"event_id":"0199d0a6-0000-7000-8000-000000000003","idempotency_key":null,"source":"coingecko","endpoint":"coin_detail","request":{"path":"/coins/tether","params":{}},"fetched_at":"2026-10-10T10:04:00.000Z","outcome":"network_error","http":null,"error":"context deadline exceeded","payload_sha256":null,"payload":null}

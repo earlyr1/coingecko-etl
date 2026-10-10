@@ -1,0 +1,1 @@
+{"schema_version":1,"stage":"publish","error_class":"decode_error","violations":[],"origin":{"kind":"s3","bucket":"raw","object_key":"source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl","line_no":3,"batch_id":42},"original_base64":"eyJhIjoxLCJhIjoyfQ==","occurred_at":"2026-10-10T10:08:30.000Z"}

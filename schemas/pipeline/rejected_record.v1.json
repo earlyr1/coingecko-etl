@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/pipeline/rejected_record.v1.json",
+  "title": "S3 rejected record: a record dropped by a cleaning rule (data/rejected/)",
+  "description": "STRICT. record holds the record as the transformer saw it; its inner shape is not constrained.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "dataset",
+    "reason",
+    "record_key",
+    "event_date",
+    "record",
+    "_event_id",
+    "_raw_object",
+    "_kafka_partition",
+    "_kafka_offset",
+    "_processed_at"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "dataset": {
+      "enum": ["market_snapshot", "coin_snapshot", "coin_market_by_currency", "ticker", "coin_contract"]
+    },
+    "reason": {
+      "enum": ["missing_id", "null_price", "nonpositive_price", "empty_platform", "empty_record", "snapshot_conflict"]
+    },
+    "record_key": { "type": "string", "minLength": 1 },
+    "event_date": { "$ref": "../common/defs.v1.json#/$defs/date" },
+    "record": {
+      "description": "transform.RowJSON output: business fields plus the _ lineage columns",
+      "type": "object"
+    },
+    "_event_id": { "$ref": "../common/defs.v1.json#/$defs/uuid" },
+    "_raw_object": { "type": "string", "minLength": 1 },
+    "_kafka_partition": { "type": "integer", "minimum": 0 },
+    "_kafka_offset": { "type": "integer", "minimum": 0 },
+    "_processed_at": { "$ref": "../common/defs.v1.json#/$defs/utc_timestamp" }
+  }
+}
