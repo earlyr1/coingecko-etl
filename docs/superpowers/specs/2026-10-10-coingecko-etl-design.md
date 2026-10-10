@@ -1,7 +1,7 @@
 # CoinGecko ETL — Design Spec
 
 - **Date:** 2026-10-10
-- **Status:** Approved in design review; pending written-spec review
+- **Status:** Approved (design review and written-spec review, 2026-10-10)
 - **Context:** Trust Wallet Data Engineer take-home. Deliverable is a public GitHub repository.
 
 ## 1. Goals
