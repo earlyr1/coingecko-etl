@@ -11,10 +11,10 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awshttp "github.com/aws/aws-sdk-go-v2/aws/transport/http"
-	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -40,25 +40,54 @@ const (
 	contentType = "application/x-ndjson"
 )
 
-type Config struct{ Endpoint, AccessKey, SecretKey, Region string }
+// Default HTTP timeouts of a Client.
+const (
+	DefaultTimeout       = 2 * time.Minute  // one HTTP attempt, response body included
+	DefaultHeaderTimeout = 30 * time.Second // wait for the response headers
+)
+
+type Config struct {
+	Endpoint, AccessKey, SecretKey, Region string
+	// Timeout bounds one HTTP attempt end to end, reading the body included;
+	// HeaderTimeout bounds the wait for the response headers. Zero means
+	// DefaultTimeout and DefaultHeaderTimeout. No caller sets a deadline, so
+	// these are what stop a gateway that hangs instead of being down; the
+	// SDK's retries and the callers' backoff then handle the error.
+	Timeout, HeaderTimeout time.Duration
+}
 
 type Client struct{ api *s3.Client }
 
 // New builds a path-style client (http://host:port/bucket/key). Path style is
-// required because versitygw has no virtual-host bucket DNS.
-func New(ctx context.Context, cfg Config) (*Client, error) {
-	awsCfg, err := config.LoadDefaultConfig(ctx,
-		config.WithRegion(cfg.Region),
-		config.WithCredentialsProvider(credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, "")),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("s3: load config: %w", err)
+// required because versitygw has no virtual-host bucket DNS. The client is
+// configured from cfg alone: no AWS_* environment variables and no shared
+// config files (~/.aws), so a developer's AWS_PROFILE cannot break or
+// redirect it. New never fails; the error result is kept for the interface.
+func New(_ context.Context, cfg Config) (*Client, error) {
+	return &Client{api: s3.New(options(cfg))}, nil
+}
+
+// options builds the SDK options for cfg.
+func options(cfg Config) s3.Options {
+	timeout, header := cfg.Timeout, cfg.HeaderTimeout
+	if timeout <= 0 {
+		timeout = DefaultTimeout
 	}
-	api := s3.NewFromConfig(awsCfg, func(o *s3.Options) {
-		o.BaseEndpoint = aws.String(cfg.Endpoint)
-		o.UsePathStyle = true
-	})
-	return &Client{api: api}, nil
+	if header <= 0 {
+		header = DefaultHeaderTimeout
+	}
+	return s3.Options{
+		Region:       cfg.Region,
+		Credentials:  credentials.NewStaticCredentialsProvider(cfg.AccessKey, cfg.SecretKey, ""),
+		BaseEndpoint: aws.String(cfg.Endpoint),
+		UsePathStyle: true,
+		HTTPClient: awshttp.NewBuildableClient().
+			WithTimeout(timeout).
+			WithTransportOptions(func(t *http.Transport) { t.ResponseHeaderTimeout = header }),
+		// What config.LoadDefaultConfig resolves when nothing is configured.
+		RequestChecksumCalculation: aws.RequestChecksumCalculationWhenSupported,
+		ResponseChecksumValidation: aws.ResponseChecksumValidationWhenSupported,
+	}
 }
 
 // PutIfAbsent writes body under bucket/key only if the key does not exist.
