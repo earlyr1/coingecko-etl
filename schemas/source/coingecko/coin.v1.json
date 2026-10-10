@@ -1,0 +1,134 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/source/coingecko/coin.v1.json",
+  "title": "S0 CoinGecko GET /coins/{id} response (observed contract)",
+  "description": "PERMISSIVE: requires and types only the fields the transformer reads; unknown fields are allowed. market_data and tickers are optional because the endpoint omits them when market_data=false / tickers=false (see testdata/coingecko/coin_usd-coin_meta.json). Currency maps are open maps keyed by currency code.",
+  "type": "object",
+  "required": ["id", "symbol", "name", "last_updated"],
+  "properties": {
+    "id": { "type": "string" },
+    "symbol": { "type": "string" },
+    "name": { "type": "string" },
+    "asset_platform_id": { "type": ["string", "null"] },
+    "platforms": {
+      "type": ["object", "null"],
+      "additionalProperties": { "type": ["string", "null"] }
+    },
+    "detail_platforms": {
+      "type": ["object", "null"],
+      "additionalProperties": {
+        "type": ["object", "null"],
+        "properties": {
+          "decimal_place": { "type": ["integer", "null"] },
+          "contract_address": { "type": ["string", "null"] }
+        }
+      }
+    },
+    "categories": {
+      "type": ["array", "null"],
+      "items": { "type": ["string", "null"] }
+    },
+    "hashing_algorithm": { "type": ["string", "null"] },
+    "block_time_in_minutes": { "type": ["integer", "null"] },
+    "genesis_date": {
+      "description": "YYYY-MM-DD, or null / \"\" when unknown.",
+      "type": ["string", "null"],
+      "if": { "type": "string", "minLength": 1 },
+      "then": { "format": "date" }
+    },
+    "market_cap_rank": { "type": ["integer", "null"] },
+    "last_updated": { "type": "string", "format": "date-time" },
+    "market_data": {
+      "type": "object",
+      "properties": {
+        "current_price": { "$ref": "#/$defs/currency_map" },
+        "ath": { "$ref": "#/$defs/currency_map" },
+        "ath_change_percentage": { "$ref": "#/$defs/currency_map" },
+        "ath_date": { "$ref": "#/$defs/currency_datetime_map" },
+        "atl": { "$ref": "#/$defs/currency_map" },
+        "atl_change_percentage": { "$ref": "#/$defs/currency_map" },
+        "atl_date": { "$ref": "#/$defs/currency_datetime_map" },
+        "market_cap": { "$ref": "#/$defs/currency_map" },
+        "fully_diluted_valuation": { "$ref": "#/$defs/currency_map" },
+        "total_volume": { "$ref": "#/$defs/currency_map" },
+        "high_24h": { "$ref": "#/$defs/currency_map" },
+        "low_24h": { "$ref": "#/$defs/currency_map" },
+        "price_change_24h_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_1h_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_24h_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_7d_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_14d_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_30d_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_60d_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_200d_in_currency": { "$ref": "#/$defs/currency_map" },
+        "price_change_percentage_1y_in_currency": { "$ref": "#/$defs/currency_map" },
+        "market_cap_change_24h_in_currency": { "$ref": "#/$defs/currency_map" },
+        "market_cap_change_percentage_24h_in_currency": { "$ref": "#/$defs/currency_map" },
+        "market_cap_rank": { "type": ["integer", "null"] },
+        "total_supply": { "$ref": "#/$defs/num" },
+        "max_supply": { "$ref": "#/$defs/num" },
+        "circulating_supply": { "$ref": "#/$defs/num" },
+        "roi": {
+          "type": ["object", "null"],
+          "properties": {
+            "times": { "$ref": "#/$defs/num" },
+            "currency": { "type": ["string", "null"] },
+            "percentage": { "$ref": "#/$defs/num" }
+          }
+        },
+        "last_updated": { "$ref": "#/$defs/opt_datetime" }
+      }
+    },
+    "tickers": {
+      "type": ["array", "null"],
+      "items": { "$ref": "#/$defs/ticker" }
+    }
+  },
+  "$defs": {
+    "num": { "type": ["number", "null"] },
+    "opt_datetime": {
+      "description": "Absent is encoded as null or \"\"; any other string must be an RFC 3339 date-time.",
+      "type": ["string", "null"],
+      "if": { "type": "string", "minLength": 1 },
+      "then": { "format": "date-time" }
+    },
+    "currency_map": {
+      "description": "Currency code -> number, e.g. {\"usd\": 82776, \"vnd\": 43083803721443304}.",
+      "type": ["object", "null"],
+      "additionalProperties": { "type": ["number", "null"] }
+    },
+    "currency_datetime_map": {
+      "type": ["object", "null"],
+      "additionalProperties": { "$ref": "#/$defs/opt_datetime" }
+    },
+    "ticker": {
+      "type": "object",
+      "required": ["base", "target", "market"],
+      "properties": {
+        "base": { "type": "string" },
+        "target": { "type": "string" },
+        "market": {
+          "type": "object",
+          "properties": {
+            "name": { "type": ["string", "null"] },
+            "identifier": { "type": ["string", "null"] },
+            "has_trading_incentive": { "type": ["boolean", "null"] }
+          }
+        },
+        "last": { "$ref": "#/$defs/num" },
+        "volume": { "$ref": "#/$defs/num" },
+        "converted_last": { "$ref": "#/$defs/currency_map" },
+        "converted_volume": { "$ref": "#/$defs/currency_map" },
+        "trust_score": { "type": ["string", "null"] },
+        "bid_ask_spread_percentage": { "$ref": "#/$defs/num" },
+        "timestamp": { "$ref": "#/$defs/opt_datetime" },
+        "last_traded_at": { "$ref": "#/$defs/opt_datetime" },
+        "last_fetch_at": { "$ref": "#/$defs/opt_datetime" },
+        "is_anomaly": { "type": ["boolean", "null"] },
+        "is_stale": { "type": ["boolean", "null"] },
+        "coin_id": { "type": ["string", "null"] },
+        "target_coin_id": { "type": ["string", "null"] }
+      }
+    }
+  }
+}

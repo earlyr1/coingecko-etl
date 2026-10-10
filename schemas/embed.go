@@ -12,4 +12,5 @@ import "embed"
 //
 //go:embed common/*.json
 //go:embed pipeline/*.json
+//go:embed source/coingecko/*.json
 var FS embed.FS

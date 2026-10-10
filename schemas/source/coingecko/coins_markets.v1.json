@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://schemas.cg-etl.internal/source/coingecko/coins_markets.v1.json",
+  "title": "S0 CoinGecko GET /coins/markets response (observed contract)",
+  "description": "PERMISSIVE: requires and types only the fields the transformer reads; unknown fields are allowed. Metric fields allow null (documented by CoinGecko; the cleaning rules null_price and empty_record depend on nulls reaching the transformer). Empty-string ids are a cleaning reject (missing_id), not a schema failure.",
+  "type": "array",
+  "items": { "$ref": "#/$defs/coin" },
+  "$defs": {
+    "num": { "type": ["number", "null"] },
+    "opt_datetime": {
+      "description": "Absent is encoded as null or \"\"; any other string must be an RFC 3339 date-time.",
+      "type": ["string", "null"],
+      "if": { "type": "string", "minLength": 1 },
+      "then": { "format": "date-time" }
+    },
+    "coin": {
+      "type": "object",
+      "required": ["id", "symbol", "name", "current_price", "last_updated"],
+      "properties": {
+        "id": { "type": "string" },
+        "symbol": { "type": "string" },
+        "name": { "type": "string" },
+        "current_price": { "$ref": "#/$defs/num" },
+        "market_cap": { "$ref": "#/$defs/num" },
+        "market_cap_rank": { "type": ["integer", "null"] },
+        "fully_diluted_valuation": { "$ref": "#/$defs/num" },
+        "total_volume": { "$ref": "#/$defs/num" },
+        "high_24h": { "$ref": "#/$defs/num" },
+        "low_24h": { "$ref": "#/$defs/num" },
+        "price_change_24h": { "$ref": "#/$defs/num" },
+        "price_change_percentage_24h": { "$ref": "#/$defs/num" },
+        "market_cap_change_24h": { "$ref": "#/$defs/num" },
+        "market_cap_change_percentage_24h": { "$ref": "#/$defs/num" },
+        "circulating_supply": { "$ref": "#/$defs/num" },
+        "total_supply": { "$ref": "#/$defs/num" },
+        "max_supply": { "$ref": "#/$defs/num" },
+        "ath": { "$ref": "#/$defs/num" },
+        "ath_change_percentage": { "$ref": "#/$defs/num" },
+        "ath_date": { "$ref": "#/$defs/opt_datetime" },
+        "atl": { "$ref": "#/$defs/num" },
+        "atl_change_percentage": { "$ref": "#/$defs/num" },
+        "atl_date": { "$ref": "#/$defs/opt_datetime" },
+        "roi": {
+          "type": ["object", "null"],
+          "properties": {
+            "times": { "$ref": "#/$defs/num" },
+            "currency": { "type": ["string", "null"] },
+            "percentage": { "$ref": "#/$defs/num" }
+          }
+        },
+        "last_updated": { "type": "string", "format": "date-time" },
+        "price_change_percentage_1h_in_currency": { "$ref": "#/$defs/num" },
+        "price_change_percentage_24h_in_currency": { "$ref": "#/$defs/num" },
+        "price_change_percentage_7d_in_currency": { "$ref": "#/$defs/num" }
+      }
+    }
+  }
+}
