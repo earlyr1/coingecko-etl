@@ -326,6 +326,7 @@ CREATE TABLE pipeline.dedup_claims (
   kafka_offset    bigint NOT NULL,
   ordinal         int    NOT NULL,          -- record index within the message
   event_id        uuid   NOT NULL,
+  idempotency_key text,                     -- of the claiming message; only for the drop-reason metric
   content_sha256  bytea  NOT NULL,
   first_seen_at   timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (dataset, record_key, event_date)
