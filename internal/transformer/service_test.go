@@ -150,18 +150,52 @@ func TestRunEndToEnd(t *testing.T) {
 		t.Fatalf("processed=%d rejected=%d, want %d and %d", counts[s3.BucketProcessed], counts[s3.BucketRejected], wantProcessed, wantRejected)
 	}
 
-	// A restart re-reads nothing: offsets are committed and no new batch appears.
+	// A restart resumes from the committed offsets: one more message yields
+	// exactly one new batch, covering only that message; nothing committed
+	// is read again.
 	var before int
 	if err := e.deps.Pool.QueryRow(ctx, `SELECT count(*) FROM pipeline.consumer_batches`).Scan(&before); err != nil {
 		t.Fatal(err)
 	}
-	runFor(8*time.Second, func() bool { return false })
+	extra := fixtureEvent(t, "markets_top10_t2.json", event.EndpointMarkets, "", "2026-10-10T10:04:17.000Z") // a CDN copy of t2
+	v, err := event.Marshal(extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &kgo.Record{Topic: topic, Key: []byte("coins_markets"), Value: v, Headers: []kgo.RecordHeader{
+		{Key: queue.HeaderEventID, Value: []byte(extra.EventID)},
+		{Key: queue.HeaderRawObject, Value: []byte("source=coingecko/ingest_date=2026-10-10/batch=00000000000000000002.jsonl")},
+	}}
+	if err := cl.ProduceSync(ctx, rec).FirstErr(); err != nil {
+		t.Fatal(err)
+	}
+	committedExtra := func() bool {
+		offs, err := adm.FetchOffsets(ctx, ConsumerGroup)
+		if err != nil {
+			return false
+		}
+		c, ok := offs.Lookup(topic, rec.Partition)
+		return ok && c.At == rec.Offset+1
+	}
+	runFor(60*time.Second, committedExtra)
+	if !committedExtra() {
+		t.Fatalf("partition %d not committed past the extra message at offset %d", rec.Partition, rec.Offset)
+	}
 	var after int
 	if err := e.deps.Pool.QueryRow(ctx, `SELECT count(*) FROM pipeline.consumer_batches`).Scan(&after); err != nil {
 		t.Fatal(err)
 	}
-	if after != before {
-		t.Fatalf("restart created %d new batches", after-before)
+	if after != before+1 {
+		t.Fatalf("restart created %d new batches, want exactly 1", after-before)
+	}
+	var first, last int64
+	var status string
+	if err := e.deps.Pool.QueryRow(ctx, `SELECT first_offset, last_offset, status FROM pipeline.consumer_batches
+		WHERE kafka_partition = $1 ORDER BY first_offset DESC LIMIT 1`, rec.Partition).Scan(&first, &last, &status); err != nil {
+		t.Fatal(err)
+	}
+	if first != rec.Offset || last != rec.Offset || status != statusWritten {
+		t.Fatalf("new batch = [%d..%d] %s, want [%d..%d] written", first, last, status, rec.Offset, rec.Offset)
 	}
 }
 
