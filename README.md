@@ -310,15 +310,19 @@ The Grafana dashboard shows records per stage, data freshness and end-to-end lat
 
 The rules are in `deploy/prometheus/alerts.yml` and have unit tests (`make alerts-test` runs `promtool`). Open <http://localhost:9090/alerts> to see their state.
 
+Nine rules; the severity is `warning` unless marked critical.
+
 | Alert | Fires when | Likely cause |
 |---|---|---|
-| `ETLDataStale` | no successful CoinGecko call on an endpoint for more than 2 minutes, or no successful markets call yet | rate limiting, network, CoinGecko outage, fetcher down |
+| `ETLDataStale` (critical) | no successful CoinGecko call on an endpoint for more than 2 minutes, or no successful markets call yet | rate limiting, network, CoinGecko outage, fetcher down |
 | `ETLDeadLetterRecords` | any record reached `dlq/` in the last 10 minutes | a bug, a broken message, an integrity failure |
-| `ETLSourceSchemaDrift` | more than 5% of CoinGecko responses fail the source schema over 15 minutes | CoinGecko changed its response format |
-| `ETLExportLagHigh` | export lag above 5 minutes | a long Postgres transaction, S3 failures, exporter down |
-| `ETLConsumerLagGrowing` | consumer lag has grown for 10 minutes | transformers too slow, stuck or crash-looping |
-| `ETLFrequentRateLimiting` | 3 or more HTTP 429 responses in 15 minutes | another client on the same IP, or a too aggressive schedule |
+| `ETLSourceSchemaDrift` (critical) | more than 5% of CoinGecko responses fail the source schema over 15 minutes | CoinGecko changed its response format |
+| `ETLExportLagHigh` | the exporter's lag is above 5 minutes, or the exporter reports no lag at all (only the exporter's series counts: every service exports the gauge, the others at 0) | a long Postgres transaction, S3 failures, exporter down |
+| `ETLConsumerLagGrowing` | consumer lag has grown for 10 minutes | transformers too slow, a batch that keeps failing, a halted partition |
+| `ETLServiceDown` (critical) | for 2 minutes a pipeline service fails its scrape (`up == 0`) or has no scrape target at all (Prometheus finds the containers through Docker DNS) | the container is stopped, crash-looping or hung |
+| `ETLPipelineNotProgressing` | CoinGecko calls succeed, but for 5 minutes no transformer counted a record (written, duplicate, rejected or dlq) over the last 15 minutes | a stopped or failing publisher (for example the broker is down), a stalled exporter, transformers that cannot write |
 | `ETLObjectChecksumMismatch` (critical) | an object key already holds different bytes, or a re-planned transformer batch differs from its manifest; fires at once and stays up | the lake (`./data`, `./.s3meta`) was kept while Postgres and Redpanda were reset (or the reverse), a non-deterministic transform, or a foreign writer; the transformer halts that partition, the exporter retries the batch every 15 s |
+| `ETLFrequentRateLimiting` | 3 or more HTTP 429 responses in 15 minutes | another client on the same IP, or a too aggressive schedule |
 
 Alertmanager is not part of the stack; in production the rules route to on-call through Alertmanager or Grafana alerting.
 

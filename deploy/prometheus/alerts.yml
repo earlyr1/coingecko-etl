@@ -1,6 +1,8 @@
 # Alert rules from spec §8.4. Label values follow the services' metrics:
 # etl_schema_validations_total{result} is "pass" or "fail" in every stage, and
 # schema is the schema file name without .json (coins_markets.v1, coin.v1, ...).
+# Every service registers the whole etl_* catalogue, so rules about one
+# service's metric select it by job (the job names of prometheus.yml).
 groups:
   - name: etl
     rules:
@@ -46,13 +48,18 @@ groups:
           description: "See data/dlq/stage=transform/ for source_schema_violation records."
 
       - alert: ETLExportLagHigh
-        expr: max(etl_export_lag_seconds) > 300
+        # Only the exporter moves etl_export_lag_seconds; the other services
+        # export a constant 0, which must not hide a missing exporter.
+        expr: |
+          max(etl_export_lag_seconds{job="exporter"}) > 300
+          or
+          absent(etl_export_lag_seconds{job="exporter"})
         for: 2m
         labels:
           severity: warning
         annotations:
-          summary: "Exporter is {{ $value | humanizeDuration }} behind raw.api_calls"
-          description: "A long Postgres transaction stalls the xid8 cursor, or S3 is failing."
+          summary: "{{ if $labels.job }}The exporter reports no export lag{{ else }}Exporter is {{ $value | humanizeDuration }} behind raw.api_calls{{ end }}"
+          description: "A long Postgres transaction stalls the xid8 cursor, S3 is failing, or the exporter is down."
 
       - alert: ETLConsumerLagGrowing
         # Total lag has been rising for 10 minutes and is not trivially small.
@@ -65,7 +72,39 @@ groups:
           severity: warning
         annotations:
           summary: "Transformer consumer lag has grown for 10 minutes"
-          description: "Transformers are slower than the publisher, stuck, or crash-looping."
+          description: "Transformers are slower than the publisher, a batch keeps failing, or a partition is halted (see ETLObjectChecksumMismatch)."
+
+      - alert: ETLServiceDown
+        # Prometheus finds the containers through Docker DNS: a stopped or
+        # crash-looping container has no target at all (absent), a hung one
+        # fails its scrape (up == 0).
+        expr: |
+          up{job=~"fetcher|exporter|publisher|transformer"} == 0
+          or absent(up{job="fetcher"})
+          or absent(up{job="exporter"})
+          or absent(up{job="publisher"})
+          or absent(up{job="transformer"})
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }} is down{{ if $labels.instance }} ({{ $labels.instance }}){{ end }}"
+          description: "Prometheus cannot scrape it, or Docker DNS knows no running container for it. Check docker compose ps and its log."
+
+      - alert: ETLPipelineNotProgressing
+        # CoinGecko calls succeed but no transformer counted a record (written,
+        # duplicate, rejected or dlq) in 15 minutes. "or vector(0)": a
+        # transformer that never wrote a batch has no etl_records_total series.
+        expr: |
+          sum(increase(etl_api_requests_total{status="200"}[15m])) > 0
+          and
+          (sum(increase(etl_records_total[15m])) or vector(0)) == 0
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "CoinGecko calls succeed but nothing reached the lake in 15 minutes"
+          description: "The exporter, the publisher (or the broker) or the transformers are stalled; check their logs and ETLServiceDown."
 
       - alert: ETLObjectChecksumMismatch
         # A write-once key already holds other bytes (PUT 412 with another

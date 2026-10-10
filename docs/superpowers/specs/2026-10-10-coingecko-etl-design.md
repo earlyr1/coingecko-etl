@@ -435,9 +435,11 @@ Labels stay low-cardinality.
 - Data stale: no successful poll for more than 2 minutes.
 - `dlq` records appeared.
 - More than 5% of responses fail S0 over 15 minutes (upstream format change).
-- Export lag above 5 minutes.
+- Export lag above 5 minutes, or no export lag reported by the exporter (only the exporter's series counts; the other services export the gauge at 0).
 - Consumer lag growing for 10 minutes.
 - Frequent 429 responses.
+- A pipeline service is down for 2 minutes: its scrape fails (`up == 0`) or it has no scrape target at all (critical).
+- The pipeline does not progress: CoinGecko calls succeed but no transformer record is counted over 15 minutes (a stalled exporter, publisher, broker or transformer).
 - An object key already holds different bytes, or a re-planned batch differs from its manifest (`etl_s3_put_total{result="mismatch"}` above 0; critical, fires at once and stays up while a transformer partition is halted, §7.4).
 
 ### 8.5 Grafana dashboard (provisioned)

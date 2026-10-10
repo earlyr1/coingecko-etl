@@ -60,8 +60,10 @@ tests:
   - name: export lag above five minutes
     interval: 1m
     input_series:
-      - series: 'etl_export_lag_seconds'
+      - series: 'etl_export_lag_seconds{job="exporter",instance="10.0.0.5:8080"}'
         values: '400x10'
+      - series: 'etl_export_lag_seconds{job="fetcher",instance="10.0.0.4:8080"}'
+        values: '0x10'
     alert_rule_test:
       - eval_time: 5m
         alertname: ETLExportLagHigh
@@ -69,7 +71,35 @@ tests:
           - exp_labels: {severity: warning}
             exp_annotations:
               summary: "Exporter is 6m 40s behind raw.api_calls"
-              description: "A long Postgres transaction stalls the xid8 cursor, or S3 is failing."
+              description: "A long Postgres transaction stalls the xid8 cursor, S3 is failing, or the exporter is down."
+
+  - name: export lag fires when the exporter is gone, even though other jobs export 0
+    interval: 1m
+    input_series:
+      - series: 'etl_export_lag_seconds{job="fetcher",instance="10.0.0.4:8080"}'
+        values: '0x10'
+      - series: 'etl_export_lag_seconds{job="publisher",instance="10.0.0.6:8080"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ETLExportLagHigh
+        exp_alerts:
+          - exp_labels: {severity: warning, job: exporter}
+            exp_annotations:
+              summary: "The exporter reports no export lag"
+              description: "A long Postgres transaction stalls the xid8 cursor, S3 is failing, or the exporter is down."
+
+  - name: no export lag alert while the exporter keeps up
+    interval: 1m
+    input_series:
+      - series: 'etl_export_lag_seconds{job="exporter",instance="10.0.0.5:8080"}'
+        values: '0 12 0 9 0 0 14 0 0 0 0'
+      - series: 'etl_export_lag_seconds{job="fetcher",instance="10.0.0.4:8080"}'
+        values: '0x10'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ETLExportLagHigh
+        exp_alerts: []
 
   - name: consumer lag growing for ten minutes
     interval: 1m
@@ -86,7 +116,7 @@ tests:
           - exp_labels: {severity: warning}
             exp_annotations:
               summary: "Transformer consumer lag has grown for 10 minutes"
-              description: "Transformers are slower than the publisher, stuck, or crash-looping."
+              description: "Transformers are slower than the publisher, a batch keeps failing, or a partition is halted (see ETLObjectChecksumMismatch)."
 
   - name: frequent 429s
     interval: 1m
@@ -132,3 +162,123 @@ tests:
             exp_annotations:
               summary: "transformer: an object key already holds different bytes"
               description: "The write-once check failed; see the ERROR log of transformer. A halted transformer partition stays stopped until the conflict is resolved and the transformer restarted."
+
+  - name: a service that fails its scrape is down
+    interval: 1m
+    input_series:
+      - series: 'up{job="fetcher",instance="10.0.0.4:8080"}'
+        values: '1x10'
+      - series: 'up{job="exporter",instance="10.0.0.5:8080"}'
+        values: '1x10'
+      - series: 'up{job="publisher",instance="10.0.0.6:8080"}'
+        values: '1 1 0 0 0 0 0 0 0 0 0'
+      - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
+        values: '1x10'
+      - series: 'up{job="transformer",instance="10.0.0.8:8080"}'
+        values: '1x10'
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ETLServiceDown
+        exp_alerts: [] # pending: for 2m
+      - eval_time: 6m
+        alertname: ETLServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: publisher, instance: "10.0.0.6:8080"}
+            exp_annotations:
+              summary: "publisher is down (10.0.0.6:8080)"
+              description: "Prometheus cannot scrape it, or Docker DNS knows no running container for it. Check docker compose ps and its log."
+
+  - name: a service without any scrape target is down
+    interval: 1m
+    input_series:
+      - series: 'up{job="fetcher",instance="10.0.0.4:8080"}'
+        values: '1x10'
+      - series: 'up{job="exporter",instance="10.0.0.5:8080"}'
+        values: '1x10'
+      - series: 'up{job="publisher",instance="10.0.0.6:8080"}'
+        values: '1x10'
+      - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
+        values: '1 1 _ _ _ _ _ _ _ _ _' # both replicas stopped: no DNS records, no target
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ETLServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: transformer}
+            exp_annotations:
+              summary: "transformer is down"
+              description: "Prometheus cannot scrape it, or Docker DNS knows no running container for it. Check docker compose ps and its log."
+
+  - name: no service-down alert while every service answers
+    interval: 1m
+    input_series:
+      - series: 'up{job="fetcher",instance="10.0.0.4:8080"}'
+        values: '1x10'
+      - series: 'up{job="exporter",instance="10.0.0.5:8080"}'
+        values: '1x10'
+      - series: 'up{job="publisher",instance="10.0.0.6:8080"}'
+        values: '1x10'
+      - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
+        values: '1x10'
+      - series: 'up{job="prometheus",instance="localhost:9090"}'
+        values: '0x10' # not a pipeline service
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ETLServiceDown
+        exp_alerts: []
+
+  - name: fetches succeed but no records reach the lake
+    interval: 1m
+    input_series:
+      - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="200"}'
+        values: '0+2x30'
+      - series: 'etl_records_total{job="transformer",instance="10.0.0.7:8080",dataset="market_snapshot",outcome="written"}'
+        values: '500x30' # flat: the publisher or the broker is stuck
+    alert_rule_test:
+      - eval_time: 4m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: [] # pending: for 5m
+      - eval_time: 20m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "CoinGecko calls succeed but nothing reached the lake in 15 minutes"
+              description: "The exporter, the publisher (or the broker) or the transformers are stalled; check their logs and ETLServiceDown."
+
+  - name: a transformer that never wrote a batch counts as no progress
+    interval: 1m
+    input_series:
+      - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="200"}'
+        values: '0+2x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "CoinGecko calls succeed but nothing reached the lake in 15 minutes"
+              description: "The exporter, the publisher (or the broker) or the transformers are stalled; check their logs and ETLServiceDown."
+
+  - name: no progress alert while records flow or while CoinGecko fails
+    interval: 1m
+    input_series:
+      - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="200"}'
+        values: '0+2x30'
+      - series: 'etl_records_total{job="transformer",instance="10.0.0.7:8080",dataset="market_snapshot",outcome="written"}'
+        values: '0+100x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: []
+
+  - name: no progress alert when no fetch succeeds (ETLDataStale covers that)
+    interval: 1m
+    input_series:
+      - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="429"}'
+        values: '0+2x30'
+      - series: 'etl_records_total{job="transformer",instance="10.0.0.7:8080",dataset="market_snapshot",outcome="written"}'
+        values: '500x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: []
