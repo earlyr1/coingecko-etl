@@ -5,6 +5,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -17,11 +19,6 @@ func TestRunDispatch(t *testing.T) {
 	}{
 		{nil, 2, "usage: etl"},
 		{[]string{"bogus"}, 2, `unknown command "bogus"`},
-		{[]string{"init"}, 1, "etl init: not implemented"},
-		{[]string{"fetcher"}, 1, "etl fetcher: not implemented"},
-		{[]string{"exporter"}, 1, "etl exporter: not implemented"},
-		{[]string{"publisher"}, 1, "etl publisher: not implemented"},
-		{[]string{"transformer"}, 1, "etl transformer: not implemented"},
 		{[]string{"help"}, 0, ""},
 	}
 	for _, c := range cases {
@@ -34,6 +31,51 @@ func TestRunDispatch(t *testing.T) {
 				t.Fatalf("stderr %q does not contain %q", stderr.String(), c.wantStderr)
 			}
 		})
+	}
+}
+
+func TestServiceRejectsBadConfig(t *testing.T) {
+	t.Setenv("ETL_LOG_DIR", t.TempDir())
+	t.Setenv("ETL_TOPIC_PARTITIONS", "six")
+	for _, svc := range []string{"init", "fetcher", "exporter", "publisher", "transformer"} {
+		var stderr bytes.Buffer
+		if code := run([]string{svc}, &bytes.Buffer{}, &stderr); code != 1 {
+			t.Fatalf("%s: exit %d, want 1", svc, code)
+		}
+		if !strings.Contains(stderr.String(), "ETL_TOPIC_PARTITIONS") {
+			t.Fatalf("%s: stderr %q does not name the bad variable", svc, stderr.String())
+		}
+	}
+}
+
+// closedAddr returns a loopback address on which nothing listens.
+func closedAddr(t *testing.T) string {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	return addr
+}
+
+func TestServiceExitsWhenPostgresUnreachable(t *testing.T) {
+	logDir := t.TempDir()
+	t.Setenv("ETL_LOG_DIR", logDir)
+	t.Setenv("ETL_PG_DSN", "postgres://etl:etl@"+closedAddr(t)+"/etl?sslmode=disable&connect_timeout=1")
+	t.Setenv("ETL_HTTP_ADDR", closedAddr(t))
+	for _, svc := range []string{"fetcher", "exporter", "publisher", "transformer"} {
+		if code := run([]string{svc}, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
+			t.Fatalf("%s: exit %d, want 1", svc, code)
+		}
+		logged, err := os.ReadFile(filepath.Join(logDir, svc, "etl.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(logged), `"msg":"service failed"`) {
+			t.Fatalf("%s: log does not record the failure:\n%s", svc, logged)
+		}
 	}
 }
 
@@ -80,14 +122,23 @@ func TestHealthcheckCommand(t *testing.T) {
 }
 
 func TestHealthcheckUnreachable(t *testing.T) {
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	addr := ln.Addr().String()
-	ln.Close() // nothing listens there any more
-	t.Setenv("ETL_HTTP_ADDR", addr)
+	t.Setenv("ETL_HTTP_ADDR", closedAddr(t))
 	if code := run([]string{"healthcheck"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
 		t.Fatalf("exit %d, want 1", code)
+	}
+}
+
+func TestLogDirPerHost(t *testing.T) {
+	t.Setenv("ETL_LOG_PER_HOST", "")
+	if got := logDir("logs"); got != "logs" {
+		t.Fatalf("logDir without ETL_LOG_PER_HOST = %q, want logs", got)
+	}
+	t.Setenv("ETL_LOG_PER_HOST", "true")
+	host, err := os.Hostname()
+	if err != nil {
+		t.Skip("no hostname")
+	}
+	if got, want := logDir("logs"), filepath.Join("logs", host); got != want {
+		t.Fatalf("logDir = %q, want %q", got, want)
 	}
 }
