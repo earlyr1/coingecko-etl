@@ -394,6 +394,197 @@ func TestExportOnceSendsInvalidRowsToDLQ(t *testing.T) {
 	}
 }
 
+// insertTxidSQL is insertSQL that also returns the row's ingest_txid.
+const insertTxidSQL = insertSQL + `, ingest_txid::text::bigint`
+
+// insertWithTxid inserts one committed ok row and returns its event id and
+// ingest_txid.
+func (e *env) insertWithTxid(t *testing.T) (string, uint64) {
+	t.Helper()
+	id, args := e.okArgs(event.SourceCoinGecko, event.EndpointMarkets)
+	var (
+		seq  int64
+		txid uint64
+	)
+	if err := e.pool.QueryRow(context.Background(), insertTxidSQL, args...).Scan(&seq, &txid); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+	return id, txid
+}
+
+// burnXidsBelow advances the transaction id counter, one autocommit
+// transaction per statement, until the next xid is `before` ids below a power
+// of ten (1000 on a fresh container). It returns that power of ten.
+func (e *env) burnXidsBelow(t *testing.T, before uint64) uint64 {
+	t.Helper()
+	current := func() uint64 {
+		var x uint64
+		// pg_current_xact_id assigns an xid to the statement's own transaction.
+		if err := e.pool.QueryRow(context.Background(), `SELECT pg_current_xact_id()::text::bigint`).Scan(&x); err != nil {
+			t.Fatalf("burn xid: %v", err)
+		}
+		return x
+	}
+	cur := current()
+	boundary := uint64(1000)
+	for boundary <= cur+before {
+		boundary *= 10
+	}
+	for cur+1 < boundary-before {
+		cur = current()
+	}
+	return boundary
+}
+
+type txidBatch struct {
+	id               int64
+	fromTxid, toTxid uint64
+	fromSeq, toSeq   int64
+	rows             int
+	status           string
+}
+
+func (e *env) txidLedger(t *testing.T) []txidBatch {
+	t.Helper()
+	rows, err := e.pool.Query(context.Background(), `
+SELECT batch_id, from_txid::text::bigint, from_seq, to_txid::text::bigint, to_seq, row_count, status
+FROM pipeline.export_batches ORDER BY batch_id`)
+	if err != nil {
+		t.Fatalf("ledger: %v", err)
+	}
+	defer rows.Close()
+	var out []txidBatch
+	for rows.Next() {
+		var b txidBatch
+		if err := rows.Scan(&b.id, &b.fromTxid, &b.fromSeq, &b.toTxid, &b.toSeq, &b.rows, &b.status); err != nil {
+			t.Fatalf("ledger scan: %v", err)
+		}
+		out = append(out, b)
+	}
+	return out
+}
+
+// checkChain asserts that every batch starts exactly where the previous one
+// ended (the first one at (0,0)) and is exported.
+func checkChain(t *testing.T, l []txidBatch) {
+	t.Helper()
+	var prevTxid uint64
+	var prevSeq int64
+	for _, b := range l {
+		if b.fromTxid != prevTxid || b.fromSeq != prevSeq {
+			t.Fatalf("batch %d starts at (%d,%d), want the previous end (%d,%d); ledger=%+v", b.id, b.fromTxid, b.fromSeq, prevTxid, prevSeq, l)
+		}
+		if b.status != "exported" {
+			t.Fatalf("batch %d status %q, want exported", b.id, b.status)
+		}
+		prevTxid, prevSeq = b.toTxid, b.toSeq
+	}
+}
+
+// TestExportCursorCrossesTxidPowerOfTen: transaction ids travel as text, and
+// text sorts "1000" before "999". With one row per batch on each side of the
+// boundary, the cursor must still be the true maximum: every claim starts
+// where the previous batch ended, and the lag drops to 0 after each export.
+func TestExportCursorCrossesTxidPowerOfTen(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	boundary := e.burnXidsBelow(t, 12)
+
+	var ids []string
+	var txids []uint64
+	for len(txids) == 0 || txids[len(txids)-1] < boundary+5 {
+		id, txid := e.insertWithTxid(t)
+		ids, txids = append(ids, id), append(txids, txid)
+		if n := e.exportOnce(t, 500); n != 1 {
+			t.Fatalf("ExportOnce after the row at txid %d = %d, want 1", txid, n)
+		}
+		txidS, seq, err := lastBatchEnd(ctx, e.pool, false)
+		if err != nil || txidS != fmt.Sprint(txid) {
+			t.Fatalf("cursor after the row at txid %d = (%s,%d) err=%v, want txid %d", txid, txidS, seq, err, txid)
+		}
+		if got := promtest.ToFloat64(e.m.ExportLag); got != 0 {
+			t.Fatalf("export lag = %v after exporting the row at txid %d, want 0", got, txid)
+		}
+	}
+	if txids[0] >= boundary || txids[len(txids)-1] < boundary {
+		t.Fatalf("test setup: txids %v do not straddle %d", txids, boundary)
+	}
+
+	l := e.txidLedger(t)
+	if len(l) != len(txids) {
+		t.Fatalf("ledger has %d batches, want %d (one per row): %+v", len(l), len(txids), l)
+	}
+	checkChain(t, l)
+	for i, b := range l {
+		if b.rows != 1 || b.toTxid != txids[i] {
+			t.Fatalf("batch %d = %+v, want 1 row ending at txid %d", b.id, b, txids[i])
+		}
+	}
+	if got := e.exportedEventIDs(t); fmt.Sprint(got) != fmt.Sprint(ids) {
+		t.Fatalf("exported %v, want %v", got, ids)
+	}
+	if got := promtest.ToFloat64(e.m.ExportBatches.WithLabelValues("error")); got != 0 {
+		t.Fatalf("export_batches_total{error} = %v, want 0", got)
+	}
+}
+
+// TestExportClaimStraddlingTxidPowerOfTen: a claim whose rows lie on both
+// sides of a power of ten must take the lowest rows first (LIMIT) and store
+// bounds and a row count that readRange finds again.
+func TestExportClaimStraddlingTxidPowerOfTen(t *testing.T) {
+	e := setup(t)
+	boundary := e.burnXidsBelow(t, 5)
+
+	var ids []string
+	var txids []uint64
+	for i := 0; i < 9; i++ {
+		id, txid := e.insertWithTxid(t)
+		ids, txids = append(ids, id), append(txids, txid)
+	}
+	if txids[3] >= boundary || txids[4] >= boundary || txids[7] < boundary {
+		t.Fatalf("test setup: txids %v, want rows 0-4 below %d and row 7 at or above it", txids, boundary)
+	}
+
+	// max 4: batches [0..3], [4..7] (straddles the boundary), [8].
+	for i, want := range []int{4, 4, 1, 0} {
+		if n := e.exportOnce(t, 4); n != want {
+			t.Fatalf("ExportOnce #%d = %d, want %d", i+1, n, want)
+		}
+	}
+	l := e.txidLedger(t)
+	if len(l) != 3 {
+		t.Fatalf("ledger has %d batches, want 3: %+v", len(l), l)
+	}
+	checkChain(t, l)
+	for i, last := range []int{3, 7, 8} {
+		wantRows := []int{4, 4, 1}[i]
+		if l[i].toTxid != txids[last] || l[i].rows != wantRows {
+			t.Fatalf("batch %d = %+v, want %d rows ending at txid %d", l[i].id, l[i], wantRows, txids[last])
+		}
+	}
+	if got := e.exportedEventIDs(t); fmt.Sprint(got) != fmt.Sprint(ids) {
+		t.Fatalf("exported %v, want %v in ingest_txid order", got, ids)
+	}
+}
+
+// TestExportOnceCountsClaimFailures: a claim that fails never reaches
+// exportBatch's counter, so ExportOnce counts it.
+func TestExportOnceCountsClaimFailures(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+	// The ledger stays readable, the claim's range select fails.
+	if _, err := e.pool.Exec(ctx, `ALTER TABLE raw.api_calls RENAME TO api_calls_gone`); err != nil {
+		t.Fatalf("rename: %v", err)
+	}
+	if _, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, 500); err == nil || !strings.Contains(err.Error(), "select range") {
+		t.Fatalf("ExportOnce without raw.api_calls = %v, want a select range error", err)
+	}
+	if got := promtest.ToFloat64(e.m.ExportBatches.WithLabelValues("error")); got != 1 {
+		t.Fatalf("export_batches_total{error} = %v after a failed claim, want 1", got)
+	}
+}
+
 func TestRunExportsAndStopsOnCancel(t *testing.T) {
 	e := setup(t)
 	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)

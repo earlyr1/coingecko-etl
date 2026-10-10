@@ -156,12 +156,15 @@ func rowToEvent(r apiRow) (event.RawEvent, error) {
 // ExportOnce first finishes batches left in status 'claimed' by a previous
 // (crashed) run, then claims and exports at most one new batch of up to max
 // rows. It returns the number of rows covered by the batches it exported.
+// Every failure counts in etl_export_batches_total{result="error"}: exportBatch
+// counts its own, and a failure before any batch exists is counted here.
 func ExportOnce(ctx context.Context, pool *pgxpool.Pool, s3c *s3.Client, reg *validation.Registry, m *obs.Metrics, log *slog.Logger, max int) (int, error) {
 	exported := 0
 	defer updateLag(ctx, pool, m, log)
 
 	pending, err := claimedBatches(ctx, pool)
 	if err != nil {
+		m.ExportBatches.WithLabelValues("error").Inc()
 		return 0, err
 	}
 	for _, b := range pending {
@@ -174,6 +177,7 @@ func ExportOnce(ctx context.Context, pool *pgxpool.Pool, s3c *s3.Client, reg *va
 
 	b, ok, err := claimNext(ctx, pool, max)
 	if err != nil {
+		m.ExportBatches.WithLabelValues("error").Inc()
 		return exported, err
 	}
 	if !ok {
@@ -223,20 +227,19 @@ func claimNext(ctx context.Context, pool *pgxpool.Pool, max int) (batch, bool, e
 		return b, false, fmt.Errorf("exporter: watermark: %w", err)
 	}
 
-	b.FromTxid, b.FromSeq = "0", 0
-	err = tx.QueryRow(ctx, `
-SELECT to_txid::text, to_seq FROM pipeline.export_batches
-ORDER BY to_txid DESC, to_seq DESC LIMIT 1`).Scan(&b.FromTxid, &b.FromSeq)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	b.FromTxid, b.FromSeq, err = lastBatchEnd(ctx, tx, false)
+	if err != nil {
 		return b, false, fmt.Errorf("exporter: cursor: %w", err)
 	}
 
+	// Sort on the xid8 column, not on its text alias (see lastBatchEnd): the
+	// last row read is the batch's upper bound.
 	rows, err := tx.Query(ctx, `
-SELECT ingest_txid::text, seq FROM raw.api_calls
+SELECT ingest_txid::text AS txid_s, seq FROM raw.api_calls
 WHERE outcome = 'ok'
   AND (ingest_txid, seq) > ($1::text::xid8, $2::bigint)
   AND ingest_txid < $3::text::xid8
-ORDER BY ingest_txid, seq
+ORDER BY api_calls.ingest_txid, api_calls.seq
 LIMIT $4`, b.FromTxid, b.FromSeq, hi, max)
 	if err != nil {
 		return b, false, fmt.Errorf("exporter: select range: %w", err)
@@ -275,6 +278,35 @@ VALUES ($1, $2::text::xid8, $3, $4::text::xid8, $5, $6::text::xid8, $7, $8, $9)`
 		return b, false, fmt.Errorf("exporter: commit claim: %w", err)
 	}
 	return b, true, nil
+}
+
+// querier is the part of pgxpool.Pool and pgx.Tx that lastBatchEnd needs.
+type querier interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+}
+
+// lastBatchEnd returns the upper bound (to_txid, to_seq) of the highest batch
+// in the ledger, or of the highest exported batch when exportedOnly is set;
+// ("0", 0) when there is none.
+//
+// The text cast gets its own alias and ORDER BY names the table column: an
+// unqualified "to_txid" would resolve to the text output column, and text
+// sorts "996" above "1007", which sent the cursor backwards once txids
+// passed 1000.
+func lastBatchEnd(ctx context.Context, q querier, exportedOnly bool) (txid string, seq int64, err error) {
+	sql := `
+SELECT to_txid::text AS to_txid_s, to_seq FROM pipeline.export_batches
+ORDER BY export_batches.to_txid DESC, export_batches.to_seq DESC LIMIT 1`
+	if exportedOnly {
+		sql = `
+SELECT to_txid::text AS to_txid_s, to_seq FROM pipeline.export_batches WHERE status = 'exported'
+ORDER BY export_batches.to_txid DESC, export_batches.to_seq DESC LIMIT 1`
+	}
+	err = q.QueryRow(ctx, sql).Scan(&txid, &seq)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "0", 0, nil
+	}
+	return txid, seq, err
 }
 
 // exportBatch runs steps 2-4 for a claimed batch. No transaction is open
@@ -380,7 +412,7 @@ FROM raw.api_calls
 WHERE outcome = 'ok'
   AND (ingest_txid, seq) >  ($1::text::xid8, $2::bigint)
   AND (ingest_txid, seq) <= ($3::text::xid8, $4::bigint)
-ORDER BY ingest_txid, seq`, b.FromTxid, b.FromSeq, b.ToTxid, b.ToSeq)
+ORDER BY api_calls.ingest_txid, api_calls.seq`, b.FromTxid, b.FromSeq, b.ToTxid, b.ToSeq)
 	if err != nil {
 		return nil, fmt.Errorf("exporter: read batch %d: %w", b.ID, err)
 	}
@@ -472,11 +504,8 @@ func updateLag(ctx context.Context, pool *pgxpool.Pool, m *obs.Metrics, log *slo
 	if ctx.Err() != nil {
 		return
 	}
-	txid, seq := "0", int64(0)
-	err := pool.QueryRow(ctx, `
-SELECT to_txid::text, to_seq FROM pipeline.export_batches WHERE status = 'exported'
-ORDER BY to_txid DESC, to_seq DESC LIMIT 1`).Scan(&txid, &seq)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	txid, seq, err := lastBatchEnd(ctx, pool, true)
+	if err != nil {
 		log.Warn("export lag: cursor query failed", "stage", stage, "err", err)
 		return
 	}
