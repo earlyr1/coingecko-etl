@@ -15,14 +15,14 @@ Use the Kafka protocol with the franz-go client (`kgo`, `kadm`, `kprom`), and ru
 
 | Broker | Verdict |
 |---|---|
-| Redpanda | Chosen locally: Kafka protocol in one C++ binary, no JVM, starts in ~2 s, ~200 MiB |
+| Redpanda | Chosen locally: Kafka protocol in one C++ binary, no JVM, starts in ~2 s, ~300 MiB |
 | Apache Kafka, Amazon MSK, Confluent Cloud | Production targets; drop-in because the code speaks the protocol |
 | NATS JetStream, Apache Pulsar | Viable with caveats: different consumer model or heavier operations; weaker data-engineering ecosystem |
 | RabbitMQ classic queues, Redis Streams, SQS, Pub/Sub | Rejected: no offset replay or per-key ordering at scale |
 
 ## Consequences
 
-- The same client code was verified against both Apache Kafka 4.3.1 and Redpanda v26.2.4 during design; the integration tests run against Redpanda v26.2.4.
+- During design, a franz-go harness using the same client patterns (kgo/kadm, keyed produce, consumer group with manual commits) ran against both Apache Kafka 4.3.1 and Redpanda v26.2.4; this project's integration tests run against Redpanda v26.2.4 only.
 - Redpanda lacks the Kafka Connect ecosystem; the design does not use it (Debezium and the S3 sink are documented as production alternatives).
 - Redpanda is licensed under BSL 1.1, which permits this use; production would use MSK.
 - Broker transactions (exactly-once) are not used: the S3 sink is outside Kafka anyway, and idempotent writes plus the dedup claims give exactly-once content in the processed zone.
