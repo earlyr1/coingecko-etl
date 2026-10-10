@@ -1,0 +1,7 @@
+# local data lake, logs and S3 sidecar metadata
+/data/
+/logs/
+/.s3meta/
+.env
+# build
+/bin/
