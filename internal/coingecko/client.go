@@ -10,6 +10,7 @@ import (
 	"encoding/json/jsontext"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"math/rand/v2"
 	"net/http"
@@ -28,6 +29,7 @@ import (
 const (
 	defaultTimeout    = 10 * time.Second
 	defaultCooldown   = 60 * time.Second // used on 429 without a usable Retry-After
+	maxCooldown       = 15 * time.Minute // cap on a Retry-After cooldown: the header is untrusted
 	backoffBase       = 2 * time.Second  // first cooldown after a 5xx / timeout / connection error
 	backoffMax        = 60 * time.Second // cap of the exponential backoff
 	maxBodyBytes      = 32 << 20         // a /coins/{id} body is ~100 KB
@@ -43,6 +45,7 @@ type Client struct {
 	lim     *Limiter
 	now     func() time.Time
 	timeout time.Duration // per request; tests shorten it
+	log     *slog.Logger  // client-side warnings; discarded unless SetLogger is called
 
 	// Exponential backoff with jitter on transient failures (spec §3.2).
 	// failures is only touched while Fetch holds the limiter's in-flight
@@ -72,9 +75,18 @@ func NewClient(baseURL, apiKey string, hc *http.Client, l *Limiter, now func() t
 		lim:         l,
 		now:         now,
 		timeout:     defaultTimeout,
+		log:         slog.New(slog.DiscardHandler),
 		backoffBase: backoffBase,
 		backoffMax:  backoffMax,
 		jitter:      equalJitter,
+	}
+}
+
+// SetLogger sets the logger for the client's own warnings (a Retry-After
+// above the cap). Without it they are discarded.
+func (c *Client) SetLogger(l *slog.Logger) {
+	if l != nil {
+		c.log = l
 	}
 }
 
@@ -169,7 +181,8 @@ func requestURL(baseURL string, req event.Request) string {
 // number text verbatim, so one call stays one JSONL line and one message.
 // PayloadSHA256 is the hash of exactly the stored bytes.
 //
-// On HTTP 429 it calls Cooldown(Retry-After, or 60 s) on the limiter. On a
+// On HTTP 429 it calls Cooldown(Retry-After capped at 15 min, or 60 s
+// without a usable Retry-After) on the limiter. On a
 // 5xx, a 2xx with a non-JSON body, a timeout or a connection error it calls
 // Cooldown with an exponential backoff (2 s, 4 s, ... capped at 60 s, with
 // jitter). Any other non-429 response (ok, 3xx, non-429 4xx) resets the
@@ -225,11 +238,7 @@ func (c *Client) Fetch(ctx context.Context, endpoint string, req event.Request) 
 	ev.HTTP = httpMeta(resp, latency, c.now())
 	switch {
 	case resp.StatusCode == http.StatusTooManyRequests:
-		cd := defaultCooldown
-		if ra := ev.HTTP.RetryAfterS; ra != nil && *ra > 0 {
-			cd = time.Duration(*ra) * time.Second
-		}
-		c.lim.Cooldown(cd)
+		c.lim.Cooldown(c.retryAfterCooldown(ev.HTTP.RetryAfterS))
 	case resp.StatusCode >= 500:
 		c.backoff()
 	}
@@ -275,6 +284,26 @@ func (c *Client) Fetch(ctx context.Context, endpoint string, req event.Request) 
 	ev.PayloadSHA256 = &sha
 	ev.IdempotencyKey = &key
 	return ev
+}
+
+// retryAfterCooldown turns the Retry-After of a 429, already parsed into
+// seconds from either header form, into the limiter cooldown:
+// defaultCooldown without a usable value, never more than maxCooldown. The
+// header is untrusted, so it is clamped in seconds before the multiplication:
+// a huge value would overflow time.Duration (an arbitrary or negative
+// cooldown) and a large valid one would stop polling for months. The event
+// keeps the header's own value in http.retry_after_s.
+func (c *Client) retryAfterCooldown(ra *int) time.Duration {
+	if ra == nil || *ra <= 0 {
+		return defaultCooldown
+	}
+	limit := int(maxCooldown / time.Second)
+	if *ra > limit {
+		c.log.Warn("Retry-After above the cooldown cap; cooling down for the cap instead",
+			"retry_after_s", *ra, "cooldown_s", limit)
+	}
+	secs := min(*ra, limit)
+	return time.Duration(secs) * time.Second
 }
 
 // failed fills the outcome fields of a non-ok event: no payload, no hash, no key.

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -221,6 +222,38 @@ func TestFetch429SetsCooldown(t *testing.T) {
 		t.Error("limiter still cooling down after Retry-After elapsed")
 	}
 	assertS1(t, ev)
+}
+
+// Retry-After is untrusted: a huge delay would overflow time.Duration (and
+// wrap to no cooldown at all), a large valid one would stop polling for
+// months. Both header forms are capped at maxCooldown, with a warning.
+func TestFetch429ClampsRetryAfter(t *testing.T) {
+	yearAhead := fixedNow.Add(365 * 24 * time.Hour).UTC().Format(http.TimeFormat)
+	for name, ra := range map[string]string{"delay-seconds": "99999999999", "HTTP-date a year ahead": yearAhead} {
+		t.Run(name, func(t *testing.T) {
+			c, lim := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+				w.Header().Set("Retry-After", ra)
+				w.WriteHeader(http.StatusTooManyRequests)
+			}, "")
+			var logs bytes.Buffer
+			c.SetLogger(slog.New(slog.NewJSONHandler(&logs, nil)))
+			before := time.Now()
+			ev := c.Fetch(context.Background(), event.EndpointMarkets, MarketsRequest(100))
+			if ev.HTTP == nil || ev.HTTP.Status != 429 || ev.HTTP.RetryAfterS == nil || *ev.HTTP.RetryAfterS <= int(maxCooldown/time.Second) {
+				t.Fatalf("http = %+v, want 429 with the header's own retry_after_s", ev.HTTP)
+			}
+			if lim.Allowed(before.Add(maxCooldown - time.Second)) {
+				t.Error("cooldown shorter than maxCooldown")
+			}
+			if !lim.Allowed(time.Now().Add(maxCooldown + time.Second)) {
+				t.Error("cooldown longer than maxCooldown")
+			}
+			if !strings.Contains(logs.String(), `"level":"WARN"`) || !strings.Contains(logs.String(), "Retry-After") {
+				t.Errorf("no clamp warning logged: %s", logs.String())
+			}
+			assertS1(t, ev)
+		})
+	}
 }
 
 func TestFetch429WithoutRetryAfterCoolsDown60s(t *testing.T) {

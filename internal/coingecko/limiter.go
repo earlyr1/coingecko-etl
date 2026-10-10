@@ -43,7 +43,9 @@ func (l *Limiter) Wait(ctx context.Context) error {
 }
 
 // Cooldown forbids any request start before now+d. A shorter cooldown never
-// shortens one that is already active.
+// shortens one that is already active. d comes from the client: a 429's
+// Retry-After capped at 15 minutes (60 s without one), or a backoff of at
+// most 60 s.
 func (l *Limiter) Cooldown(d time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

@@ -205,6 +205,7 @@ func buildService(ctx context.Context, cfg config.Config, reg *prometheus.Regist
 		// 10 s context deadline, the single source of the per-request limit.
 		hc := &http.Client{}
 		cg := coingecko.NewClient(cfg.CoinGeckoBaseURL, cfg.CoinGeckoAPIKey, hc, lim, time.Now)
+		cg.SetLogger(log)
 		return func(ctx context.Context) error {
 			return fetcher.Run(ctx, cfg, cg, lim, pool, m, log)
 		}, cleanup, nil

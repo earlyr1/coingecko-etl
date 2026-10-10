@@ -164,7 +164,7 @@ Five ways to look at it:
 | `/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&price_change_percentage=1h,24h,7d&sparkline=false&precision=full` | every 30 s | a flat 30-second time series of the top 100 coins |
 | `/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | every 60 s, rotating over bitcoin, ethereum, tether, usd-coin, 15 s after the markets call | deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, contracts per chain |
 
-The keyless CoinGecko tier allows a dynamic 10–30 calls per minute per IP; we saw HTTP 429 with `Retry-After: 60` on the sixth call within 27 s. The fetcher therefore spends ~3 calls per minute (at least 15 s between calls), keeps one request in flight with a 10 s timeout per request, honours `Retry-After`, backs off exponentially with jitter on 5xx and network errors, and skips ticks instead of queueing them.
+The keyless CoinGecko tier allows a dynamic 10–30 calls per minute per IP; we saw HTTP 429 with `Retry-After: 60` on the sixth call within 27 s. The fetcher therefore spends ~3 calls per minute (at least 15 s between calls), keeps one request in flight with a 10 s timeout per request, honours `Retry-After` (capped at 15 minutes, since the header is untrusted), backs off exponentially with jitter on 5xx and network errors, and skips ticks instead of queueing them.
 
 ### Raw zone
 
