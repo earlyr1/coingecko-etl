@@ -4,7 +4,9 @@ COMPOSE ?= docker compose
 BIN := bin/etl
 
 # Files written through bind mounts (./data, ./logs, ./.s3meta) belong to the
-# invoking user, so the containers run with the same uid/gid (see docker-compose.yml).
+# invoking user, so the containers run with the same uid/gid (see
+# docker-compose.yml). make passes them to compose; `up` also writes them into
+# a new .env, so plain `docker compose` commands later use the same ids.
 export ETL_UID ?= $(shell id -u)
 export ETL_GID ?= $(shell id -g)
 
@@ -18,9 +20,10 @@ DEMO_WAIT ?= 150
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -o $(BIN) ./cmd/etl
 
-# All tests, including Docker-backed integration tests (skipped when Docker is unavailable).
+# All tests, including Docker-backed integration tests (skipped when Docker is
+# unavailable). -p 2 limits how many packages start containers at once (as in CI).
 test:
-	$(GO) test -race -count=1 ./...
+	$(GO) test -race -p 2 -count=1 -timeout 15m ./...
 
 # Unit tests only: integration tests skip themselves under -short.
 test-unit:
@@ -40,7 +43,7 @@ alerts-test:
 
 up:
 	mkdir -p data logs .s3meta
-	@test -f .env || cp .env.example .env
+	@test -f .env || sed -e "s/^ETL_UID=.*/ETL_UID=$$(id -u)/" -e "s/^ETL_GID=.*/ETL_GID=$$(id -g)/" .env.example > .env
 	$(COMPOSE) up -d --build
 
 down:
