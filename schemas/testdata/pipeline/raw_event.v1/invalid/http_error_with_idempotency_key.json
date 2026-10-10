@@ -1,0 +1,2 @@
+{"expect":{"instance_location":"/idempotency_key","keyword":"type"},
+ "doc":{"schema_version":1,"event_id":"0199d0a6-0000-7000-8000-000000000012","idempotency_key":"3f1f2b9d8e1101a12543a8440199d0a46c1e7cc29a513f1f2b9d8e1101a12543","source":"coingecko","endpoint":"coins_markets","request":{"path":"/coins/markets","params":{}},"fetched_at":"2026-10-10T10:03:00.000Z","outcome":"http_error","http":{"status":503,"latency_ms":80,"date":null,"age_s":null,"cf_cache_status":null,"etag":null,"retry_after_s":null},"error":"HTTP 503: unavailable","payload_sha256":null,"payload":null}}

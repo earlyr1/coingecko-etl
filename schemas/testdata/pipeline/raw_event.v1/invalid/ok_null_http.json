@@ -1,0 +1,2 @@
+{"expect":{"instance_location":"/http","keyword":"type"},
+ "doc":{"schema_version":1,"event_id":"0199d0a6-0000-7000-8000-000000000014","idempotency_key":"3f1f2b9d8e1101a12543a8440199d0a46c1e7cc29a513f1f2b9d8e1101a12543","source":"coingecko","endpoint":"coins_markets","request":{"path":"/coins/markets","params":{}},"fetched_at":"2026-10-10T10:03:30.000Z","outcome":"ok","http":null,"error":null,"payload_sha256":"4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945","payload":[]}}

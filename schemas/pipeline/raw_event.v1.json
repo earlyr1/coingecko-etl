@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://schemas.cg-etl.internal/pipeline/raw_event.v1.json",
   "title": "S1 raw event: one CoinGecko HTTP call (raw.api_calls row = raw JSONL line = Kafka message value)",
-  "description": "STRICT. Mirrors event.RawEvent; every key is always present because the Go struct has no omitempty. payload is the upstream body verbatim and is validated separately against S0.",
+  "description": "STRICT. Mirrors event.RawEvent; every key is always present because the Go struct has no omitempty. payload is the upstream body as the fetcher stored it (verbatim, or compacted when it contained line breaks) and is validated separately against S0.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -57,7 +57,7 @@
     "error": { "type": ["string", "null"] },
     "payload_sha256": { "type": ["string", "null"], "pattern": "^[0-9a-f]{64}$" },
     "payload": {
-      "description": "Upstream response body embedded verbatim (any JSON value); JSON null when the call failed."
+      "description": "Upstream response body as stored by the fetcher, embedded verbatim (any JSON value); JSON null when the call failed."
     }
   },
   "if": {
@@ -65,15 +65,21 @@
     "required": ["outcome"]
   },
   "then": {
+    "description": "ok: a 2xx response with its body, hash and idempotency key.",
+    "required": ["http"],
     "properties": {
+      "http": { "type": "object" },
       "payload": { "not": { "type": "null" } },
       "idempotency_key": { "$ref": "../common/defs.v1.json#/$defs/sha256_hex" },
       "payload_sha256": { "$ref": "../common/defs.v1.json#/$defs/sha256_hex" }
     }
   },
   "else": {
+    "description": "http_error / network_error: no body, so no hash and no idempotency key.",
     "properties": {
-      "payload": { "type": "null" }
+      "payload": { "type": "null" },
+      "idempotency_key": { "type": "null" },
+      "payload_sha256": { "type": "null" }
     }
   }
 }

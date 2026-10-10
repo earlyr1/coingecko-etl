@@ -1,0 +1,2 @@
+{"expect":{"instance_location":"/payload_sha256","keyword":"type"},
+ "doc":{"schema_version":1,"event_id":"0199d0a6-0000-7000-8000-000000000013","idempotency_key":null,"source":"coingecko","endpoint":"coin_detail","request":{"path":"/coins/bitcoin","params":{}},"fetched_at":"2026-10-10T10:03:15.000Z","outcome":"network_error","http":null,"error":"dial tcp: i/o timeout","payload_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","payload":null}}
