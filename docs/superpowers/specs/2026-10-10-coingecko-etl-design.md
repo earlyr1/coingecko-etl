@@ -114,7 +114,7 @@ The design needs a replayable log, per-key ordering within partitions, and consu
 | Pipeline state | Postgres schema `pipeline`; Kafka Streams / goka rejected (JVM-only / no transactions) |
 | Schema registry, Kafka Connect | Not used; README production notes |
 | Bootstrapping | One idempotent `etl init` for Postgres migrations, topics and buckets, started after its dependencies are healthy |
-| Logs | `logs/<service>/etl.log` + stdout |
+| Logs | One file per replica: `logs/<service>/etl.log`, transformer replicas `logs/<container id>/transformer/etl.log`; + stdout |
 | Monitoring | Prometheus + Grafana with alert rules and a provisioned dashboard |
 | Cleaning | Empty records → `rejected/`; questionable records kept with flags |
 | Fetcher scope | Transport only; source-schema (S0) validation lives in the transformer |
@@ -425,7 +425,7 @@ Labels stay low-cardinality.
 
 ### 8.3 Logs
 
-`log/slog` JSON handler, UTC time, fields `service`, `stage`, `event_id`, `batch`. Written to `logs/<service>/etl.log` and stdout (one writer per file; no shared file across containers). Covers API success/failure, transformation errors, and data saved.
+`log/slog` JSON handler, UTC time, fields `service`, `stage`, `event_id`, `batch`. Written to stdout and to one file per replica: `logs/<service>/etl.log`, and `logs/<container id>/transformer/etl.log` for each transformer replica (one writer per file; no shared file across containers). Covers API success/failure, transformation errors, and data saved.
 
 ### 8.4 Alerts (Prometheus rules)
 

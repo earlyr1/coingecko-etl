@@ -896,7 +896,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           </details>
         </details>
         <details><summary>.s3meta/ <span class="muted">· sidecar metadata</span></summary></details>
-        <details><summary>logs/ <span class="muted">· &lt;service&gt;/etl.log</span></summary></details>
+        <details><summary>logs/ <span class="muted">· one etl.log per replica</span></summary></details>
       </div>
       <div class="panel" id="file-view" style="display:grid;gap:10px;align-content:start"></div>
     </div>
@@ -1588,7 +1588,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     { area: "Delivery", topic: "Fetcher", d: "transport only", why: "No business logic on the write path into Postgres; broken payloads go to dlq and can be replayed.", alt: "S0 checks plus a flag column in the fetcher: duplicated work." },
     { area: "Operations", topic: "Bootstrapping", d: "one idempotent etl init", why: "Tables, topic and buckets described in code in one place.", alt: "Postgres init scripts: run once, unversioned. A shell topic container: one more part." },
     { area: "Operations", topic: "DLQ", d: "a bucket, not a topic", why: "Two writers run before the broker; write-once naming keeps retries from duplicating entries.", alt: "A dlq topic: easy replay, but outside the batch manifest." },
-    { area: "Operations", topic: "Logs", d: "one writer per file", why: "No two containers append to the same file; each transformer replica gets its own.", alt: "One shared logs/etl.log: interleaved lines possible." },
+    { area: "Operations", topic: "Logs", d: "one log file per replica", why: "No two containers append to the same file; each transformer replica gets its own.", alt: "One shared logs/etl.log: interleaved lines possible." },
     { area: "Data", topic: "Cleaning", d: "reject empty, flag questionable", why: "Nothing disappears silently; readers decide about stale rows.", alt: "Dropping questionable rows: stale coins vanish from the series." },
     { area: "Data", topic: "Numbers", d: "money as decimal strings", why: "Values pass 2^53 (bitcoin's VND market cap), where float64 stops holding every integer.", alt: "Plain JSON numbers: precision depends on the reader." }
   ];

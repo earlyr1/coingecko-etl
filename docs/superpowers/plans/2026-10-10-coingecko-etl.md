@@ -23,7 +23,7 @@
 - Postgres `raw.api_calls.payload` is type `json` (byte-exact), never `jsonb`.
 - No `now()`/`time.Now()` inside transforms or serialization; time comes from messages or the batch manifest.
 - Never hold a Postgres transaction across S3 or broker I/O.
-- Logs: `log/slog` JSON, UTC, written to `logs/<service>/etl.log` and stdout.
+- Logs: `log/slog` JSON, UTC, written to stdout and to one file per replica: `logs/<service>/etl.log`, transformer replicas `logs/<container id>/transformer/etl.log`.
 - Every long-running service serves `/healthz`, `/readyz`, `/metrics` on `:8080`.
 - CoinGecko request budget: ~3 calls/min, one request in flight, honor `Retry-After`, skip ticks instead of queueing.
 - Commit after every task with a message ending in `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
@@ -18172,7 +18172,7 @@ The assignment leaves some points open. This is how they were read:
 - **"Timestamps in UTC ISO 8601"**: RFC 3339 with milliseconds and a `Z` suffix.
 - **Duplicates** come in two kinds and both are removed from the processed zone: redelivered messages (same event) and true duplicates (the same snapshot polled twice, or the same record in two messages).
 - **Questionable data** is kept with flags (`is_stale`, `is_inactive`, `is_anomaly`) instead of being dropped; only empty or unusable records are rejected.
-- **"`logs/etl.log`"**: one file per service, `logs/<service>/etl.log`, because several containers cannot safely append to one file.
+- **"`logs/etl.log`"**: one file per replica, `logs/<service>/etl.log`, and `logs/<container id>/transformer/etl.log` for each transformer replica, because several containers cannot safely append to one file.
 - **Scale**: the free CoinGecko tier caps the volume at a few calls per minute; the design does not depend on that (see scalability below).
 
 ## Productionization
