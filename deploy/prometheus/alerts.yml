@@ -67,6 +67,20 @@ groups:
           summary: "Transformer consumer lag has grown for 10 minutes"
           description: "Transformers are slower than the publisher, stuck, or crash-looping."
 
+      - alert: ETLObjectChecksumMismatch
+        # A write-once key already holds other bytes (PUT 412 with another
+        # sha256), or a re-planned transformer batch differs from its manifest.
+        # The exporter, publisher and transformer count it. The transformer
+        # halts the affected partition and keeps running, so the counter, and
+        # this alert, stay up until a human resolves the conflict and restarts it.
+        expr: sum by (job) (etl_s3_put_total{result="mismatch"}) > 0
+        for: 0m
+        labels:
+          severity: critical
+        annotations:
+          summary: "{{ $labels.job }}: an object key already holds different bytes"
+          description: "The write-once check failed; see the ERROR log of {{ $labels.job }}. A halted transformer partition stays stopped until the conflict is resolved and the transformer restarted."
+
       - alert: ETLFrequentRateLimiting
         expr: sum(increase(etl_api_rate_limited_total[15m])) >= 3
         labels:

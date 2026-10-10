@@ -263,6 +263,8 @@ The content hash covers business fields only, so the same record arriving in two
 
 **Transformer batch.** A batch is a contiguous offset range of one partition. (1) Input checks without the database. (2) A short transaction records the range in `pipeline.consumer_batches` (`planned`), claims keys, decides, validates, and stores the object keys and checksums. (3) Objects are written with `If-None-Match: *`. (4) The batch is marked `written`. (5) The offset is committed. On partition assignment the manifest decides: `written` → skip past it, `planned` → reprocess exactly that range.
 
+If a key already holds different bytes (412 with another checksum), or a re-planned batch would store other checksums than the manifest, the transformer halts that partition in place: it stops fetching it, commits nothing, keeps reporting its growing lag, keeps the other partitions and `/metrics` running, and `ETLObjectChecksumMismatch` fires until a human resolves the conflict and restarts the transformer.
+
 | Crash point | Recovery | Loss | Duplicates |
 |---|---|---|---|
 | before the first transaction commits | the batch starts over | no | no |
@@ -316,6 +318,7 @@ The rules are in `deploy/prometheus/alerts.yml` and have unit tests (`make alert
 | `ETLExportLagHigh` | export lag above 5 minutes | a long Postgres transaction, S3 failures, exporter down |
 | `ETLConsumerLagGrowing` | consumer lag has grown for 10 minutes | transformers too slow, stuck or crash-looping |
 | `ETLFrequentRateLimiting` | 3 or more HTTP 429 responses in 15 minutes | another client on the same IP, or a too aggressive schedule |
+| `ETLObjectChecksumMismatch` (critical) | an object key already holds different bytes, or a re-planned transformer batch differs from its manifest; fires at once and stays up | the lake (`./data`, `./.s3meta`) was kept while Postgres and Redpanda were reset (or the reverse), a non-deterministic transform, or a foreign writer; the transformer halts that partition, the exporter retries the batch every 15 s |
 
 Alertmanager is not part of the stack; in production the rules route to on-call through Alertmanager or Grafana alerting.
 

@@ -20,6 +20,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/prometheus/client_golang/prometheus"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kgo"
 )
@@ -423,5 +424,117 @@ func TestRunReportsLagWhileBatchFails(t *testing.T) {
 	}
 	if v, ok := lagSeries(t, preg, "0"); ok {
 		t.Errorf("lag series still exported (%v) after the replica left the group", v)
+	}
+}
+
+// A batch whose processed object already holds other bytes halts its
+// partition in place (spec §7.4 "alert and stop"): Run keeps running, the
+// partition is neither committed nor fetched again and keeps reporting its
+// lag, the mismatch counter (ETLObjectChecksumMismatch) stays at 1, and the
+// other partition carries on.
+func TestRunHaltsPartitionOnChecksumMismatch(t *testing.T) {
+	e := newEnv(t)
+	brokers := testutil.StartRedpanda(t)
+	ctx := context.Background()
+	cl, err := kgo.NewClient(kgo.SeedBrokers(brokers...), kgo.RecordPartitioner(kgo.ManualPartitioner()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cl.Close()
+	adm := kadm.NewClient(cl)
+	const topic = "test.halt"
+	if _, err := adm.CreateTopic(ctx, 2, 1, nil, topic); err != nil {
+		t.Fatal(err)
+	}
+	produce := func(p int32, ev event.RawEvent) {
+		t.Helper()
+		m := message(t, p, 0, ev)
+		var hs []kgo.RecordHeader
+		for k, v := range m.Headers {
+			hs = append(hs, kgo.RecordHeader{Key: k, Value: []byte(v)})
+		}
+		if err := cl.ProduceSync(ctx, &kgo.Record{Topic: topic, Partition: p, Key: m.Key, Value: m.Value, Headers: hs}).FirstErr(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	committed := func(p int32) int64 {
+		offs, err := adm.FetchOffsets(ctx, ConsumerGroup)
+		if err != nil {
+			return -1
+		}
+		o, ok := offs.Lookup(topic, p)
+		if !ok || o.Err != nil {
+			return -1
+		}
+		return o.At
+	}
+	mismatches := func() float64 { return promtest.ToFloat64(e.deps.Metrics.S3Puts.WithLabelValues("mismatch")) }
+	lagIs := func(p string, want float64) func() bool {
+		return func() bool { v, ok := lagSeries(t, e.reg, p); return ok && v == want }
+	}
+
+	evs := fixtureEvents(t)
+	produce(0, evs[0]) // markets t0: its first object is the market_snapshot one
+	produce(1, evs[2]) // bitcoin detail t0
+	key := ObjectKey(s3.BucketProcessed, "dataset=market_snapshot/v=1/event_date=2026-10-10", topic, 0, 0)
+	if _, err := e.deps.S3.PutIfAbsent(ctx, s3.BucketProcessed, key, []byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+
+	oldEvery := haltedLagEvery
+	haltedLagEvery = 500 * time.Millisecond
+	defer func() { haltedLagEvery = oldEvery }()
+	rctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	done := make(chan error, 1)
+	go func() {
+		done <- Run(rctx, config.Config{Brokers: brokers, Topic: topic, PipelineEpoch: testEpoch, TransformMaxRecords: 500}, e.deps)
+	}()
+	running := func() {
+		t.Helper()
+		select {
+		case err := <-done:
+			t.Fatalf("Run returned %v while a partition was halted", err)
+		default:
+		}
+	}
+
+	if !waitFor(60*time.Second, func() bool { return committed(1) == 1 && mismatches() == 1 }) {
+		t.Fatalf("committed(1)=%d mismatches=%v, want 1 and 1", committed(1), mismatches())
+	}
+	running()
+	if !waitFor(10*time.Second, lagIs("0", 1)) {
+		v, ok := lagSeries(t, e.reg, "0")
+		t.Fatalf("lag of the halted partition = %v (present %v), want 1", v, ok)
+	}
+
+	// The halted partition is not fetched again: more records only raise its
+	// lag. The other partition keeps going.
+	produce(0, evs[1])
+	produce(0, evs[4])
+	produce(1, evs[3])
+	if !waitFor(60*time.Second, func() bool { return committed(1) == 2 }) {
+		t.Fatalf("partition 1 committed %d, want 2", committed(1))
+	}
+	if !waitFor(30*time.Second, lagIs("0", 3)) {
+		v, _ := lagSeries(t, e.reg, "0")
+		t.Fatalf("lag of the halted partition = %v after 2 more records, want 3", v)
+	}
+	running()
+	if got := mismatches(); got != 1 {
+		t.Errorf("mismatch counter = %v, want 1: a halted batch is not retried", got)
+	}
+	if at := committed(0); at != -1 {
+		t.Errorf("halted partition committed offset %d, want none", at)
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned %v after cancel, want nil", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("Run did not stop after cancel")
 	}
 }

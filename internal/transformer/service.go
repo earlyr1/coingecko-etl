@@ -15,6 +15,7 @@ import (
 	"coingecko-etl/internal/storage/s3"
 
 	"github.com/google/uuid"
+	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
 	"github.com/twmb/franz-go/pkg/kmsg"
@@ -35,6 +36,10 @@ const (
 	defaultMaxRecords = 500
 )
 
+// haltedLagEvery is how often the lag of halted partitions is refreshed from
+// the topic's end offsets (a variable so tests can shorten it).
+var haltedLagEvery = 15 * time.Second
+
 // runner holds the per-process consumer state.
 type runner struct {
 	d          Deps
@@ -45,11 +50,14 @@ type runner struct {
 	mu        sync.Mutex
 	pending   map[int32][]Message // records held after IncompleteBatchError
 	recovered map[int32]int64     // next offsets to commit after assignment recovery
+	halted    map[int32]int64     // halted partitions -> first uncommitted offset
+	unhalt    []int32             // halted partitions revoked or lost: resume fetching them
+
+	lagRefreshed time.Time // last end-offset lookup for halted partitions (poll loop only)
 }
 
-// Run consumes the raw topic until ctx is cancelled (returns nil) or a fatal
-// error occurs: an object exists with different bytes, or a batch is
-// non-deterministic. Both need a human; the process exits non-zero.
+// Run consumes the raw topic until ctx is cancelled and then returns nil; it
+// returns an error only when it cannot start (topic id lookup, client).
 //
 // It polls at most TransformMaxRecords records at a time and processes the
 // records of each partition as one batch (or several, when the manifest fixed
@@ -57,6 +65,10 @@ type runner struct {
 // two batches in flight. BlockRebalanceOnPoll keeps every polled partition
 // assigned until AllowRebalance, so each batch, its offset commit and any seek
 // happen while this member owns the partition.
+//
+// A batch that would overwrite an object with different bytes, or whose
+// re-plan differs from its manifest, needs a human (spec §7.4 "alert and
+// stop"): its partition halts in place (see halt) while the others carry on.
 func Run(ctx context.Context, cfg config.Config, d Deps) error {
 	epoch, err := uuid.Parse(cfg.PipelineEpoch)
 	if err != nil {
@@ -71,7 +83,7 @@ func Run(ctx context.Context, cfg config.Config, d Deps) error {
 		maxRecords = defaultMaxRecords
 	}
 	r := &runner{d: d, topic: cfg.Topic, topicID: topicID, maxRecords: maxRecords,
-		pending: map[int32][]Message{}, recovered: map[int32]int64{}}
+		pending: map[int32][]Message{}, recovered: map[int32]int64{}, halted: map[int32]int64{}}
 
 	cl, err := kgo.NewClient(
 		kgo.SeedBrokers(cfg.Brokers...),
@@ -108,6 +120,7 @@ func Run(ctx context.Context, cfg config.Config, d Deps) error {
 			d.Log.Warn("fetch error", "stage", "transform", "topic", topic, "partition", p, "err", err)
 		})
 		r.commitRecovered(ctx, cl)
+		r.resumeLost(cl)
 
 		byPartition := map[int32][]*kgo.Record{}
 		highWatermark := map[int32]int64{}
@@ -119,16 +132,13 @@ func Run(ctx context.Context, cfg config.Config, d Deps) error {
 			highWatermark[fp.Partition] = max(highWatermark[fp.Partition], fp.HighWatermark)
 		})
 		for _, p := range slices.Sorted(maps.Keys(byPartition)) {
-			next, err := r.processPartition(ctx, cl, p, byPartition[p])
-			if err != nil {
-				cl.AllowRebalance()
-				return err
-			}
+			next := r.processPartition(ctx, cl, p, byPartition[p])
 			// Lag counts from the first offset no commit covers yet, so a
 			// replica stuck on one batch reports a growing lag.
 			lag := max(highWatermark[p]-next, 0)
 			d.Metrics.ConsumerLag.WithLabelValues(strconv.Itoa(int(p))).Set(float64(lag))
 		}
+		r.refreshHaltedLag(ctx, cl)
 		cl.AllowRebalance()
 	}
 }
@@ -148,9 +158,9 @@ func lookupTopicID(ctx context.Context, cfg config.Config, epoch uuid.UUID) (uui
 // batches and commits after each written batch. It returns the first offset
 // of p that no commit covers yet, the position the consumer lag is measured
 // from: LastOffset+1 of the last batch when every record was handled, else
-// the first offset of the batch that failed, was rewound, is incomplete or
-// whose commit was rejected.
-func (r *runner) processPartition(ctx context.Context, cl *kgo.Client, p int32, recs []*kgo.Record) (int64, error) {
+// the first offset of the batch that failed, halted the partition, was
+// rewound, is incomplete or whose commit was rejected.
+func (r *runner) processPartition(ctx context.Context, cl *kgo.Client, p int32, recs []*kgo.Record) int64 {
 	epochs := make(map[int64]int32, len(recs))
 	r.mu.Lock()
 	msgs := r.pending[p]
@@ -176,16 +186,17 @@ func (r *runner) processPartition(ctx context.Context, cl *kgo.Client, p int32, 
 			r.mu.Lock()
 			r.pending[p] = msgs
 			r.mu.Unlock()
-			return first, nil
+			return first
 		case errors.As(err, &rewind):
 			r.d.Log.Warn("rewinding to the start of a planned batch", "stage", "transform", "partition", p, "offset", rewind.Offset)
 			r.seek(cl, p, rewind.Offset)
-			return first, nil
+			return first
 		case errors.Is(err, s3.ErrChecksumMismatch), errors.Is(err, ErrNonDeterministic):
-			return first, err
+			r.halt(cl, p, first, last, err)
+			return first
 		case err != nil:
 			if ctx.Err() != nil {
-				return first, nil
+				return first
 			}
 			r.d.Log.Error("batch failed, will retry", "stage", "transform", "partition", p,
 				"batch", fmt.Sprintf("%d-%d", first, last), "err", err)
@@ -194,7 +205,7 @@ func (r *runner) processPartition(ctx context.Context, cl *kgo.Client, p int32, 
 			case <-ctx.Done():
 			case <-time.After(retryBackoff):
 			}
-			return first, nil
+			return first
 		}
 
 		epoch, ok := epochs[res.LastOffset]
@@ -209,15 +220,75 @@ func (r *runner) processPartition(ctx context.Context, cl *kgo.Client, p int32, 
 			if res.LastOffset != last {
 				r.seek(cl, p, res.LastOffset+1)
 			}
-			return first, nil
+			return first
 		}
 		if res.LastOffset >= last {
 			if res.LastOffset > last {
 				r.seek(cl, p, res.LastOffset+1) // a written batch covered more than we polled
 			}
-			return res.LastOffset + 1, nil
+			return res.LastOffset + 1
 		}
 		msgs = msgs[len(upTo(msgs, res.LastOffset)):]
+	}
+}
+
+// halt stops partition p in place after the batch [first..last] met an object
+// with different bytes or re-planned to different objects (spec §7.4 "alert
+// and stop"). Fetching of p is paused and nothing is committed, so the batch
+// stays where it is and the lag keeps counting from first; Run carries on
+// with the other partitions and /metrics keeps serving. The cause already
+// counted etl_s3_put_total{result="mismatch"}, which fires
+// ETLObjectChecksumMismatch and, since the process keeps running, keeps it
+// firing. A human resolves the conflict and restarts the transformer.
+func (r *runner) halt(cl *kgo.Client, p int32, first, last int64, err error) {
+	cl.PauseFetchPartitions(map[string][]int32{r.topic: {p}})
+	r.mu.Lock()
+	delete(r.pending, p)
+	r.halted[p] = first
+	r.mu.Unlock()
+	r.d.Log.Error("partition halted: the batch would overwrite different bytes; resolve the conflict and restart the transformer",
+		"stage", "transform", "partition", p, "batch", fmt.Sprintf("%d-%d", first, last), "err", err)
+}
+
+// refreshHaltedLag sets the lag of halted partitions from the topic's end
+// offsets, at most every haltedLagEvery: they are no longer fetched, so no
+// fetch reports their high watermark. It runs before AllowRebalance, while no
+// partition can be revoked.
+func (r *runner) refreshHaltedLag(ctx context.Context, cl *kgo.Client) {
+	r.mu.Lock()
+	halted := maps.Clone(r.halted)
+	r.mu.Unlock()
+	if len(halted) == 0 || time.Since(r.lagRefreshed) < haltedLagEvery {
+		return
+	}
+	r.lagRefreshed = time.Now()
+	lctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	ends, err := kadm.NewClient(cl).ListEndOffsets(lctx, r.topic)
+	if err != nil {
+		if ctx.Err() == nil {
+			r.d.Log.Warn("end offsets of halted partitions", "stage", "transform", "err", err)
+		}
+		return
+	}
+	for p, first := range halted {
+		if o, ok := ends.Lookup(r.topic, p); ok && o.Err == nil {
+			r.d.Metrics.ConsumerLag.WithLabelValues(strconv.Itoa(int(p))).Set(float64(max(o.Offset-first, 0)))
+		}
+	}
+}
+
+// resumeLost resumes fetching of halted partitions this member no longer
+// owns: a halt belongs to the owner. The new owner, or this member if the
+// partition comes back, reads from the committed offset, meets the same
+// batch and halts it again. It runs in the poll loop, not in a group callback.
+func (r *runner) resumeLost(cl *kgo.Client) {
+	r.mu.Lock()
+	ps := r.unhalt
+	r.unhalt = nil
+	r.mu.Unlock()
+	if len(ps) > 0 {
+		cl.ResumeFetchPartitions(map[string][]int32{r.topic: ps})
 	}
 }
 
@@ -312,13 +383,18 @@ func (r *runner) commitRecovered(ctx context.Context, cl *kgo.Client) {
 
 // forget drops the local state and the lag series of revoked or lost
 // partitions; another member reports their lag now. Offsets are not committed
-// here: every written batch was committed right after it was written.
+// here: every written batch was committed right after it was written. A
+// halted partition is queued for resumeLost.
 func (r *runner) forget(_ context.Context, _ *kgo.Client, gone map[string][]int32) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, p := range gone[r.topic] {
 		delete(r.pending, p)
 		delete(r.recovered, p)
+		if _, ok := r.halted[p]; ok {
+			delete(r.halted, p)
+			r.unhalt = append(r.unhalt, p)
+		}
 		r.d.Metrics.ConsumerLag.DeleteLabelValues(strconv.Itoa(int(p)))
 	}
 }

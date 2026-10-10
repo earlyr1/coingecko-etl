@@ -383,6 +383,8 @@ franz-go: `DisableAutoCommit`, `BlockRebalanceOnPoll`, cooperative-sticky balanc
 4. **TX2:** mark the batch `written`.
 5. **Commit offset `L+1` synchronously**, then allow rebalance. A rejected commit means the partition moved; stop work on it.
 
+**Alert and stop** (a different checksum on PUT in step 3, or a non-deterministic re-plan in step 2e) halts the affected partition in place: the transformer pauses fetching it, does not commit, keeps its `etl_consumer_lag_records` at the high watermark minus the first uncommitted offset (refreshed from the topic's end offsets while the partition is paused), keeps processing its other partitions and serving `/metrics`, and counts `etl_s3_put_total{result="mismatch"}`, which fires the critical alert `ETLObjectChecksumMismatch`. The process does not exit (the consumer loop returns only when its context is cancelled), so the counter and the alert stay up until a human resolves the conflict and restarts the transformer. A halted partition that moves to another replica halts there too.
+
 **On partition assignment:** find the manifest batch covering the committed offset. `written` → seek past it and commit; `planned` → reprocess exactly that range; none → normal processing.
 
 ### 7.5 Crash analysis
@@ -436,6 +438,7 @@ Labels stay low-cardinality.
 - Export lag above 5 minutes.
 - Consumer lag growing for 10 minutes.
 - Frequent 429 responses.
+- An object key already holds different bytes, or a re-planned batch differs from its manifest (`etl_s3_put_total{result="mismatch"}` above 0; critical, fires at once and stays up while a transformer partition is halted, §7.4).
 
 ### 8.5 Grafana dashboard (provisioned)
 

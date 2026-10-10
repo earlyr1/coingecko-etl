@@ -207,6 +207,28 @@ func TestProcessBatch(t *testing.T) {
 		}
 	})
 
+	// A re-plan that would store other objects than an earlier attempt is
+	// non-deterministic; it counts as a mismatch, like a 412 with other bytes.
+	t.Run("a re-plan whose objects differ from the stored manifest is non-deterministic", func(t *testing.T) {
+		e.reset(t)
+		b := batchOf(t, "test.nondeterministic", fixtureEvents(t))
+		if _, err := planBatch(ctx, d, b); err != nil {
+			t.Fatal(err)
+		}
+		// As if an earlier attempt (another build) had stored other checksums.
+		if _, err := d.Pool.Exec(ctx, `UPDATE pipeline.consumer_batches SET content_sha256 = array_replace(content_sha256, content_sha256[1], sha256('other'))
+			WHERE topic_id = $1`, b.TopicID); err != nil {
+			t.Fatal(err)
+		}
+		before := promtest.ToFloat64(d.Metrics.S3Puts.WithLabelValues("mismatch"))
+		if _, err := ProcessBatch(ctx, d, b); !errors.Is(err, ErrNonDeterministic) {
+			t.Fatalf("err = %v, want ErrNonDeterministic", err)
+		}
+		if n := promtest.ToFloat64(d.Metrics.S3Puts.WithLabelValues("mismatch")) - before; n != 1 {
+			t.Errorf("s3_put_total{mismatch} grew by %v, want 1", n)
+		}
+	})
+
 	t.Run("zombie: two consumers process the same batch concurrently", func(t *testing.T) {
 		e.reset(t)
 		b := batchOf(t, "test.zombie", fixtureEvents(t))

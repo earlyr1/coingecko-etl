@@ -269,7 +269,8 @@ func ensureClaimPartitions(ctx context.Context, d Deps, b Batch) error {
 }
 
 // putWithRetry writes one object with If-None-Match: *. A 412 with an equal
-// checksum counts as success. A different checksum is fatal (alert and stop).
+// checksum counts as success. A different checksum is returned at once
+// (ErrChecksumMismatch): the caller halts the partition (alert and stop).
 // Transient errors are retried with backoff and finally returned, so the
 // caller never commits the offset.
 func putWithRetry(ctx context.Context, d Deps, o object) error {

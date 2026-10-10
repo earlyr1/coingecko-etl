@@ -104,3 +104,31 @@ tests:
             exp_annotations:
               summary: "CoinGecko returned HTTP 429 4 times in 15 minutes"
               description: "Lower the request rate or set COINGECKO_API_KEY."
+
+  - name: an object checksum mismatch fires at once and stays up
+    interval: 1m
+    input_series:
+      - series: 'etl_s3_put_total{job="transformer",instance="10.0.0.7:8080",result="mismatch"}'
+        values: '_ _ 1x10' # the halted process keeps the counter at 1
+      - series: 'etl_s3_put_total{job="transformer",instance="10.0.0.7:8080",result="created"}'
+        values: '0+5x12'
+      - series: 'etl_s3_put_total{job="exporter",instance="10.0.0.5:8080",result="exists"}'
+        values: '0+1x12' # idempotent retries are not mismatches
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ETLObjectChecksumMismatch
+        exp_alerts: []
+      - eval_time: 2m
+        alertname: ETLObjectChecksumMismatch
+        exp_alerts:
+          - exp_labels: {severity: critical, job: transformer}
+            exp_annotations:
+              summary: "transformer: an object key already holds different bytes"
+              description: "The write-once check failed; see the ERROR log of transformer. A halted transformer partition stays stopped until the conflict is resolved and the transformer restarted."
+      - eval_time: 11m
+        alertname: ETLObjectChecksumMismatch
+        exp_alerts:
+          - exp_labels: {severity: critical, job: transformer}
+            exp_annotations:
+              summary: "transformer: an object key already holds different bytes"
+              description: "The write-once check failed; see the ERROR log of transformer. A halted transformer partition stays stopped until the conflict is resolved and the transformer restarted."
