@@ -163,8 +163,11 @@ func requestURL(baseURL string, req event.Request) string {
 //   - http_error:    any other response (non-2xx, or 2xx with a non-JSON body); HTTP set
 //   - network_error: no complete response (DNS, connect, timeout, body read, ctx); HTTP nil
 //
-// Payload is the body with surrounding whitespace trimmed (the bytes inside
-// are verbatim), and PayloadSHA256 is the hash of exactly those bytes.
+// Payload is the body with surrounding JSON whitespace (space, tab, CR, LF)
+// trimmed, byte for byte. A body that contains a line break is stored
+// compacted instead: insignificant whitespace removed, string contents and
+// number text verbatim, so one call stays one JSONL line and one message.
+// PayloadSHA256 is the hash of exactly the stored bytes.
 //
 // On HTTP 429 it calls Cooldown(Retry-After, or 60 s) on the limiter. On a
 // 5xx, a 2xx with a non-JSON body, a timeout or a connection error it calls
@@ -240,10 +243,10 @@ func (c *Client) Fetch(ctx context.Context, endpoint string, req event.Request) 
 	case len(body) > maxBodyBytes:
 		return failed(ev, event.OutcomeHTTPError, fmt.Sprintf("HTTP %d: body larger than %d bytes", resp.StatusCode, maxBodyBytes))
 	}
-	// Surrounding whitespace is not part of the JSON value; trimming it keeps
-	// the payload on one JSONL line. The bytes inside are kept verbatim, and
-	// payload_sha256 is the hash of the trimmed bytes.
-	payload := bytes.TrimSpace(body)
+	// Surrounding whitespace is not part of the JSON value. Only JSON
+	// whitespace is trimmed: bytes.TrimSpace would also strip NBSP, NEL, \v
+	// and \f, which make the body invalid JSON.
+	payload := bytes.Trim(body, " \t\r\n")
 	// Strict JSON (valid UTF-8, no duplicate member names), the same rule the
 	// validator applies at every later hop. encoding/json's Valid is more
 	// lenient: a body it accepts could be stored as ok and then fail S1.
@@ -254,6 +257,17 @@ func (c *Client) Fetch(ctx context.Context, endpoint string, req event.Request) 
 		return failed(ev, event.OutcomeHTTPError, fmt.Sprintf("HTTP %d: invalid JSON body: %s", resp.StatusCode, excerpt(body)))
 	}
 	c.failures = 0 // a good response ends the backoff
+	// A line break between tokens would split the event over several JSONL
+	// lines in raw/ (and several messages). Compact keeps strings and number
+	// text as they are; a body without line breaks keeps its wire bytes.
+	if bytes.ContainsAny(payload, "\r\n") {
+		compact := jsontext.Value(bytes.Clone(payload))
+		if err := compact.Compact(); err != nil { // cannot happen for a valid value
+			c.backoff()
+			return failed(ev, event.OutcomeHTTPError, fmt.Sprintf("HTTP %d: compact JSON body: %v", resp.StatusCode, err))
+		}
+		payload = compact
+	}
 	sha := event.SHA256Hex(payload)
 	key := event.IdempotencyKey(ev.Source, ev.Endpoint, req.Params, sha)
 	ev.Outcome = event.OutcomeOK

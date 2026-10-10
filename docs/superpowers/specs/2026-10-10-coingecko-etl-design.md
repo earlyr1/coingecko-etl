@@ -160,7 +160,7 @@ CREATE TABLE raw.api_calls (
   outcome          text        NOT NULL CHECK (outcome IN ('ok','http_error','network_error')),
   http             jsonb,                             -- {status, latency_ms, date, age_s, cf_cache_status, etag, retry_after_s}
   error            text,
-  payload          json,                              -- response body byte-for-byte (json, not jsonb)
+  payload          json,                              -- response body as stored by the fetcher (json, not jsonb)
   payload_sha256   bytea       CHECK (octet_length(payload_sha256) = 32),
   ingest_txid      xid8        NOT NULL DEFAULT pg_current_xact_id(),
   PRIMARY KEY (event_id, fetched_at),
@@ -170,6 +170,7 @@ CREATE INDEX ON raw.api_calls (ingest_txid, seq) WHERE outcome = 'ok';
 CREATE INDEX ON raw.api_calls (idempotency_key);
 ```
 
+- `payload` is the response body with surrounding JSON whitespace trimmed, byte for byte. A body that contains a line break is stored compacted instead (insignificant whitespace removed; string contents and number text verbatim), so one call stays one JSONL line and one message; `event.Marshal` refuses a payload with CR or LF. `payload_sha256` is computed over the stored bytes.
 - `payload` is `json`, not `jsonb`: `json` keeps the exact bytes, so `payload_sha256` stays verifiable at every hop. SQL access works the same (`payload->>'id'`).
 - `idempotency_key = sha256(source | endpoint | canonical params | payload_sha256)`. It is informational: SQL analysis of raw duplicates and a metric. Deduplication does not use it (§7.3).
 - Failed calls (429, 5xx, timeouts) are inspected with SQL: `WHERE outcome <> 'ok'`. Source-schema violations are found in `dlq/` (validated in the transformer).

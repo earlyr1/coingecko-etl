@@ -16,7 +16,8 @@ import (
 
 // FuzzRawEventMarshalsToValidS1 (spec §5.3: fuzzed structs marshal to valid
 // documents): every ok event the fetcher can build (any strict-JSON body
-// except null, any string params, any 2xx status) marshals to a document that
+// except null, trimmed of JSON whitespace and compacted when it has line
+// breaks; any string params; any 2xx status) marshals to one line that
 // passes S1. A failure here means event.Marshal and raw_event.v1.json have
 // drifted apart. The seeds run under plain go test;
 // go test -fuzz=FuzzRawEventMarshalsToValidS1 ./internal/validation/ explores further.
@@ -28,11 +29,19 @@ func FuzzRawEventMarshalsToValidS1(f *testing.F) {
 	f.Add(true, "vs_currency", "usd", []byte(`[{"id":"bitcoin","current_price":82878.57}]`), 200, int64(12), 34)
 	f.Add(false, "localization", "false", []byte(`{"id":"bitcoin","name":"é \"q\" <b>"}`), 203, int64(0), 0)
 	f.Add(true, "", "", []byte(`[]`), 299, int64(999999), -1)
+	f.Add(true, "page", "1\n", []byte("[\n {\"id\": \"bitcoin\",\r\n  \"name\": \"a\\nb\"}\n]\n"), 200, int64(5), 0)
 	f.Fuzz(func(t *testing.T, markets bool, k, v string, body []byte, status int, latency int64, age int) {
-		payload := bytes.TrimSpace(body)
-		// The same acceptance rule as coingecko.Client.Fetch (Task 6).
+		// The same acceptance rule and payload bytes as coingecko.Client.Fetch.
+		payload := bytes.Trim(body, " \t\r\n")
 		if !jsontext.Value(payload).IsValid() || bytes.Equal(payload, []byte("null")) || !utf8.ValidString(k) || !utf8.ValidString(v) {
 			t.Skip("not a body or params the fetcher would store as ok")
+		}
+		if bytes.ContainsAny(payload, "\r\n") {
+			compact := jsontext.Value(bytes.Clone(payload))
+			if err := compact.Compact(); err != nil {
+				t.Fatalf("Compact of a valid body: %v", err)
+			}
+			payload = compact
 		}
 		if status < 200 || status > 299 || latency < 0 {
 			t.Skip("not an ok response")
@@ -64,6 +73,9 @@ func FuzzRawEventMarshalsToValidS1(f *testing.F) {
 		b, err := event.Marshal(ev)
 		if err != nil {
 			t.Fatalf("Marshal: %v", err)
+		}
+		if bytes.ContainsAny(b, "\r\n") {
+			t.Fatalf("the event spans more than one line: %q", b)
 		}
 		vs, err := reg.Validate(validation.IDRawEvent, b)
 		if err != nil || len(vs) > 0 {

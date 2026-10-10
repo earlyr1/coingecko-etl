@@ -96,7 +96,9 @@ type envelope struct {
 
 // Marshal serializes ev as one JSON object with fields in declaration order and
 // no trailing newline. Payload is embedded byte-for-byte (an empty Payload is
-// written as null); it must be valid JSON. A nil Request.Params is written as {}.
+// written as null); it must be valid JSON without CR or LF, so that the event
+// stays one JSONL line and one message (the fetcher compacts bodies with line
+// breaks). A nil Request.Params is written as {}.
 func Marshal(ev RawEvent) ([]byte, error) {
 	env := envelope{
 		SchemaVersion:  ev.SchemaVersion,
@@ -118,6 +120,9 @@ func Marshal(ev RawEvent) ([]byte, error) {
 	if len(ev.Payload) > 0 {
 		if !json.Valid(ev.Payload) {
 			return nil, errors.New("event: payload is not valid JSON")
+		}
+		if bytes.ContainsAny(ev.Payload, "\r\n") {
+			return nil, errors.New("event: payload contains a line break (CR or LF); an event must stay on one line")
 		}
 		payload = ev.Payload
 	}

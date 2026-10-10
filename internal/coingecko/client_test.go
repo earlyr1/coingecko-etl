@@ -317,6 +317,59 @@ func TestFetchInvalidJSONBody(t *testing.T) {
 	assertS1(t, ev)
 }
 
+// A pretty-printed 200 body would span several JSONL lines in raw/ and
+// several messages. It is stored compacted: no line break, strings and number
+// text verbatim, and payload_sha256 over the stored bytes.
+func TestFetchCompactsABodyWithLineBreaks(t *testing.T) {
+	body := "[\n {\n  \"id\": \"bitcoin\",\r\n  \"name\": \"Bit \\u00e9 coin\\n\",\n  \"current_price\": 1.50E+3,\n  \"roi\": null\n }\n]\n"
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(body)) }, "")
+	ev := c.Fetch(context.Background(), event.EndpointMarkets, MarketsRequest(1))
+	if ev.Outcome != event.OutcomeOK {
+		t.Fatalf("outcome = %s error = %v", ev.Outcome, ev.Error)
+	}
+	want := `[{"id":"bitcoin","name":"Bit \u00e9 coin\n","current_price":1.50E+3,"roi":null}]`
+	if string(ev.Payload) != want {
+		t.Fatalf("payload = %s\nwant      %s", ev.Payload, want)
+	}
+	if bytes.ContainsAny(ev.Payload, "\r\n") {
+		t.Fatal("stored payload still contains a line break")
+	}
+	if ev.PayloadSHA256 == nil || *ev.PayloadSHA256 != event.SHA256Hex(ev.Payload) {
+		t.Fatalf("payload_sha256 = %v, want the hash of the stored bytes", ev.PayloadSHA256)
+	}
+	wantKey := event.IdempotencyKey("coingecko", "coins_markets", MarketsRequest(1).Params, event.SHA256Hex(ev.Payload))
+	if ev.IdempotencyKey == nil || *ev.IdempotencyKey != wantKey {
+		t.Fatalf("idempotency_key = %v, want %s", ev.IdempotencyKey, wantKey)
+	}
+	assertS1(t, ev)
+}
+
+// Only JSON whitespace (space, tab, LF, CR) surrounds a JSON value; NBSP,
+// NEL, vertical tab and form feed are not trimmed, so such a body is invalid.
+func TestFetchTrimsOnlyJSONWhitespace(t *testing.T) {
+	for name, tc := range map[string]struct {
+		body    string
+		outcome string
+		payload string
+	}{
+		"json whitespace": {" \t\r\n[1, 2]\r\n\t ", event.OutcomeOK, `[1, 2]`},
+		"nbsp":            {"\u00a0[1]", event.OutcomeHTTPError, ""},
+		"nel":             {"[1]\u0085", event.OutcomeHTTPError, ""},
+		"vertical tab":    {"\v[1]", event.OutcomeHTTPError, ""},
+		"form feed":       {"[1]\f", event.OutcomeHTTPError, ""},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write([]byte(tc.body)) }, "")
+			c.jitter = func(time.Duration) time.Duration { return 0 }
+			ev := c.Fetch(context.Background(), event.EndpointMarkets, MarketsRequest(1))
+			if ev.Outcome != tc.outcome || string(ev.Payload) != tc.payload {
+				t.Fatalf("outcome = %s payload = %q, want %s %q", ev.Outcome, ev.Payload, tc.outcome, tc.payload)
+			}
+			assertS1(t, ev)
+		})
+	}
+}
+
 // A 200 body that encoding/json accepts but strict JSON rejects (duplicate
 // member names, invalid UTF-8) or a bare null must not become an ok event:
 // S1 validation would reject it later and the call would vanish.

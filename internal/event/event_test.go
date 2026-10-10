@@ -72,8 +72,8 @@ func TestIdempotencyKeyDistinguishesInputs(t *testing.T) {
 }
 
 // Unusual whitespace, key order and HTML-ish characters that json.Marshal would
-// normally compact or escape.
-var oddPayload = []byte("[ {\"z\" : 1,\n\t\"a\":[ 1 , 2.50 ,1e3],  \"html\":\"<b>&</b>\", \"price\": 82800.000000001 } ]")
+// normally compact or escape. No line break: Marshal refuses those.
+var oddPayload = []byte("[ {\"z\" : 1,\t \"a\":[ 1 , 2.50 ,1e3],  \"html\":\"<b>&</b>\", \"price\": 82800.000000001 } ]")
 
 func sampleEvent() RawEvent {
 	sum := SHA256Hex(oddPayload)
@@ -185,6 +185,18 @@ func TestMarshalRejectsInvalidPayload(t *testing.T) {
 	ev.Payload = []byte(`{"truncated":`)
 	if _, err := Marshal(ev); err == nil {
 		t.Fatal("Marshal accepted invalid JSON payload")
+	}
+}
+
+// One event is one JSONL line in raw/ and one message: a payload with a line
+// break would split it, so Marshal refuses it (the fetcher compacts such bodies).
+func TestMarshalRejectsLineBreaksInPayload(t *testing.T) {
+	for _, p := range []string{"[1,\n2]", "{\"a\":\r1}", "[1]\n"} {
+		ev := sampleEvent()
+		ev.Payload = []byte(p)
+		if _, err := Marshal(ev); err == nil {
+			t.Errorf("Marshal accepted payload %q", p)
+		}
 	}
 }
 
