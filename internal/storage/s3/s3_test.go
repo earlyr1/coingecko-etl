@@ -95,7 +95,7 @@ func hangingListener(t *testing.T) string {
 		mu.Lock()
 		defer mu.Unlock()
 		for _, c := range conns {
-			c.Close()
+			_ = c.Close()
 		}
 	})
 	return "http://" + ln.Addr().String()
