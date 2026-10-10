@@ -180,6 +180,7 @@ CREATE INDEX ON raw.api_calls (idempotency_key);
 
 - Single active instance via `pg_try_advisory_lock`.
 - Cursor over `(ingest_txid, seq)` bounded by `pg_snapshot_xmin(pg_current_snapshot())`. An identity/BIGSERIAL watermark loses rows when transactions commit out of order (reproduced on 18.6); the xid8 bound can only stall, never skip.
+- Rejected alternative: an `exported` flag on `raw.api_calls` with `SELECT … WHERE NOT exported … FOR UPDATE SKIP LOCKED LIMIT n`. It never loses a late-committing row and never stalls, but it UPDATEs every raw row (the raw table stops being append-only: dead tuples, vacuum, a partial index) and a crash between PUT and the flag update lets the retry pick a different row set, so a byte-identical retry still needs a claimed batch — the ledger this design already has, at one row per batch instead of one update per raw row.
 - Steps: (1) short claim transaction inserts the range into `pipeline.export_batches` and derives the object key from the batch id; (2) read the range, serialize deterministic JSONL (each line is the S1 event, payload embedded verbatim), validate each line against S1; (3) PUT with `If-None-Match: *` and `x-amz-meta-sha256`; on 412, HEAD and compare the checksum; (4) mark `exported`.
 - Never hold a DB transaction across S3 or broker I/O.
 - Only `outcome = 'ok'` rows are exported.
