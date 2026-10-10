@@ -128,8 +128,14 @@ func TestRequestsTimeOutWhenTheGatewayHangs(t *testing.T) {
 		o.RetryMaxAttempts = 1 // measure the timeout, not the SDK's retry backoff
 		return &Client{api: s3.New(o)}
 	}
-	put := func(c *Client) error { _, err := c.PutIfAbsent(context.Background(), BucketRaw, "k.jsonl", []byte("{}\n")); return err }
-	get := func(c *Client) error { _, err := c.Get(context.Background(), BucketRaw, "k.jsonl"); return err }
+	put := func(c *Client) error {
+		_, err := c.PutIfAbsent(context.Background(), BucketRaw, "k.jsonl", []byte("{}\n"))
+		return err
+	}
+	get := func(c *Client) error {
+		_, err := c.Get(context.Background(), BucketRaw, "k.jsonl")
+		return err
+	}
 
 	cases := []struct {
 		name     string
