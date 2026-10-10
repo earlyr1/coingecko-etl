@@ -146,3 +146,35 @@ func TestEnsureBucketsCreatesMissingBucket(t *testing.T) {
 		t.Fatalf("Get = %q, want %q", got, body)
 	}
 }
+
+// HasAnyObject backs the lake check of `etl init`: an empty bucket (also one
+// with only empty sub-directories) holds no object, a nested key does.
+func TestHasAnyObject(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: needs Docker (skipped with -short)")
+	}
+	testutil.SkipIfNoDocker(t)
+	c, dataDir := newClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	if got, err := c.HasAnyObject(ctx, s3.BucketRaw); err != nil || got {
+		t.Fatalf("empty bucket: HasAnyObject = %v, %v; want false", got, err)
+	}
+	if err := os.MkdirAll(filepath.Join(dataDir, s3.BucketRaw, "source=coingecko", "ingest_date=2026-10-10"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.HasAnyObject(ctx, s3.BucketRaw); err != nil || got {
+		t.Fatalf("bucket with empty directories: HasAnyObject = %v, %v; want false", got, err)
+	}
+	key := "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl"
+	if _, err := c.PutIfAbsent(ctx, s3.BucketRaw, key, []byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := c.HasAnyObject(ctx, s3.BucketRaw); err != nil || !got {
+		t.Fatalf("bucket with one object: HasAnyObject = %v, %v; want true", got, err)
+	}
+	if got, err := c.HasAnyObject(ctx, s3.BucketDLQ); err != nil || got {
+		t.Fatalf("other empty bucket: HasAnyObject = %v, %v; want false", got, err)
+	}
+}

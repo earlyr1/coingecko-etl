@@ -13,7 +13,7 @@ GRAFANA_URL ?= http://localhost:3000
 CONSOLE_URL ?= http://localhost:8081
 DEMO_WAIT ?= 150
 
-.PHONY: build test test-unit lint alerts-test up down demo demo-report
+.PHONY: build test test-unit lint alerts-test up down clean demo demo-report
 
 build:
 	CGO_ENABLED=0 $(GO) build -trimpath -o $(BIN) ./cmd/etl
@@ -45,6 +45,13 @@ up:
 
 down:
 	$(COMPOSE) down
+
+# Wipes everything: the containers, the named volumes (Postgres, Redpanda,
+# Prometheus, Grafana), the lake and the logs. The lake (./data, ./.s3meta)
+# and the Postgres/Redpanda volumes are reset together because object keys
+# are unique only within one Postgres/Redpanda lifetime.
+clean:
+	$(COMPOSE) down -v && rm -rf data logs .s3meta
 
 demo: up
 	@echo "Pipeline started; waiting $(DEMO_WAIT)s for data to flow through every stage..."

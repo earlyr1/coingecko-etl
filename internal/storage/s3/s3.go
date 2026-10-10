@@ -156,6 +156,16 @@ func (c *Client) EnsureBuckets(ctx context.Context, buckets ...string) error {
 	return nil
 }
 
+// HasAnyObject reports whether bucket holds at least one object (one
+// ListObjectsV2 request with MaxKeys=1).
+func (c *Client) HasAnyObject(ctx context.Context, bucket string) (bool, error) {
+	out, err := c.api.ListObjectsV2(ctx, &s3.ListObjectsV2Input{Bucket: aws.String(bucket), MaxKeys: aws.Int32(1)})
+	if err != nil {
+		return false, fmt.Errorf("s3: list %s: %w", bucket, err)
+	}
+	return len(out.Contents) > 0, nil
+}
+
 // Ping is the readiness check: a signed ListBuckets proves endpoint and credentials.
 func (c *Client) Ping(ctx context.Context) error {
 	if _, err := c.api.ListBuckets(ctx, &s3.ListBucketsInput{}); err != nil {

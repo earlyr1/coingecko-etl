@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,6 +14,7 @@ import (
 
 	"coingecko-etl/internal/config"
 	"coingecko-etl/internal/storage/pg"
+	"coingecko-etl/internal/storage/s3"
 	"coingecko-etl/internal/testutil"
 )
 
@@ -100,5 +102,59 @@ func TestRunTwiceAgainstRealDependencies(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "partitions") {
 		t.Fatalf("run with 3 partitions: err = %v, want a partition-count mismatch", err)
+	}
+}
+
+// Object keys are unique only within one Postgres and Redpanda lifetime, so
+// init refuses a fresh ledger on a lake whose raw bucket already holds
+// objects (for example after `docker compose down -v` without wiping ./data).
+func TestRunRefusesALakeFromAnotherLifetime(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+	dsn := testutil.StartPostgres(t)
+	brokers := testutil.StartRedpanda(t)
+	endpoint, _ := testutil.StartVersityGW(t)
+	cfg := config.Config{
+		Service: "init", PostgresDSN: dsn, Brokers: brokers,
+		Topic: "coingecko.raw", TopicPartitions: 6, TopicRetention: 168 * time.Hour,
+		S3Endpoint: endpoint, S3AccessKey: testutil.VersityGWAccessKey, S3SecretKey: testutil.VersityGWSecretKey, S3Region: "us-east-1",
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+
+	// An empty raw bucket passes.
+	if err := Run(ctx, cfg, discardLogger()); err != nil {
+		t.Fatalf("run on an empty lake: %v", err)
+	}
+
+	s3c, err := s3.New(ctx, s3.Config{Endpoint: endpoint, AccessKey: cfg.S3AccessKey, SecretKey: cfg.S3SecretKey, Region: cfg.S3Region})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.PutIfAbsent(ctx, s3.BucketRaw, "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl", []byte("{}\n")); err != nil {
+		t.Fatal(err)
+	}
+	err = Run(ctx, cfg, discardLogger())
+	if !errors.Is(err, ErrLakeFromOtherLifetime) {
+		t.Fatalf("run with a raw object and an empty export ledger: err = %v, want ErrLakeFromOtherLifetime", err)
+	}
+	for _, want := range []string{"./data", ".s3meta", "make clean"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not mention %q", err, want)
+		}
+	}
+
+	// With a matching ledger (the exporter wrote that object) init passes.
+	pool, err := pg.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline.export_batches
+		(from_txid, from_seq, to_txid, to_seq, watermark_xmin, row_count, object_key)
+		VALUES ('0', 0, '1', 1, '2', 1, 'source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl')`); err != nil {
+		t.Fatal(err)
+	}
+	if err := Run(ctx, cfg, discardLogger()); err != nil {
+		t.Fatalf("run with a matching ledger: %v", err)
 	}
 }

@@ -5,6 +5,8 @@
 //   - Broker: the raw topic with the configured partitions and retention
 //     (an existing topic is verified, never altered).
 //   - Object storage: the raw, processed, rejected and dlq buckets.
+//   - The lake check: a fresh export ledger next to a raw bucket that already
+//     holds objects is refused (ErrLakeFromOtherLifetime).
 //
 // Running it twice is safe: every step is a no-op when its target exists.
 package bootstrap
@@ -29,6 +31,15 @@ import (
 // [today-1, today+3].
 const partitionDaysAhead = 3
 
+// ErrLakeFromOtherLifetime: pipeline.export_batches is empty but the raw
+// bucket already holds objects. Object keys are unique only within one
+// Postgres and Redpanda lifetime (batch ids restart at 1, topic offsets at
+// 0), so the new objects would collide with the old ones and stop the
+// exporter and the transformers with checksum mismatches.
+var ErrLakeFromOtherLifetime = errors.New("the raw bucket already holds objects but pipeline.export_batches is empty: " +
+	"the lake (./data and ./.s3meta) belongs to a different Postgres/Redpanda lifetime. " +
+	"Wipe the lake together with the volumes (make clean) or restore the matching volumes")
+
 // Retry policy for reaching a dependency. Compose starts init only after the
 // healthchecks pass, but "healthy" can precede "accepts our requests" by a
 // few seconds (e.g. Redpanda's controller election), so every step retries.
@@ -46,22 +57,25 @@ func Run(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	log.Info("init started",
 		"brokers", cfg.Brokers, "topic", cfg.Topic, "s3_endpoint", cfg.S3Endpoint)
 
-	if err := initPostgres(ctx, cfg, log); err != nil {
+	ledgerEmpty, err := initPostgres(ctx, cfg, log)
+	if err != nil {
 		return err
 	}
 	if err := initBroker(ctx, cfg, log); err != nil {
 		return err
 	}
-	if err := initBuckets(ctx, cfg, log); err != nil {
+	if err := initBuckets(ctx, cfg, log, ledgerEmpty); err != nil {
 		return err
 	}
 	log.Info("init finished", "duration_ms", time.Since(started).Milliseconds())
 	return nil
 }
 
-func initPostgres(ctx context.Context, cfg config.Config, log *slog.Logger) error {
+// initPostgres migrates and creates partitions. It reports whether the
+// export ledger is empty, for the lake check in initBuckets.
+func initPostgres(ctx context.Context, cfg config.Config, log *slog.Logger) (ledgerEmpty bool, err error) {
 	var pool *pgxpool.Pool
-	err := step(ctx, log, "postgres_connect", func(ctx context.Context) error {
+	err = step(ctx, log, "postgres_connect", func(ctx context.Context) error {
 		p, err := pg.Connect(ctx, cfg.PostgresDSN)
 		if err != nil {
 			return err
@@ -70,18 +84,24 @@ func initPostgres(ctx context.Context, cfg config.Config, log *slog.Logger) erro
 		return nil
 	})
 	if err != nil {
-		return err
+		return false, err
 	}
 	defer pool.Close()
 
 	if err := step(ctx, log, "postgres_migrate", func(ctx context.Context) error {
 		return pg.Migrate(ctx, pool)
 	}); err != nil {
-		return err
+		return false, err
 	}
-	return step(ctx, log, "postgres_partitions", func(ctx context.Context) error {
+	if err := step(ctx, log, "postgres_partitions", func(ctx context.Context) error {
 		return pg.EnsurePartitions(ctx, pool, time.Now(), partitionDaysAhead)
+	}); err != nil {
+		return false, err
+	}
+	err = step(ctx, log, "postgres_export_ledger", func(ctx context.Context) error {
+		return pool.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM pipeline.export_batches)`).Scan(&ledgerEmpty)
 	})
+	return ledgerEmpty, err
 }
 
 func initBroker(ctx context.Context, cfg config.Config, log *slog.Logger) error {
@@ -101,7 +121,9 @@ func initBroker(ctx context.Context, cfg config.Config, log *slog.Logger) error 
 	})
 }
 
-func initBuckets(ctx context.Context, cfg config.Config, log *slog.Logger) error {
+// initBuckets creates the buckets. With an empty export ledger it also checks
+// that the raw bucket holds no object (ErrLakeFromOtherLifetime).
+func initBuckets(ctx context.Context, cfg config.Config, log *slog.Logger, ledgerEmpty bool) error {
 	s3c, err := s3.New(ctx, s3.Config{
 		Endpoint:  cfg.S3Endpoint,
 		AccessKey: cfg.S3AccessKey,
@@ -114,9 +136,27 @@ func initBuckets(ctx context.Context, cfg config.Config, log *slog.Logger) error
 	if err := step(ctx, log, "s3_ping", s3c.Ping); err != nil {
 		return err
 	}
-	return step(ctx, log, "s3_buckets", func(ctx context.Context) error {
+	if err := step(ctx, log, "s3_buckets", func(ctx context.Context) error {
 		return s3c.EnsureBuckets(ctx, s3.BucketRaw, s3.BucketProcessed, s3.BucketRejected, s3.BucketDLQ)
-	})
+	}); err != nil {
+		return err
+	}
+	if !ledgerEmpty {
+		return nil
+	}
+	var rawObjects bool
+	if err := step(ctx, log, "s3_lake_check", func(ctx context.Context) error {
+		var err error
+		rawObjects, err = s3c.HasAnyObject(ctx, s3.BucketRaw)
+		return err
+	}); err != nil {
+		return err
+	}
+	if rawObjects {
+		log.Error("init refused: lake from another lifetime", "step", "s3_lake_check", "error", ErrLakeFromOtherLifetime)
+		return fmt.Errorf("init: %w", ErrLakeFromOtherLifetime)
+	}
+	return nil
 }
 
 // step runs fn with retry and logs the outcome under the given step name.

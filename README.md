@@ -102,6 +102,7 @@ Prerequisites: Docker with Compose v2 (Docker Desktop on macOS works), GNU make,
 make up      # creates ./data ./logs ./.s3meta, copies .env.example to .env if missing, builds and starts everything
 make demo    # make up, waits 150 s, then prints object/record counts per bucket, the duplicate share and links
 make down    # stops the stack; data, logs and named volumes are kept
+make clean   # removes the stack and its named volumes, then ./data, ./logs and ./.s3meta
 ```
 
 `make demo-report` prints the same summary again without touching the stack. Output from a real run (the duplicate share is printed unrounded):
@@ -123,7 +124,7 @@ A duplicate share around one third to one half is expected: CoinGecko's CDN cach
 
 Configuration lives in `.env` (see `.env.example`): an optional `COINGECKO_API_KEY` (sent as `x-cg-demo-api-key`; the keyless tier works at the default ~3 calls per minute), host ports, polling intervals and cleaning thresholds. The containers run as your user so that the files under `./data`, `./logs` and `./.s3meta` belong to you: `make up` exports your uid and gid; when you call `docker compose` directly on Linux, set `ETL_UID` and `ETL_GID` in `.env`.
 
-To wipe everything and start from scratch: `docker compose down -v`, then `rm -rf data logs .s3meta`.
+To wipe everything and start from scratch: `make clean` (`docker compose down -v`, then `rm -rf data logs .s3meta`). Reset the lake and the Postgres/Redpanda volumes together, never one without the other: object keys are unique only within one Postgres and Redpanda lifetime (batch ids restart at 1, topic offsets at 0), so a lake kept across `docker compose down -v` would collide with the new keys. `etl init` refuses to start on a raw bucket that already holds objects while the export ledger is empty, and its log says so.
 
 ## Browsing the lake
 
