@@ -171,7 +171,7 @@ The keyless CoinGecko tier allows a dynamic 10–30 calls per minute per IP; we 
 
 `raw.api_calls` in Postgres has one row per HTTP call, including failures (`outcome` is `ok`, `http_error` or `network_error`). The response body is stored in a `json` column (not `jsonb`), which keeps the exact bytes, so `payload_sha256` can be re-verified at every hop. The fetcher stores the body as received, minus surrounding whitespace; a body with line breaks between tokens is stored compacted (insignificant whitespace removed, strings and numbers untouched), so one call is always one JSONL line and one message, and `payload_sha256` is the hash of the stored bytes. Each row also carries `idempotency_key = sha256(source | endpoint | canonical params | payload_sha256)`; two polls that received the same cached response share the key. The table is partitioned by day on `fetched_at`.
 
-The exporter writes the same rows (successful calls only) as JSON Lines into `s3://raw`, one line per call, with the response embedded verbatim.
+The exporter writes the same rows (successful calls only) as JSON Lines into `s3://raw`, one line per call, with the stored payload embedded verbatim.
 
 ### Processed datasets
 
