@@ -158,7 +158,7 @@ CREATE TABLE raw.api_calls (
   request          jsonb       NOT NULL,              -- {path, params}
   fetched_at       timestamptz NOT NULL,              -- partition key, UTC
   outcome          text        NOT NULL CHECK (outcome IN ('ok','http_error','network_error')),
-  http             jsonb,                             -- {status, latency_ms, date, age, cf_cache_status, etag}
+  http             jsonb,                             -- {status, latency_ms, date, age_s, cf_cache_status, etag, retry_after_s}
   error            text,
   payload          json,                              -- response body byte-for-byte (json, not jsonb)
   payload_sha256   bytea       CHECK (octet_length(payload_sha256) = 32),
