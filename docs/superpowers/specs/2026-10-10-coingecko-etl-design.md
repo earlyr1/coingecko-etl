@@ -65,7 +65,7 @@ All Go services are subcommands of one binary `etl`, built into one image.
 | Command | Role | Replicas |
 |---|---|---|
 | `etl init` | One-shot, idempotent: goose migrations and daily partitions in Postgres; topics via `kadm` against Redpanda (verifies config if they exist); S3 buckets | 1, runs to completion |
-| `etl fetcher` | Polls CoinGecko with a rate limiter, validates, inserts into `raw.api_calls` | 1 |
+| `etl fetcher` | Pure transport: polls CoinGecko with a rate limiter, builds the event envelope and hash, inserts into `raw.api_calls`. No business logic, no source-schema validation | 1 |
 | `etl exporter` | Every ~15 s claims a batch of new rows and writes one raw JSONL object | 1 (Postgres advisory lock) |
 | `etl publisher` | Leases exported batches, reads the object via S3, publishes to the broker | 1 (leases allow more) |
 | `etl transformer` | Consumer group; writes processed, rejected and dlq objects | 2 |
@@ -117,6 +117,9 @@ The design needs a replayable log, per-key ordering within partitions, and consu
 | Logs | `logs/<service>/etl.log` + stdout |
 | Monitoring | Prometheus + Grafana with alert rules and a provisioned dashboard |
 | Cleaning | Empty records → `rejected/`; questionable records kept with flags |
+| Fetcher scope | Transport only; source-schema (S0) validation lives in the transformer |
+| Schema distribution | Schemas embedded via `go:embed`; updates ship as redeploys; no schema registry |
+| Dedup content hash | Business fields only; excludes schema version and technical columns |
 
 ## 3. Source: CoinGecko
 
@@ -158,9 +161,6 @@ CREATE TABLE raw.api_calls (
   error            text,
   payload          json,                              -- response body byte-for-byte (json, not jsonb)
   payload_sha256   bytea       CHECK (octet_length(payload_sha256) = 32),
-  payload_schema   text,
-  payload_valid    boolean,
-  payload_errors   jsonb,                             -- at most 20 violations
   ingest_txid      xid8        NOT NULL DEFAULT pg_current_xact_id(),
   PRIMARY KEY (event_id, fetched_at),
   CHECK ((outcome = 'ok') = (payload IS NOT NULL))
@@ -171,7 +171,7 @@ CREATE INDEX ON raw.api_calls (idempotency_key);
 
 - `payload` is `json`, not `jsonb`: `json` keeps the exact bytes, so `payload_sha256` stays verifiable at every hop. SQL access works the same (`payload->>'id'`).
 - `idempotency_key = sha256(source | endpoint | canonical params | payload_sha256)`. It is informational: SQL analysis of raw duplicates and a metric. Deduplication does not use it (§7.3).
-- Failed calls and source-schema violations are inspected with SQL: `WHERE outcome <> 'ok' OR NOT payload_valid`.
+- Failed calls (429, 5xx, timeouts) are inspected with SQL: `WHERE outcome <> 'ok'`. Source-schema violations are found in `dlq/` (validated in the transformer).
 - Retries of the same insert are idempotent: `ON CONFLICT DO NOTHING` on the primary key.
 - Daily partitions are created by `etl init` and a maintenance loop (today … today+3); no DEFAULT partition.
 
@@ -181,7 +181,7 @@ CREATE INDEX ON raw.api_calls (idempotency_key);
 - Cursor over `(ingest_txid, seq)` bounded by `pg_snapshot_xmin(pg_current_snapshot())`. An identity/BIGSERIAL watermark loses rows when transactions commit out of order (reproduced on 18.6); the xid8 bound can only stall, never skip.
 - Steps: (1) short claim transaction inserts the range into `pipeline.export_batches` and derives the object key from the batch id; (2) read the range, serialize deterministic JSONL (each line is the S1 event, payload embedded verbatim), validate each line against S1; (3) PUT with `If-None-Match: *` and `x-amz-meta-sha256`; on 412, HEAD and compare the checksum; (4) mark `exported`.
 - Never hold a DB transaction across S3 or broker I/O.
-- Only `outcome = 'ok'` rows are exported (including rows flagged `payload_valid = false`).
+- Only `outcome = 'ok'` rows are exported.
 
 ### 4.3 Publisher → broker
 
@@ -212,12 +212,13 @@ JSON Schema draft 2020-12 files in `schemas/`, embedded with `go:embed`, compile
 
 | Stage | Schema | On failure |
 |---|---|---|
-| fetcher, response | S0 | Store and flag: `payload_valid = false`, `payload_errors`, WARN log, metric |
-| fetcher, before INSERT | S1 | Reject (our bug): ERROR log, alert |
+| fetcher, before INSERT | S1 (envelope only; the payload is not inspected) | Reject (our bug): ERROR log, alert |
 | exporter, publisher | S1 | Write to `dlq/`, do not pass on |
-| transformer, input | S1; flagged payloads re-checked against the current S0 | `dlq/`; if the payload now passes (schema fixed), process it |
+| transformer, input | S1, then the payload against S0 | `dlq/` (`schema_violation` / `source_schema_violation`). After a schema fix, the raw objects are republished and reprocessed |
 | transformer, output | S2 | `dlq/`, never written to processed |
 | writing rejected / dlq | S3 | ERROR log with the original bytes in base64 |
+
+Schemas are embedded in the binary, so producers and consumers always carry the schema version of their build; a schema change ships as a redeploy. Rollout order for a compatible change: consumers (transformer) first, then producers (publisher, exporter, fetcher). CI checks that a new schema version still accepts every fixture of the previous one. A breaking change gets a new major version (`v2`) handled side by side.
 
 Cleaning-rule drops are not schema failures: they go to `rejected/`, not `dlq/`. `dlq/` means "something broke, a human is needed".
 
@@ -359,13 +360,15 @@ Every record bound for `processed/` or `rejected/` claims its natural key (§6.2
 | Other position, same content hash | Drop as duplicate |
 | Other position, different content hash | Write to `rejected/` with `snapshot_conflict` |
 
+The content hash (`content_sha256`) is computed over the record's business fields only, in canonical form. It excludes `_schema_version` and every technical column (`_event_id`, `_raw_object`, `_kafka_partition`, `_kafka_offset`, `_processed_at`) and `fetched_at`; otherwise identical records arriving in different messages would never match.
+
 Drop reasons for metrics only (no separate logic): same `event_id` → `replay`; same `idempotency_key` → `duplicate_response`; otherwise `duplicate_record`. `dlq/` records are not deduplicated.
 
 ### 7.4 Transformer batch algorithm
 
 franz-go: `DisableAutoCommit`, `BlockRebalanceOnPoll`, cooperative-sticky balancer, `FetchMinBytes` 1 MB / `FetchMaxWait` 5 s, max 500 records. At most one in-flight batch per partition. A batch is a contiguous offset range `[F..L]` of one partition.
 
-1. **Input checks (no DB):** valid JSON (no duplicate keys, valid UTF-8) else `dlq` `decode_error`; S1 else `dlq` `schema_violation`; `sha256(payload) == payload_sha256` else `dlq` `integrity_error`; flagged payloads re-checked against current S0.
+1. **Input checks (no DB):** valid JSON (no duplicate keys, valid UTF-8) else `dlq` `decode_error`; S1 else `dlq` `schema_violation`; `sha256(payload) == payload_sha256` else `dlq` `integrity_error`; payload against S0 else `dlq` `source_schema_violation`.
 2. **TX1 (milliseconds, no network I/O):**
    a. Insert the range into `consumer_batches` (`planned`). The EXCLUDE constraint forbids overlap; if a row with this start exists, use its stored range instead of the polled one.
    b. Transform passing messages into dataset records (cleaning rules §6.4).
