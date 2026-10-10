@@ -403,6 +403,34 @@ func TestFetchTrimsOnlyJSONWhitespace(t *testing.T) {
 	}
 }
 
+// One event (body plus envelope) must fit into one broker message (~1 MiB by
+// default in Redpanda and franz-go); a larger 200 body becomes an http_error
+// at fetch time instead of a batch the publisher can never produce.
+func TestFetchBodySizeLimit(t *testing.T) {
+	jsonBody := func(n int) []byte { // a JSON array of one string, n bytes long
+		return append(append([]byte(`["`), bytes.Repeat([]byte("x"), n-4)...), `"]`...)
+	}
+	for name, tc := range map[string]struct {
+		body    []byte
+		outcome string
+	}{
+		"800 KiB": {jsonBody(800 << 10), event.OutcomeOK},
+		"1 MiB":   {jsonBody(1 << 20), event.OutcomeHTTPError},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) { _, _ = w.Write(tc.body) }, "")
+			ev := c.Fetch(context.Background(), event.EndpointMarkets, MarketsRequest(1))
+			if ev.Outcome != tc.outcome {
+				t.Fatalf("outcome = %s (error %v), want %s", ev.Outcome, ev.Error, tc.outcome)
+			}
+			if tc.outcome == event.OutcomeHTTPError && (ev.Error == nil || !strings.Contains(*ev.Error, "body larger than 921600 bytes")) {
+				t.Fatalf("error = %v, want the body size limit", ev.Error)
+			}
+			assertS1(t, ev)
+		})
+	}
+}
+
 // A 200 body that encoding/json accepts but strict JSON rejects (duplicate
 // member names, invalid UTF-8) or a bare null must not become an ok event:
 // S1 validation would reject it later and the call would vanish.

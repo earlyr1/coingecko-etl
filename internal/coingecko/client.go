@@ -32,10 +32,15 @@ const (
 	maxCooldown       = 15 * time.Minute // cap on a Retry-After cooldown: the header is untrusted
 	backoffBase       = 2 * time.Second  // first cooldown after a 5xx / timeout / connection error
 	backoffMax        = 60 * time.Second // cap of the exponential backoff
-	maxBodyBytes      = 32 << 20         // a /coins/{id} body is ~100 KB
 	maxErrorBodyBytes = 512              // body excerpt kept in event.Error
 	userAgent         = "coingecko-etl/1"
 )
+
+// maxBodyBytes keeps one event (body plus a ~1 KB envelope) inside one broker
+// message: Redpanda's default message limit and franz-go's batch limit are
+// about 1 MiB, and a larger event would fail on every publish. Real bodies
+// are ~95 KB.
+const maxBodyBytes = 900 << 10
 
 // Client calls CoinGecko through a shared Limiter.
 type Client struct {
@@ -250,7 +255,7 @@ func (c *Client) Fetch(ctx context.Context, endpoint string, req event.Request) 
 		}
 		return failed(ev, event.OutcomeHTTPError, fmt.Sprintf("HTTP %d: %s", resp.StatusCode, excerpt(body)))
 	case len(body) > maxBodyBytes:
-		return failed(ev, event.OutcomeHTTPError, fmt.Sprintf("HTTP %d: body larger than %d bytes", resp.StatusCode, maxBodyBytes))
+		return failed(ev, event.OutcomeHTTPError, fmt.Sprintf("HTTP %d: body larger than %d bytes (900 KiB, so that the event fits one broker message)", resp.StatusCode, maxBodyBytes))
 	}
 	// Surrounding whitespace is not part of the JSON value. Only JSON
 	// whitespace is trimmed: bytes.TrimSpace would also strip NBSP, NEL, \v
