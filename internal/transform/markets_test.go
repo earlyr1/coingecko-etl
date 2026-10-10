@@ -105,17 +105,28 @@ func TestMarketsGoldenRow(t *testing.T) {
 	}
 }
 
+// roi_currency is a currency code like vs_currency and
+// coin_market_by_currency.currency, so it is lower case too and joins on them.
 func TestMarketsROIFlattened(t *testing.T) {
 	payload := []byte(`[{"id":"ethereum","symbol":"eth","name":"Ethereum","current_price":2000,"total_volume":1,
 	  "roi":{"times":42.012142715693386,"currency":"btc","percentage":4201.214271569338},
-	  "last_updated":"2026-10-10T10:07:55.000Z"}]`)
+	  "last_updated":"2026-10-10T10:07:55.000Z"},
+	 {"id":"a","symbol":"a","name":"A","current_price":1,"total_volume":1,
+	  "roi":{"times":1.5,"currency":"USD","percentage":150},"last_updated":"2026-10-10T10:07:55.000Z"},
+	 {"id":"b","symbol":"b","name":"B","current_price":1,"total_volume":1,
+	  "roi":{"times":2.5,"currency":" Eth ","percentage":250},"last_updated":"2026-10-10T10:07:55.000Z"}]`)
 	recs := mustTransform(t, rawEvent(event.EndpointMarkets, nil, payload))
 	m := recs[0].Business.(MarketSnapshot)
-	if m.ROITimes == nil || *m.ROITimes != 42.012142715693386 || *m.ROICurrency != "BTC" || *m.ROIPct != 4201.214271569338 {
+	if m.ROITimes == nil || *m.ROITimes != 42.012142715693386 || *m.ROICurrency != "btc" || *m.ROIPct != 4201.214271569338 {
 		t.Fatalf("roi = %v %v %v", m.ROITimes, m.ROICurrency, m.ROIPct)
 	}
 	if m.VsCurrency != "usd" {
 		t.Fatalf("vs_currency default = %q", m.VsCurrency)
+	}
+	for i, want := range map[int]string{1: "usd", 2: "eth"} {
+		if got := recs[i].Business.(MarketSnapshot).ROICurrency; got == nil || *got != want {
+			t.Errorf("record %d roi_currency = %v, want %q", i, got, want)
+		}
 	}
 }
 

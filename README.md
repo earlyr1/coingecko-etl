@@ -189,7 +189,7 @@ The child datasets reference `coin_snapshot` by `(coin_id, snapshot_at)`. Images
 
 - Timestamps: RFC 3339 in UTC with milliseconds, e.g. `2026-10-10T10:07:55.000Z`; `genesis_date` as `YYYY-MM-DD`.
 - Money and quantities (prices, market caps, volumes, supplies) are decimal strings in plain notation, e.g. `"43083803721443304"`. They are decoded with `json.Number` and a decimal type and never pass through `float64`: some values exceed 2^53. Percentages and ratios are JSON numbers.
-- Symbols are upper-case; EVM contract addresses lower-case.
+- Symbols are upper-case; currency codes (`vs_currency`, `currency`, `roi_currency`) and EVM contract addresses lower-case.
 - Files are plain `.jsonl` (no compression) so they can be read with `cat`.
 
 ### Cleaning rules

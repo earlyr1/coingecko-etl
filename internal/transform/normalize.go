@@ -54,6 +54,17 @@ func upperSymbol(s *string) *string {
 	return &v
 }
 
+// lowerCode lower-cases a currency code (like vs_currency and
+// coin_market_by_currency.currency); nil/"" → nil.
+func lowerCode(s *string) *string {
+	s = nilIfEmpty(s)
+	if s == nil {
+		return nil
+	}
+	v := strings.ToLower(strings.TrimSpace(*s))
+	return &v
+}
+
 // normAddress lower-cases EVM addresses and leaves every other address
 // format untouched (Solana/Tron/Stellar addresses are case-sensitive).
 func normAddress(s string) string {

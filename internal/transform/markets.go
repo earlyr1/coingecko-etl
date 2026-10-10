@@ -179,7 +179,7 @@ func marketSnapshotFrom(r marketsRow, snap time.Time, snapAt, vs string, rules R
 	}
 	if r.ROI != nil {
 		m.ROITimes = e.pct(r.ROI.Times)
-		m.ROICurrency = upperSymbol(r.ROI.Currency)
+		m.ROICurrency = lowerCode(r.ROI.Currency) // a currency code: joins on vs_currency
 		m.ROIPct = e.pct(r.ROI.Percentage)
 	}
 	rank, err := intOrNil(r.MarketCapRank)
