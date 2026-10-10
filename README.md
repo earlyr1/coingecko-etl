@@ -85,7 +85,7 @@ The design needs three things from the broker:
 
 The Kafka protocol provides all three, and it is the de-facto standard for data engineering at this scale: connectors, stream processors, lakehouse sinks and managed offerings all speak it.
 
-Redpanda is used for the local stack because it speaks the same protocol as a single C++ binary without a JVM: it starts in about two seconds, uses about 200 MiB of memory in this stack and needs no separate controller. The Go client ([franz-go](https://github.com/twmb/franz-go)) does not know which broker it talks to, so the same code runs unchanged against Apache Kafka, Amazon MSK or Confluent Cloud in production. The main thing Redpanda lacks is the Kafka Connect ecosystem, and this project does not use Kafka Connect. Redpanda's licence (BSL 1.1) allows this use.
+Redpanda is used for the local stack because it speaks the same protocol as a single C++ binary without a JVM: it starts in about two seconds, uses about 300 MiB of memory in this stack and needs no separate controller. The Go client ([franz-go](https://github.com/twmb/franz-go)) does not know which broker it talks to, so the same code runs unchanged against Apache Kafka, Amazon MSK or Confluent Cloud in production. The main thing Redpanda lacks is the Kafka Connect ecosystem, and this project does not use Kafka Connect. Redpanda's licence (BSL 1.1) allows this use.
 
 | Broker | Verdict |
 |---|---|
@@ -198,7 +198,7 @@ The child datasets reference `coin_snapshot` by `(coin_id, snapshot_at)`. Images
 - **Reject** to `s3://rejected` with a reason: `missing_id`, `null_price`, `nonpositive_price`, `empty_platform` (for example bitcoin's `platforms: {"": ""}`), `empty_record` (all metrics null), `snapshot_conflict` (see below; it also catches two tickers of one response that share a key with different values).
 - **Flag and keep:**
   - `is_stale`: `snapshot_at − source_updated_at > 10 min`; for tickers, the upstream flag or a last trade older than 1 h;
-  - `is_inactive`: zero volume;
+  - `is_inactive`: zero volume (`market_snapshot` and `coin_market_by_currency` only: the other datasets have no volume of their own);
   - `is_anomaly`: price outside `[low_24h, high_24h]`; for tickers, the upstream flag or `last_usd` more than 2% away from the coin's median over all its tickers in the snapshot. For `market_snapshot` the range is widened by `ETL_ANOMALY_TOLERANCE_PCT` (default 0.5%) on each side, `price < low_24h × (1 − t/100)` or `price > high_24h × (1 + t/100)`, because with `precision=full` the price carries more digits than the rounded 24 h bounds (USYC `1.140213` against `[1.14, 1.14]`; strict, 69 of 700 rows of a live run were flagged); `0` restores the strict check. `coin_market_by_currency` stays strict: `/coins/{id}` sends price and bounds at one precision.
 
 The thresholds are configuration (`ETL_STALE_AFTER`, `ETL_TICKER_STALE_AFTER`, `ETL_TICKER_ANOMALY_PCT`, `ETL_ANOMALY_TOLERANCE_PCT`).
@@ -277,6 +277,8 @@ If a key already holds different bytes (412 with another checksum), or a re-plan
 The naive rule "drop if the key was already claimed" would lose every record of a batch that crashed between its transaction and the PUT; claims that remember their position avoid that.
 
 Invariants: transforms are pure (no clock, no random order); `dedup_claims` and `consumer_batches` must outlive the topic's 7-day retention, so that a replay within retention is still deduplicated (nothing in this stack deletes them; a production retention job would keep at least 30 days); Postgres runs with `idle_in_transaction_session_timeout = 60s` and `transaction_timeout = 5min`, so a stuck transaction cannot stall the exporter forever.
+
+Known limitation: if the topic's 7-day retention deletes the records of a transformer batch that is still `planned` (for example after a week-long transformer outage), that batch cannot be redone, because its range is fixed in the manifest. It needs a manual repair: delete the `planned` row of `pipeline.consumer_batches` and that batch's claims by position (`pipeline.dedup_claims` rows with its topic id and partition and offsets in its range; `dedup_claims_position_idx` covers that lookup).
 
 ## Metrics
 
@@ -366,15 +368,17 @@ for svc in fetcher exporter publisher transformer; do
 done
 ```
 
-What persists where:
+What persists where, by how the stack was started:
 
-| Data | Location | Survives |
+| Data | `make up` (docker compose) | `docker run` (above) |
 |---|---|---|
-| raw, processed, rejected, dlq objects | `./data` (bind mount) | container removal, `docker compose down -v` |
-| object metadata (sha256 used by the write-once check) | `./.s3meta` (bind mount) | as above; keep it together with `./data` |
-| logs | `./logs` (bind mount) | as above |
-| Postgres (raw calls, ledgers, dedup claims) | named volume `pgdata` | container removal; deleted by `down -v` |
-| broker log and consumer offsets | named volume `redpanda` | container removal; deleted by `down -v` |
+| raw, processed, rejected, dlq objects | `./data` bind mount: survives `docker compose down -v`; `make clean` removes it | `./data` bind mount: survives container and volume removal |
+| object metadata (the sha256 of the write-once check) | `./.s3meta`, like `./data` | `./.s3meta`, like `./data` |
+| logs | `./logs`, like `./data` | `./logs`, like `./data` |
+| Postgres (raw calls, ledgers, dedup claims) | volume `coingecko-etl_pgdata`, deleted by `docker compose down -v` | volume `pgdata`, deleted only by `docker volume rm pgdata` |
+| broker log and consumer offsets | volume `coingecko-etl_redpanda`, deleted by `docker compose down -v` | volume `redpanda`, deleted only by `docker volume rm redpanda` |
+
+`./data`, `./.s3meta` and `./logs` survive both ways of stopping, but they belong to the Postgres and Redpanda volumes next to them: object keys are unique only within one Postgres/Redpanda lifetime, so reset everything together or nothing. For compose that is `make clean`; for the `docker run` stack, `docker rm -f postgres redpanda versitygw fetcher exporter publisher transformer`, `docker volume rm pgdata redpanda`, `docker network rm etl` and `rm -rf data logs .s3meta`. Compose and `docker run` use different volume names but the same `./data`, so run them from different checkouts. `etl init` refuses to start when the raw bucket already holds objects but the export ledger is empty.
 
 ## Assumptions
 
