@@ -14,7 +14,7 @@ var allKeys = []string{
 	"ETL_MARKETS_INTERVAL", "ETL_DETAIL_INTERVAL", "ETL_DETAIL_OFFSET", "ETL_WATCHLIST",
 	"ETL_MARKETS_PER_PAGE", "ETL_MIN_REQUEST_SPACING", "ETL_EXPORT_INTERVAL", "ETL_EXPORT_BATCH_MAX",
 	"ETL_PUBLISH_LEASE", "ETL_PUBLISH_POLL", "ETL_TRANSFORM_MAX_RECORDS", "ETL_STALE_AFTER",
-	"ETL_TICKER_STALE_AFTER", "ETL_TICKER_ANOMALY_PCT",
+	"ETL_TICKER_STALE_AFTER", "ETL_TICKER_ANOMALY_PCT", "ETL_ANOMALY_TOLERANCE_PCT",
 }
 
 // clearEnv blanks every variable Load reads; blank means "use the default".
@@ -61,6 +61,7 @@ func TestLoadDefaults(t *testing.T) {
 		StaleAfter:          10 * time.Minute,
 		TickerStaleAfter:    time.Hour,
 		TickerAnomalyPct:    2.0,
+		AnomalyTolerancePct: 0.5,
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("defaults mismatch:\n got %+v\nwant %+v", got, want)
@@ -98,6 +99,7 @@ func TestLoadOverrides(t *testing.T) {
 		"ETL_STALE_AFTER":           "5m",
 		"ETL_TICKER_STALE_AFTER":    "2h",
 		"ETL_TICKER_ANOMALY_PCT":    "3.5",
+		"ETL_ANOMALY_TOLERANCE_PCT": "1.25",
 	}
 	for k, v := range env {
 		t.Setenv(k, v)
@@ -139,6 +141,7 @@ func TestLoadOverrides(t *testing.T) {
 		{"StaleAfter", c.StaleAfter, 5 * time.Minute},
 		{"TickerStaleAfter", c.TickerStaleAfter, 2 * time.Hour},
 		{"TickerAnomalyPct", c.TickerAnomalyPct, 3.5},
+		{"AnomalyTolerancePct", c.AnomalyTolerancePct, 1.25},
 	}
 	for _, ch := range checks {
 		if !reflect.DeepEqual(ch.got, ch.want) {
@@ -158,6 +161,12 @@ func TestLoadInvalid(t *testing.T) {
 		{"ETL_TOPIC_PARTITIONS", "99999999999"}, // overflows int32
 		{"ETL_EXPORT_BATCH_MAX", "0"},           // not positive
 		{"ETL_TICKER_ANOMALY_PCT", "two"},       // not a float
+		{"ETL_TICKER_ANOMALY_PCT", "NaN"},       // parses, but is no threshold
+		{"ETL_TICKER_ANOMALY_PCT", "+Inf"},      // parses, but is no threshold
+		{"ETL_ANOMALY_TOLERANCE_PCT", "-0.5"},   // negative
+		{"ETL_ANOMALY_TOLERANCE_PCT", "NaN"},    // not a number
+		{"ETL_ANOMALY_TOLERANCE_PCT", "Inf"},    // infinite
+		{"ETL_ANOMALY_TOLERANCE_PCT", "half"},   // not a float
 		{"ETL_PIPELINE_EPOCH", "not-a-uuid"},    // not a uuid
 		{"ETL_WATCHLIST", " , ,"},               // no values
 	}
@@ -173,6 +182,19 @@ func TestLoadInvalid(t *testing.T) {
 				t.Fatalf("error %q does not name %s", err, c.key)
 			}
 		})
+	}
+}
+
+// ETL_ANOMALY_TOLERANCE_PCT=0 is allowed: it means the strict range check.
+func TestLoadAnomalyToleranceZeroIsStrict(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("ETL_ANOMALY_TOLERANCE_PCT", "0")
+	c, err := Load("transformer")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.AnomalyTolerancePct != 0 {
+		t.Fatalf("AnomalyTolerancePct = %v, want 0", c.AnomalyTolerancePct)
 	}
 }
 

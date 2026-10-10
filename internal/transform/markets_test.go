@@ -119,6 +119,41 @@ func TestMarketsROIFlattened(t *testing.T) {
 	}
 }
 
+// With precision=full, current_price has more digits than the rounded
+// high_24h/low_24h (USYC 1.140213 against [1.14, 1.14]). is_anomaly therefore
+// allows AnomalyTolerancePct percent around the range; 0 is the strict check.
+func TestMarketsAnomalyTolerance(t *testing.T) {
+	cases := []struct {
+		name  string
+		price string
+		tol   float64
+		want  bool
+	}{
+		{"precision=full price at rounded bounds, 0.5%", "1.140213033752708", 0.5, false},
+		{"exactly on the widened high, 0.5%", "1.1457", 0.5, false}, // 1.14 * 1.005
+		{"just above the widened high, 0.5%", "1.14570001", 0.5, true},
+		{"2% above the high, 0.5%", "1.1628", 0.5, true}, // 1.14 * 1.02
+		{"2% below the low, 0.5%", "1.1172", 0.5, true},
+		{"precision=full price at rounded bounds, strict", "1.140213033752708", 0, true},
+		{"on the bound, strict", "1.14", 0, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			payload := []byte(`[{"id":"usyc","symbol":"usyc","name":"USYC","current_price":` + tc.price + `,"total_volume":5,
+			  "high_24h":1.14,"low_24h":1.14,"last_updated":"2026-10-10T10:07:55.000Z"}]`)
+			rules := testRules
+			rules.AnomalyTolerancePct = tc.tol
+			recs, err := Transform(rawEvent(event.EndpointMarkets, map[string]string{"vs_currency": "usd"}, payload), rules)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := recs[0].Business.(MarketSnapshot).IsAnomaly; got != tc.want {
+				t.Fatalf("is_anomaly = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestTransformDeterministic(t *testing.T) {
 	ev := fixtureEvent(t, event.EndpointMarkets, "markets_usd250_t0.json")
 	serialize := func() []byte {

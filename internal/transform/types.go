@@ -38,9 +38,12 @@ const (
 )
 
 // Rules are the configurable cleaning thresholds (config.StaleAfter etc.).
+// AnomalyTolerancePct widens [low_24h, high_24h] for market_snapshot.is_anomaly
+// by that many percent on each side; 0 is the strict range check.
 type Rules struct {
 	StaleAfter, TickerStaleAfter time.Duration
 	TickerAnomalyPct             float64
+	AnomalyTolerancePct          float64
 }
 
 // Lineage holds the technical columns appended to every written row.

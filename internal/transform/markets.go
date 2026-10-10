@@ -10,6 +10,8 @@ import (
 
 	"coingecko-etl/internal/event"
 	"coingecko-etl/internal/xtime"
+
+	"github.com/shopspring/decimal"
 )
 
 // marketsRow is one element of the /coins/markets array. Numbers are
@@ -193,7 +195,9 @@ func marketSnapshotFrom(r marketsRow, snap time.Time, snapAt, vs string, rules R
 		m.IsStale = snap.Sub(t) > rules.StaleAfter
 	}
 	m.IsInactive = isZero(m.TotalVolume)
-	m.IsAnomaly = outsideRange(m.Price, m.Low24h, m.High24h)
+	// precision=full prices carry more digits than the rounded 24h bounds
+	// (USYC 1.140213 against [1.14, 1.14]): allow the configured tolerance.
+	m.IsAnomaly = outsideRange(m.Price, m.Low24h, m.High24h, rules.AnomalyTolerancePct)
 	return m, nil
 }
 
@@ -209,13 +213,18 @@ func isZero(d Dec) bool {
 	return ok && v.IsZero()
 }
 
-// outsideRange reports price ∉ [low, high]; false unless all three are present.
-func outsideRange(price, low, high Dec) bool {
+// outsideRange reports whether price lies outside [low, high] widened by
+// tolPct percent on each side: price < low*(1-tolPct/100) or price >
+// high*(1+tolPct/100), computed in decimal. tolPct 0 is the strict check.
+// It is false unless all three values are present.
+func outsideRange(price, low, high Dec, tolPct float64) bool {
 	p, okP := price.Decimal()
 	l, okL := low.Decimal()
 	h, okH := high.Decimal()
 	if !okP || !okL || !okH {
 		return false
 	}
-	return p.LessThan(l) || p.GreaterThan(h)
+	t := decimal.NewFromFloat(tolPct).Div(decimal.NewFromInt(100))
+	one := decimal.NewFromInt(1)
+	return p.LessThan(l.Mul(one.Sub(t))) || p.GreaterThan(h.Mul(one.Add(t)))
 }

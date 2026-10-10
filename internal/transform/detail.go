@@ -360,7 +360,8 @@ func (b *detailBuilder) addCurrencies(md *coinMarketDoc) error {
 			return fmt.Errorf("transform: market_data currency %q: %w", cur, e.err)
 		}
 		r.IsInactive = isZero(r.TotalVolume)
-		r.IsAnomaly = outsideRange(r.Price, r.Low24h, r.High24h)
+		// Strict: /coins/{id} sends price and 24h bounds at one precision.
+		r.IsAnomaly = outsideRange(r.Price, r.Low24h, r.High24h, 0)
 
 		zone, reason := ZoneProcessed, ""
 		switch {

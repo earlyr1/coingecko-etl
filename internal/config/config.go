@@ -5,6 +5,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -43,6 +44,7 @@ type Config struct {
 	StaleAfter          time.Duration // ETL_STALE_AFTER, default 10m
 	TickerStaleAfter    time.Duration // ETL_TICKER_STALE_AFTER, default 1h
 	TickerAnomalyPct    float64       // ETL_TICKER_ANOMALY_PCT, default 2.0
+	AnomalyTolerancePct float64       // ETL_ANOMALY_TOLERANCE_PCT, default 0.5 (0 = strict range check)
 }
 
 // Load reads the environment. service names the subcommand ("fetcher", ...) and is
@@ -79,6 +81,7 @@ func Load(service string) (Config, error) {
 		StaleAfter:          p.duration("ETL_STALE_AFTER", 10*time.Minute, false),
 		TickerStaleAfter:    p.duration("ETL_TICKER_STALE_AFTER", time.Hour, false),
 		TickerAnomalyPct:    p.float("ETL_TICKER_ANOMALY_PCT", 2.0),
+		AnomalyTolerancePct: p.nonNegFloat("ETL_ANOMALY_TOLERANCE_PCT", 0.5),
 	}
 	if len(p.errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(p.errs...))
@@ -159,14 +162,29 @@ func (p *parser) int32(key string, def int32) int32 {
 	return int32(n)
 }
 
+// float parses a positive, finite number. ParseFloat accepts "NaN" and
+// "Inf", which pass a plain f <= 0 check.
 func (p *parser) float(key string, def float64) float64 {
 	v, ok := p.raw(key)
 	if !ok {
 		return def
 	}
 	f, err := strconv.ParseFloat(v, 64)
-	if err != nil || f <= 0 {
+	if err != nil || !(f > 0) || math.IsInf(f, 0) {
 		p.fail(key, v, "must be a positive number")
+	}
+	return f
+}
+
+// nonNegFloat parses a finite number >= 0.
+func (p *parser) nonNegFloat(key string, def float64) float64 {
+	v, ok := p.raw(key)
+	if !ok {
+		return def
+	}
+	f, err := strconv.ParseFloat(v, 64)
+	if err != nil || !(f >= 0) || math.IsInf(f, 0) {
+		p.fail(key, v, "must be a number >= 0")
 	}
 	return f
 }

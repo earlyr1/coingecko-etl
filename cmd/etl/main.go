@@ -254,9 +254,10 @@ func buildService(ctx context.Context, cfg config.Config, reg *prometheus.Regist
 		deps := transformer.Deps{
 			Pool: pool, S3: s3c, Reg: schemaReg, Metrics: m, Log: log,
 			Rules: transform.Rules{
-				StaleAfter:       cfg.StaleAfter,
-				TickerStaleAfter: cfg.TickerStaleAfter,
-				TickerAnomalyPct: cfg.TickerAnomalyPct,
+				StaleAfter:          cfg.StaleAfter,
+				TickerStaleAfter:    cfg.TickerStaleAfter,
+				TickerAnomalyPct:    cfg.TickerAnomalyPct,
+				AnomalyTolerancePct: cfg.AnomalyTolerancePct,
 			},
 		}
 		return func(ctx context.Context) error {

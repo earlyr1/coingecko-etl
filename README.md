@@ -198,9 +198,9 @@ The child datasets reference `coin_snapshot` by `(coin_id, snapshot_at)`. Images
 - **Flag and keep:**
   - `is_stale`: `snapshot_at − source_updated_at > 10 min`; for tickers, the upstream flag or a last trade older than 1 h;
   - `is_inactive`: zero volume;
-  - `is_anomaly`: price outside `[low_24h, high_24h]`; for tickers, the upstream flag or `last_usd` more than 2% away from the coin's median over all its tickers in the snapshot.
+  - `is_anomaly`: price outside `[low_24h, high_24h]`; for tickers, the upstream flag or `last_usd` more than 2% away from the coin's median over all its tickers in the snapshot. For `market_snapshot` the range is widened by `ETL_ANOMALY_TOLERANCE_PCT` (default 0.5%) on each side, `price < low_24h × (1 − t/100)` or `price > high_24h × (1 + t/100)`, because with `precision=full` the price carries more digits than the rounded 24 h bounds (USYC `1.140213` against `[1.14, 1.14]`; strict, 69 of 700 rows of a live run were flagged); `0` restores the strict check. `coin_market_by_currency` stays strict: `/coins/{id}` sends price and bounds at one precision.
 
-The thresholds are configuration (`ETL_STALE_AFTER`, `ETL_TICKER_STALE_AFTER`, `ETL_TICKER_ANOMALY_PCT`).
+The thresholds are configuration (`ETL_STALE_AFTER`, `ETL_TICKER_STALE_AFTER`, `ETL_TICKER_ANOMALY_PCT`, `ETL_ANOMALY_TOLERANCE_PCT`).
 
 ### Time model
 

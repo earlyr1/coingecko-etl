@@ -270,7 +270,7 @@ Every row carries technical columns `_event_id`, `_raw_object`, `_kafka_partitio
 - **Flag and keep:**
   - `is_stale`: `snapshot_at − source_updated_at > 10 min`; for tickers, the upstream flag or last trade older than 1 h.
   - `is_inactive`: zero volume.
-  - `is_anomaly`: price outside `[low_24h, high_24h]`; for tickers, the upstream flag or `last_usd` more than 2% from the coin's median across tickers in the snapshot.
+  - `is_anomaly`: price outside `[low_24h, high_24h]`; for tickers, the upstream flag or `last_usd` more than 2% from the coin's median across tickers in the snapshot. For `market_snapshot` the range is widened by `ETL_ANOMALY_TOLERANCE_PCT` percent on each side (default 0.5; 0 = strict): `price < low_24h × (1 − t/100)` or `price > high_24h × (1 + t/100)`, in decimal, because `precision=full` prices carry more digits than the rounded 24 h bounds. `coin_market_by_currency` keeps the strict range (`/coins/{id}` sends price and bounds at one precision).
 - Thresholds are configuration.
 
 ### 6.5 Object layout
