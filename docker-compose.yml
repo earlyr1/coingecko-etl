@@ -1,0 +1,181 @@
+name: coingecko-etl
+
+# Shared settings of every `etl` container (one image, one subcommand each).
+x-etl: &etl
+  image: coingecko-etl:local
+  build: .
+  user: "${ETL_UID:-65532}:${ETL_GID:-65532}"
+  env_file:
+    - path: .env
+      required: false
+  environment: &etl-env
+    ETL_PG_DSN: postgres://etl:etl@postgres:5432/etl?sslmode=disable
+    ETL_BROKERS: redpanda:9092
+    ETL_S3_ENDPOINT: http://versitygw:7070
+    ETL_HTTP_ADDR: ":8080"
+    ETL_LOG_DIR: /app/logs
+  volumes:
+    - ./logs:/app/logs
+  restart: unless-stopped
+  depends_on:
+    init:
+      condition: service_completed_successfully
+  healthcheck:
+    test: ["CMD", "/etl", "healthcheck"]
+    interval: 10s
+    timeout: 5s
+    retries: 3
+    start_period: 20s
+
+services:
+  # ---------------- infrastructure ----------------
+  postgres:
+    image: postgres:18.6
+    environment:
+      POSTGRES_USER: etl
+      POSTGRES_PASSWORD: etl
+      POSTGRES_DB: etl
+    # Postgres 18 keeps PGDATA under /var/lib/postgresql/<major>/docker;
+    # mounting /var/lib/postgresql/data makes the container refuse to start.
+    volumes:
+      - pgdata:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      # -h forces TCP: the init phase listens on the Unix socket only, so a
+      # socket check would report healthy before the real server is up.
+      test: ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "etl", "-d", "etl"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redpanda:
+    image: redpandadata/redpanda:v26.2.4
+    command:
+      - redpanda
+      - start
+      - --mode=dev-container
+      - --smp=1
+      - --memory=1G
+      - --kafka-addr=internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr=internal://redpanda:9092,external://localhost:${REDPANDA_EXTERNAL_PORT:-19092}
+    volumes:
+      - redpanda:/var/lib/redpanda/data
+      # Sets auto_create_topics_enabled=false on first start: topics are
+      # created only by `etl init`, with explicit partitions and retention.
+      - ./deploy/redpanda/bootstrap.yaml:/etc/redpanda/.bootstrap.yaml:ro
+    ports:
+      - "127.0.0.1:${REDPANDA_EXTERNAL_PORT:-19092}:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    restart: unless-stopped
+
+  versitygw:
+    image: versity/versitygw:v1.8.0
+    # posix backend: every top-level dir of /lake is a bucket, every object a
+    # plain file. Metadata (sha256, content type) lives in the sidecar dir
+    # because Docker Desktop bind mounts have no xattrs.
+    command: ["--port", ":7070", "--health", "/health", "posix", "--sidecar", "/meta", "/lake"]
+    user: "${ETL_UID:-65532}:${ETL_GID:-65532}"
+    environment:
+      ROOT_ACCESS_KEY_ID: ${ETL_S3_ACCESS_KEY:-etl}
+      ROOT_SECRET_ACCESS_KEY: ${ETL_S3_SECRET_KEY:-etlsecret123}
+    volumes:
+      - ./data:/lake
+      - ./.s3meta:/meta
+    ports:
+      - "127.0.0.1:${S3_PORT:-7070}:7070"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:7070/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
+  redpanda-console:
+    image: redpandadata/console:v3.12.0
+    environment:
+      KAFKA_BROKERS: redpanda:9092
+    ports:
+      - "127.0.0.1:${CONSOLE_PORT:-8081}:8080"
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./deploy/prometheus:/etc/prometheus:ro
+      - prometheus:/prometheus
+    ports:
+      - "127.0.0.1:${PROMETHEUS_PORT:-9090}:9090"
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:13.2.3
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Viewer
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /etc/grafana/dashboards/etl.json
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./deploy/grafana/dashboards:/etc/grafana/dashboards:ro
+      - grafana:/var/lib/grafana
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # ---------------- pipeline ----------------
+  init:
+    <<: *etl
+    command: ["init"]
+    restart: "no"
+    healthcheck:
+      disable: true
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redpanda:
+        condition: service_healthy
+      versitygw:
+        condition: service_healthy
+
+  fetcher:
+    <<: *etl
+    command: ["fetcher"]
+
+  exporter:
+    <<: *etl
+    command: ["exporter"]
+
+  publisher:
+    <<: *etl
+    command: ["publisher"]
+
+  transformer:
+    <<: *etl
+    command: ["transformer"]
+    environment:
+      <<: *etl-env
+      ETL_LOG_PER_HOST: "true" # replicas share ./logs: one file per container
+    deploy:
+      replicas: 2
+
+volumes:
+  pgdata:
+  redpanda:
+  prometheus:
+  grafana:

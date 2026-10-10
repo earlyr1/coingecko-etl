@@ -1,0 +1,106 @@
+# Unit tests for alerts.yml: docker run --rm --entrypoint promtool \
+#   -v "$PWD/deploy/prometheus:/p:ro" -w /p prom/prometheus:v3.15.0 test rules alerts_test.yml
+rule_files:
+  - alerts.yml
+evaluation_interval: 1m
+
+tests:
+  - name: stale data fires after two quiet minutes
+    interval: 1m
+    input_series:
+      - series: 'etl_last_success_timestamp_seconds{endpoint="coins_markets"}'
+        values: '0x10' # last success at unix time 0, never again
+    alert_rule_test:
+      - eval_time: 1m
+        alertname: ETLDataStale
+        exp_alerts: []
+      - eval_time: 5m
+        alertname: ETLDataStale
+        exp_alerts:
+          - exp_labels: {severity: critical, endpoint: coins_markets}
+            exp_annotations:
+              summary: "No successful CoinGecko poll for coins_markets in over 2 minutes"
+              description: "Check the fetcher logs (logs/fetcher/etl.log) for HTTP errors or a 429 cooldown."
+
+  - name: a brand-new dlq series fires immediately
+    interval: 1m
+    input_series:
+      - series: 'etl_dlq_total{stage="transform_input",error_class="decode_error"}'
+        values: '_x20 1x10' # first sample appears at minute 20 with value 1
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ETLDeadLetterRecords
+        exp_alerts: []
+      - eval_time: 22m
+        alertname: ETLDeadLetterRecords
+        exp_alerts:
+          - exp_labels: {severity: warning, stage: transform_input, error_class: decode_error}
+            exp_annotations:
+              summary: "Records went to the dead-letter zone (transform_input / decode_error)"
+              description: "Inspect data/dlq/; a human is needed."
+
+  - name: source schema drift above 5 percent
+    interval: 1m
+    input_series:
+      - series: 'etl_schema_validations_total{stage="transform_input",schema="coins_markets.v1",result="pass"}'
+        values: '0+9x30'
+      - series: 'etl_schema_validations_total{stage="transform_input",schema="coins_markets.v1",result="fail"}'
+        values: '0+1x30'
+      - series: 'etl_schema_validations_total{stage="fetch",schema="raw_event.v1",result="pass"}'
+        values: '0+100x30' # other schemas do not dilute the ratio
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ETLSourceSchemaDrift
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "Over 5% of CoinGecko responses fail the source schema (upstream format change?)"
+              description: "See data/dlq/stage=transform/ for source_schema_violation records."
+
+  - name: export lag above five minutes
+    interval: 1m
+    input_series:
+      - series: 'etl_export_lag_seconds'
+        values: '400x10'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ETLExportLagHigh
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Exporter is 6m 40s behind raw.api_calls"
+              description: "A long Postgres transaction stalls the xid8 cursor, or S3 is failing."
+
+  - name: consumer lag growing for ten minutes
+    interval: 1m
+    input_series:
+      - series: 'etl_consumer_lag_records{partition="0"}'
+        values: '0+5x40'
+    alert_rule_test:
+      - eval_time: 5m
+        alertname: ETLConsumerLagGrowing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: ETLConsumerLagGrowing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "Transformer consumer lag has grown for 10 minutes"
+              description: "Transformers are slower than the publisher, stuck, or crash-looping."
+
+  - name: frequent 429s
+    interval: 1m
+    input_series:
+      - series: 'etl_api_rate_limited_total'
+        values: '0 0 0 1 2 3 4 4 4 4 4 4 4 4 4 4'
+    alert_rule_test:
+      - eval_time: 2m
+        alertname: ETLFrequentRateLimiting
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ETLFrequentRateLimiting
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "CoinGecko returned HTTP 429 4 times in 15 minutes"
+              description: "Lower the request rate or set COINGECKO_API_KEY."

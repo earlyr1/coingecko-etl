@@ -1,0 +1,76 @@
+# Alert rules from spec §8.4. Label values follow the services' metrics:
+# etl_schema_validations_total{result} is "pass" or "fail" in every stage, and
+# schema is the schema file name without .json (coins_markets.v1, coin.v1, ...).
+groups:
+  - name: etl
+    rules:
+      - alert: ETLDataStale
+        # No successful CoinGecko call for more than 2 minutes on an endpoint
+        # that has succeeded before, or no successful markets call at all yet.
+        expr: |
+          time() - max by (endpoint) (etl_last_success_timestamp_seconds) > 120
+          or
+          absent(etl_last_success_timestamp_seconds{endpoint="coins_markets"})
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No successful CoinGecko poll for {{ $labels.endpoint }} in over 2 minutes"
+          description: "Check the fetcher logs (logs/fetcher/etl.log) for HTTP errors or a 429 cooldown."
+
+      - alert: ETLDeadLetterRecords
+        # increase() misses the first sample of a brand-new series, so new
+        # series (absent 10 minutes ago) are caught by the second branch.
+        expr: |
+          sum by (stage, error_class) (increase(etl_dlq_total[10m])) > 0
+          or
+          sum by (stage, error_class) (etl_dlq_total unless etl_dlq_total offset 10m) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: "Records went to the dead-letter zone ({{ $labels.stage }} / {{ $labels.error_class }})"
+          description: "Inspect data/dlq/; a human is needed."
+
+      - alert: ETLSourceSchemaDrift
+        # More than 5% of CoinGecko responses fail the source schema (S0) in 15 minutes.
+        expr: |
+          sum(rate(etl_schema_validations_total{schema=~"coins_markets.v1|coin.v1", result="fail"}[15m]))
+          /
+          sum(rate(etl_schema_validations_total{schema=~"coins_markets.v1|coin.v1"}[15m]))
+          > 0.05
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Over 5% of CoinGecko responses fail the source schema (upstream format change?)"
+          description: "See data/dlq/stage=transform/ for source_schema_violation records."
+
+      - alert: ETLExportLagHigh
+        expr: max(etl_export_lag_seconds) > 300
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Exporter is {{ $value | humanizeDuration }} behind raw.api_calls"
+          description: "A long Postgres transaction stalls the xid8 cursor, or S3 is failing."
+
+      - alert: ETLConsumerLagGrowing
+        # Total lag has been rising for 10 minutes and is not trivially small.
+        expr: |
+          deriv(sum(etl_consumer_lag_records)[10m:1m]) > 0
+          and
+          sum(etl_consumer_lag_records) > 10
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Transformer consumer lag has grown for 10 minutes"
+          description: "Transformers are slower than the publisher, stuck, or crash-looping."
+
+      - alert: ETLFrequentRateLimiting
+        expr: sum(increase(etl_api_rate_limited_total[15m])) >= 3
+        labels:
+          severity: warning
+        annotations:
+          summary: "CoinGecko returned HTTP 429 {{ $value }} times in 15 minutes"
+          description: "Lower the request rate or set COINGECKO_API_KEY."

@@ -1,0 +1,208 @@
+{
+  "uid": "coingecko-etl",
+  "title": "CoinGecko ETL",
+  "tags": ["etl", "coingecko"],
+  "timezone": "utc",
+  "schemaVersion": 41,
+  "version": 1,
+  "editable": false,
+  "graphTooltip": 1,
+  "refresh": "15s",
+  "time": {"from": "now-1h", "to": "now"},
+  "timepicker": {},
+  "templating": {"list": []},
+  "annotations": {"list": []},
+  "links": [],
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Data freshness",
+      "description": "Seconds since the last successful markets poll (alert at 120 s).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 0, "w": 6, "h": 4},
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 60}, {"color": "red", "value": 120}]}, "color": {"mode": "thresholds"}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "textMode": "auto", "justifyMode": "auto", "orientation": "auto"},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "time() - max(etl_last_success_timestamp_seconds{endpoint=\"coins_markets\"})", "instant": false}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Duplicate share (1h)",
+      "description": "Records dropped by dedup / (dropped + written) over the last hour. ~50% is expected: the CDN serves the same snapshot for 60 s and we poll every 30 s.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 6, "y": 0, "w": 6, "h": 4},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "color": {"mode": "thresholds"}, "decimals": 1}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "textMode": "auto", "justifyMode": "auto", "orientation": "auto"},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum(increase(etl_dedup_dropped_total[1h])) / (sum(increase(etl_dedup_dropped_total[1h])) + sum(increase(etl_records_total{outcome=\"written\"}[1h])))", "instant": false}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "DLQ records (24h)",
+      "description": "Records sent to the dead-letter zone in the last 24 hours; anything above 0 needs a human.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
+      "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "color": {"mode": "thresholds"}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "textMode": "auto", "justifyMode": "auto", "orientation": "auto"},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum(increase(etl_dlq_total[24h])) or vector(0)", "instant": false}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "End-to-end latency p95",
+      "description": "95th percentile from fetched_at to the processed object being written (15 min window).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 18, "y": 0, "w": 6, "h": 4},
+      "fieldConfig": {"defaults": {"unit": "s", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "color": {"mode": "thresholds"}}, "overrides": []},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "value", "graphMode": "area", "textMode": "auto", "justifyMode": "auto", "orientation": "auto"},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "histogram_quantile(0.95, sum by (le) (rate(etl_e2e_latency_seconds_bucket[15m])))", "instant": false}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Records per stage",
+      "description": "Throughput of every hop: API calls stored, raw records published to the broker, processed records by outcome.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 4, "w": 24, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum(rate(etl_api_requests_total{status=\"200\"}[5m])) * 60", "legendFormat": "fetched calls / min"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "sum(rate(etl_published_records_total[5m])) * 60", "legendFormat": "published / min"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "C", "expr": "sum by (outcome) (rate(etl_records_total[5m])) * 60", "legendFormat": "transformer {{outcome}} / min"}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Data freshness and source age",
+      "description": "Seconds since the last successful call per endpoint, and how old CoinGecko's own data was when fetched (fetched_at - last_updated).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 12, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "time() - etl_last_success_timestamp_seconds", "legendFormat": "since last success: {{endpoint}}"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "etl_source_data_age_seconds", "legendFormat": "source data age: {{endpoint}}"}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "End-to-end latency",
+      "description": "Quantiles of fetched_at -> processed object written.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(etl_e2e_latency_seconds_bucket[5m])))", "legendFormat": "p50"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(etl_e2e_latency_seconds_bucket[5m])))", "legendFormat": "p95"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "C", "expr": "histogram_quantile(0.99, sum by (le) (rate(etl_e2e_latency_seconds_bucket[5m])))", "legendFormat": "p99"}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Duplicate share",
+      "description": "Share of records dropped by deduplication, total and by reason (replay = same event redelivered, duplicate_response = same API response, duplicate_record = same record in another snapshot).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 20, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "percentunit", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum(rate(etl_dedup_dropped_total[15m])) / (sum(rate(etl_dedup_dropped_total[15m])) + sum(rate(etl_records_total{outcome=\"written\"}[15m])))", "legendFormat": "total"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "sum by (reason) (rate(etl_dedup_dropped_total[15m])) / ignoring(reason) group_left() (sum(rate(etl_dedup_dropped_total[15m])) + sum(rate(etl_records_total{outcome=\"written\"}[15m])))", "legendFormat": "{{reason}}"}
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Rejected records by reason",
+      "description": "Cleaning-rule drops written to the rejected zone (missing_id, null_price, nonpositive_price, empty_platform, empty_record, snapshot_conflict).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 20, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "stacking": {"mode": "normal", "group": "A"}}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (reason) (increase(etl_rejected_total[15m]))", "legendFormat": "{{reason}}"}
+      ]
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "Dead-letter records",
+      "description": "Records written to the dlq zone by stage and error class.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 28, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "stacking": {"mode": "normal", "group": "A"}}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (stage, error_class) (increase(etl_dlq_total[15m]))", "legendFormat": "{{stage}} / {{error_class}}"}
+      ]
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "Consumer lag",
+      "description": "High watermark minus the next offset to process (the committed position) per partition, summed over transformer replicas.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 28, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (partition) (etl_consumer_lag_records)", "legendFormat": "partition {{partition}}"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "sum(etl_consumer_lag_records)", "legendFormat": "total"}
+      ]
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "CoinGecko API status codes",
+      "description": "Calls per minute by endpoint and HTTP status: 429 = rate limited, network_error, skipped = tick skipped (limiter cooldown or a request still in flight).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 36, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "stacking": {"mode": "normal", "group": "A"}}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (endpoint, status) (rate(etl_api_requests_total[5m])) * 60", "legendFormat": "{{endpoint}} {{status}}"}
+      ]
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "Export lag and S3 writes",
+      "description": "Age of the oldest unexported raw row, and conditional S3 PUT results (exists = idempotent retry, mismatch = alert).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 36, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "max(etl_export_lag_seconds)", "legendFormat": "export lag (s)"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "sum by (result) (rate(etl_s3_put_total[5m])) * 60", "legendFormat": "s3 put {{result}} / min"}
+      ]
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "Schema validations",
+      "description": "Validations per minute by stage, schema and result.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 44, "w": 24, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (stage, schema, result) (rate(etl_schema_validations_total[5m])) * 60", "legendFormat": "{{stage}} {{schema}} {{result}}"}
+      ]
+    }
+  ]
+}

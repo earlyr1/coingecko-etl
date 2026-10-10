@@ -1,0 +1,4 @@
+# Cluster properties applied on the first start of an empty Redpanda data
+# volume (Redpanda reads /etc/redpanda/.bootstrap.yaml once). Topics are
+# created only by `etl init`, with explicit partitions and retention.
+auto_create_topics_enabled: false

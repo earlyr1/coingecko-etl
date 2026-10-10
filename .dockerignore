@@ -1,0 +1,15 @@
+# Keep the build context small and free of runtime data and secrets.
+.git
+.github
+.env
+bin/
+data/
+logs/
+.s3meta/
+docs/
+deploy/
+*.md
+*.test
+*.out
+Dockerfile
+docker-compose.yml

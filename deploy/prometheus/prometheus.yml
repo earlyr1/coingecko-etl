@@ -1,0 +1,42 @@
+# Scrapes every etl service on :8080/metrics. dns_sd_configs resolves the
+# compose service name to one A record per container, so both transformer
+# replicas (deploy.replicas: 2) are discovered without listing them.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  - /etc/prometheus/alerts.yml
+
+scrape_configs:
+  - job_name: fetcher
+    dns_sd_configs:
+      - names: [fetcher]
+        type: A
+        port: 8080
+        refresh_interval: 15s
+
+  - job_name: exporter
+    dns_sd_configs:
+      - names: [exporter]
+        type: A
+        port: 8080
+        refresh_interval: 15s
+
+  - job_name: publisher
+    dns_sd_configs:
+      - names: [publisher]
+        type: A
+        port: 8080
+        refresh_interval: 15s
+
+  - job_name: transformer
+    dns_sd_configs:
+      - names: [transformer]
+        type: A
+        port: 8080
+        refresh_interval: 15s
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
