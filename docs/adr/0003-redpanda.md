@@ -11,7 +11,7 @@ Candidates: Apache Kafka 4.3 (KRaft), Redpanda, NATS JetStream, Apache Pulsar, R
 
 ## Decision
 
-Use the Kafka protocol with the franz-go client (`kgo`, `kadm`, `kprom`), and run Redpanda `v26.2.4` in dev-container mode (`--smp 1 --memory 1G`) locally. One topic, `coingecko.raw`, 6 partitions, 7 days retention, created by `etl init`; broker-side topic auto-creation is off (set by `deploy/redpanda/bootstrap.yaml`). Messages are keyed by `coins_markets` or the coin id.
+Use the Kafka protocol with the franz-go client (`kgo`, `kadm`, `kprom`), and run Redpanda `v26.2.4` in dev-container mode (`--smp 1 --memory 1G`) locally. One topic, `coingecko.raw`, 6 partitions, retention (TTL) 7 days — messages older than a week are deleted, while `s3://raw` and `raw.api_calls` keep the history — created by `etl init`; broker-side topic auto-creation is off (set by `deploy/redpanda/bootstrap.yaml`). Messages are keyed by `coins_markets` or the coin id.
 
 | Broker | Verdict |
 |---|---|

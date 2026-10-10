@@ -33,7 +33,7 @@ flowchart LR
     E -->|"PUT If-None-Match: *"| RAW[("s3://raw<br/>./data/raw")]
     RAW --> P[etl publisher]
     PG -. "lease batch" .- P
-    P -->|"key = coins_markets / coin id"| K[["Redpanda<br/>coingecko.raw<br/>6 partitions"]]
+    P -->|"key = coins_markets / coin id"| K[["Redpanda<br/>coingecko.raw<br/>6 partitions · TTL 7 days"]]
     K -->|consumer group| T["etl transformer x2<br/>validate, clean, dedup,<br/>normalize, validate"]
     T -->|claims + batch manifest| PG
     T --> PROC[("s3://processed<br/>./data/processed")]

@@ -1087,10 +1087,10 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     redpanda: {
       kicker: "Redpanda v26.2.4 · Kafka protocol", title: "Redpanda", role: "Replayable log with per-key ordering and consumer groups.",
       sections: [
-        ["Topic", "<p><code>coingecko.raw</code>: 6 partitions, 7 days. No version suffix: the version travels in each message. Auto-creation off; only <code>etl init</code> creates topics.</p>"],
+        ["Topic", "<p><code>coingecko.raw</code>: 6 partitions, retention (TTL) 7 days — older messages are deleted; s3://raw and raw.api_calls keep the history. No version suffix: the version travels in each message. Auto-creation off; only <code>etl init</code> creates topics.</p>"],
         ["Why Redpanda", "<p>Kafka protocol in one C++ binary, no JVM. The same franz-go code runs on Apache Kafka, MSK or Confluent Cloud.</p>"]
       ],
-      chips: ["6 partitions", "7 days", "BSL 1.1"]
+      chips: ["6 partitions", "retention (TTL) 7 days", "BSL 1.1"]
     },
     transformer: {
       kicker: "etl transformer · 2 replicas", title: "transformer", role: "Checks, cleans, deduplicates and normalizes.",
@@ -1104,7 +1104,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     init: {
       kicker: "etl init · one-shot", title: "etl init", role: "Brings Postgres, the topic and the buckets to the expected state, then exits.",
       sections: [
-        ["Order", "<ol><li>goose migrations and daily partitions.</li><li>Topic via kadm: 6 partitions, 7 days; mismatched config fails init.</li><li>Buckets: HeadBucket first (versitygw answers 500 to CreateBucket on a folder it did not create).</li></ol>"],
+        ["Order", "<ol><li>goose migrations and daily partitions.</li><li>Topic via kadm: 6 partitions, retention (TTL) 7 days; mismatched config fails init.</li><li>Buckets: HeadBucket first (versitygw answers 500 to CreateBucket on a folder it did not create).</li></ol>"],
         ["Idempotent", "<p>Safe to run any number of times; starts after postgres, redpanda and versitygw are healthy.</p>"]
       ]
     },

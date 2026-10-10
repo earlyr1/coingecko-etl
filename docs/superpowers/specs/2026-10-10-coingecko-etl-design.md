@@ -189,7 +189,7 @@ CREATE INDEX ON raw.api_calls (idempotency_key);
 
 - Leases one exported batch: `UPDATE … SET publish_lease_until = now() + '2 min' WHERE batch_id = (SELECT … FOR UPDATE SKIP LOCKED)`.
 - Streams the object, validates each line against S1 (failures go to `dlq/`), produces each line verbatim.
-- Topic `coingecko.raw`, 6 partitions, retention 7 days. Key: `coins_markets` for markets, the coin id for detail. Headers: `event_id`, `idempotency_key`, `schema`, `raw_object`, `line_no`.
+- Topic `coingecko.raw`, 6 partitions, retention (TTL) 7 days: messages older than 7 days are deleted, while `s3://raw` and `raw.api_calls` keep the history, so the topic is a 7-day replay window. Key: `coins_markets` for markets, the coin id for detail. Headers: `event_id`, `idempotency_key`, `schema`, `raw_object`, `line_no`.
 - Idempotent producer, `acks=all`. Marks `published_at` after a successful flush. A crash before the mark republishes the object; the transformer drops the copies.
 
 ### 4.4 Transformer → processed / rejected / dlq
