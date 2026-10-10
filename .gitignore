@@ -2,6 +2,8 @@
 /data/
 /logs/
 /.s3meta/
-.env
-# build
+/.env
+# build and test output
 /bin/
+*.test
+*.out
