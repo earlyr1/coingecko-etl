@@ -108,3 +108,41 @@ func TestEnsureBucketsAcceptsHostCreatedDirectory(t *testing.T) {
 		t.Fatalf("put into host-created bucket: created=%v err=%v", created, err)
 	}
 }
+
+// `etl init` against an empty ./data takes the CreateBucket branch: HeadBucket
+// fails on a bucket with no directory, so EnsureBuckets must create it through
+// the gateway. A second call must be a no-op, and the new bucket must accept
+// writes and reads.
+func TestEnsureBucketsCreatesMissingBucket(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test: needs Docker (skipped with -short)")
+	}
+	testutil.SkipIfNoDocker(t)
+	c, dataDir := newClient(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	const bucket = "fresh"
+	if _, err := os.Stat(filepath.Join(dataDir, bucket)); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("precondition: bucket directory %q must not exist, stat err=%v", bucket, err)
+	}
+	if err := c.EnsureBuckets(ctx, bucket); err != nil {
+		t.Fatalf("EnsureBuckets on a missing bucket: %v", err)
+	}
+	if err := c.EnsureBuckets(ctx, bucket); err != nil {
+		t.Fatalf("EnsureBuckets again on the created bucket: %v", err)
+	}
+
+	key := "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000002.jsonl"
+	body := []byte("{\"fresh\":true}\n")
+	if created, err := c.PutIfAbsent(ctx, bucket, key, body); err != nil || !created {
+		t.Fatalf("put into created bucket: created=%v err=%v", created, err)
+	}
+	got, err := c.Get(ctx, bucket, key)
+	if err != nil {
+		t.Fatalf("Get from created bucket: %v", err)
+	}
+	if !bytes.Equal(got, body) {
+		t.Fatalf("Get = %q, want %q", got, body)
+	}
+}
