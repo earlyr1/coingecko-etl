@@ -4,9 +4,8 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,500..800&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;600&display=swap">
 <style>
-/* Layout: a single-column engineering document under a sticky section bar. The pipeline
-   diagram anchors the page; every component opens a detail drawer, and each later section
-   zooms into one mechanism of the same pipeline. */
+/* Layout: a single-column engineering document under a sticky section bar. Each section is
+   one visual plus a one-line lead; longer explanations live in the drawers and collapsibles. */
 :root {
   --bg: #f3f5f8;
   --surface: #ffffff;
@@ -23,7 +22,6 @@
   --dlq: #bf3326;
   --state: #2f6690;
   --scrim: rgba(8, 12, 20, 0.38);
-  --shadow: 0 18px 48px rgba(15, 23, 36, 0.18);
   --font-display: "Archivo", "Helvetica Neue", Arial, sans-serif;
   --font-body: "IBM Plex Sans", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -51,7 +49,6 @@
     --dlq: #ff7e66;
     --state: #79b4e0;
     --scrim: rgba(0, 0, 0, 0.6);
-    --shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
     color-scheme: dark;
   }
 }
@@ -71,7 +68,6 @@
   --dlq: #ff7e66;
   --state: #79b4e0;
   --scrim: rgba(0, 0, 0, 0.6);
-  --shadow: 0 18px 48px rgba(0, 0, 0, 0.55);
   color-scheme: dark;
 }
 
@@ -94,7 +90,7 @@ h1 { font-size: clamp(2.1rem, 5vw, 3.3rem); font-weight: 760; line-height: 1.05;
 h2 { font-size: clamp(1.45rem, 3vw, 1.95rem); font-weight: 680; line-height: 1.15; }
 h3 { font-size: 1.05rem; font-weight: 600; line-height: 1.3; }
 h4 { font-size: var(--fs-md); font-weight: 600; line-height: 1.3; }
-p { margin: 0; max-width: 68ch; }
+p { margin: 0; max-width: 72ch; }
 code, .mono { font-family: var(--font-mono); font-size: 0.86em; }
 code { background: var(--surface-2); padding: 0.08em 0.36em; border-radius: 4px; overflow-wrap: anywhere; }
 a { color: var(--accent); }
@@ -102,8 +98,8 @@ a { color: var(--accent); }
 button { font: inherit; color: inherit; }
 .eyebrow { font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.12em; color: var(--muted); }
 .muted { color: var(--muted); }
+.lead { color: var(--muted); font-size: var(--fs-md); }
 .text-sm { font-size: var(--fs-sm); }
-.text-md { font-size: var(--fs-md); }
 .stack { display: grid; gap: 6px; align-content: start; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 .skip { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
@@ -114,9 +110,9 @@ button { font: inherit; color: inherit; }
 
 /* ---------- header ---------- */
 .top { padding-block: 40px 22px; display: grid; gap: 14px; }
-.lede { font-size: var(--fs-lg); max-width: 72ch; }
-.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; padding-top: 6px; }
-.fact { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-sm); }
+.lede { font-size: var(--fs-lg); max-width: 64ch; }
+.facts { display: flex; flex-wrap: wrap; gap: 8px 22px; }
+.fact { display: flex; gap: 8px; align-items: baseline; font-size: var(--fs-sm); color: var(--muted); }
 .fact b { font-family: var(--font-mono); font-weight: 600; font-size: var(--fs-xs); color: var(--accent); white-space: nowrap; }
 
 /* ---------- sticky section bar ---------- */
@@ -134,24 +130,23 @@ button { font: inherit; color: inherit; }
 .toc a:focus-visible { outline-offset: -2px; }
 .toc a[aria-current="true"] { color: var(--accent); background: var(--accent-soft); font-weight: 600; }
 
-section.block { padding-block: 44px 8px; display: grid; gap: 18px; scroll-margin-top: calc(56px + env(safe-area-inset-top, 0px)); }
-.section-head { display: grid; gap: 8px; align-content: start; }
-.grid-2 { display: grid; gap: 18px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
+section.block { padding-block: 40px 8px; display: grid; gap: 16px; scroll-margin-top: calc(56px + env(safe-area-inset-top, 0px)); }
+.section-head { display: grid; gap: 6px; align-content: start; }
+.grid-2 { display: grid; gap: 16px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 420px), 1fr)); }
 .grid-2 > * { min-width: 0; align-content: start; }
 
 /* ---------- generic surfaces ---------- */
-.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; min-width: 0; }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 16px; min-width: 0; }
 .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
-table { border-collapse: collapse; width: 100%; font-size: var(--fs-md); }
-th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table { border-collapse: collapse; width: 100%; font-size: var(--fs-sm); }
+th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
 th { font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 500; background: var(--surface-2); }
 tr:last-child td { border-bottom: 0; }
 td code { white-space: nowrap; }
-td code.wrap { white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .table-wrap thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .table-wrap table, .table-wrap tbody, .table-wrap tr, .table-wrap td { display: block; }
-  .table-wrap tr { padding: 10px 12px; border-bottom: 1px solid var(--line); }
+  .table-wrap tr { padding: 8px 12px; border-bottom: 1px solid var(--line); }
   .table-wrap tr:last-child { border-bottom: 0; }
   .table-wrap td { padding: 2px 0; border: 0; }
   .table-wrap td::before { content: attr(data-label); display: block; font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
@@ -180,9 +175,18 @@ pre .w { color: var(--dlq); }
 .btn:hover { border-color: var(--accent); color: var(--accent); }
 .btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
 .btn-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-.note { border-left: 3px solid var(--accent); padding: 4px 0 4px 12px; font-size: var(--fs-md); max-width: 90ch; }
-figure { margin: 0; display: grid; gap: 10px; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip { display: inline-flex; gap: 6px; align-items: baseline; font-size: var(--fs-xs); padding: 3px 8px; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); }
+.chip b { font-family: var(--font-mono); font-weight: 600; }
+.chip span { color: var(--muted); }
+.note { color: var(--muted); font-size: var(--fs-sm); }
+figure { margin: 0; display: grid; gap: 8px; }
 figcaption { font-size: var(--fs-sm); color: var(--muted); max-width: 90ch; }
+details.more > summary { cursor: pointer; font-size: var(--fs-sm); color: var(--accent); list-style: none; }
+details.more > summary::-webkit-details-marker { display: none; }
+details.more > summary::before { content: "▸ "; }
+details.more[open] > summary::before { content: "▾ "; }
+details.more > div { padding-top: 8px; }
 
 /* ---------- pipeline diagram ---------- */
 .diagram-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
@@ -219,24 +223,20 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: var(--fs-sm); color: var(--muted); align-items: center; }
 .legend .swatch { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--muted); vertical-align: middle; margin-right: 6px; }
 .legend .swatch.dash { border-top: 2px dashed var(--state); }
-
-.cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); }
-.card {
-  position: relative; text-align: left; cursor: pointer; background: var(--surface); border: 1px solid var(--control-line); border-radius: var(--radius);
-  padding: 12px 30px 12px 14px; display: grid; gap: 4px; align-content: start; min-width: 0;
+.comp { display: flex; flex-wrap: wrap; gap: 6px; }
+.comp button {
+  cursor: pointer; font-size: var(--fs-sm); padding: 4px 10px 4px 12px; border-radius: 4px;
+  border: 1px solid var(--control-line); background: var(--surface);
 }
-.card::after { content: "›"; position: absolute; right: 12px; top: 50%; translate: 0 -50%; color: var(--muted); font-size: 1.2rem; }
-.card:hover { border-color: var(--accent); }
-.card .name { font-weight: 600; display: flex; flex-wrap: wrap; justify-content: space-between; gap: 2px 8px; align-items: baseline; }
-.card .name span { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--muted); font-weight: 400; min-width: 0; overflow-wrap: anywhere; }
-.card .role { font-size: var(--fs-sm); color: var(--muted); }
+.comp button::after { content: " ›"; color: var(--muted); }
+.comp button:hover { border-color: var(--accent); color: var(--accent); }
 
 /* ---------- drawer ---------- */
 .scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 40; opacity: 0; transition: opacity 0.2s; }
 .scrim.open { opacity: 1; }
 .drawer {
   position: fixed; z-index: 50; top: 0; right: 0; bottom: 0; width: min(560px, 100%);
-  background: var(--surface); color: var(--ink); border-left: 1px solid var(--line); box-shadow: var(--shadow);
+  background: var(--surface); color: var(--ink); border-left: 1px solid var(--line);
   display: grid; grid-template-rows: auto 1fr; transform: translateX(104%); transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
   padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px);
 }
@@ -251,7 +251,6 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .drawer .body h3 { margin: 0 0 6px; font-family: var(--font-mono); font-size: var(--fs-2xs); text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 500; }
 .drawer .body :is(ul, ol) { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
 .drawer .body p { font-size: var(--fs-md); }
-.drawer .chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .drawer .pill { white-space: normal; overflow-wrap: anywhere; }
 @media (max-width: 640px) {
   .drawer { top: auto; left: 0; width: 100%; height: min(86vh, 720px); height: min(86dvh, 720px); border-left: 0; border-top: 1px solid var(--line); border-radius: 10px 10px 0 0; transform: translateY(104%); }
@@ -260,29 +259,28 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 @media (prefers-reduced-motion: reduce) { .drawer, .scrim { transition: none; } }
 
 /* ---------- walkthrough ---------- */
-.walk { display: grid; gap: 16px; grid-template-columns: minmax(0, 300px) minmax(0, 1fr); align-items: start; }
-.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.walk { display: grid; gap: 16px; grid-template-columns: minmax(0, 260px) minmax(0, 1fr); align-items: start; }
+.steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .steps button {
-  width: 100%; text-align: left; cursor: pointer; display: grid; grid-template-columns: 30px 1fr; gap: 10px; align-items: start;
-  padding: 9px 10px; border-radius: 4px; border: 1px solid transparent; background: transparent;
+  width: 100%; text-align: left; cursor: pointer; display: grid; grid-template-columns: 28px 1fr; gap: 8px; align-items: center;
+  padding: 6px 8px; border-radius: 4px; border: 1px solid transparent; background: transparent;
 }
 .steps button:hover { background: var(--surface-2); }
 .steps button[aria-current="step"] { background: var(--surface); border-color: var(--accent); }
 .steps .n {
-  font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 600; width: 26px; height: 26px; border-radius: 50%;
+  font-family: var(--font-mono); font-size: var(--fs-xs); font-weight: 600; width: 24px; height: 24px; border-radius: 50%;
   display: grid; place-items: center; border: 1px solid var(--line); background: var(--surface); color: var(--muted);
 }
 .steps button[aria-current="step"] .n { background: var(--accent); border-color: var(--accent); color: var(--bg); }
-.steps .t { font-weight: 600; font-size: var(--fs-md); }
-.steps .w { display: block; font-size: var(--fs-xs); color: var(--muted); font-family: var(--font-mono); }
+.steps .t { font-weight: 600; font-size: var(--fs-sm); }
 @media (max-width: 860px) {
   .walk { grid-template-columns: minmax(0, 1fr); }
   .steps { grid-template-columns: repeat(4, minmax(0, 1fr)); }
-  .steps button { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 8px 6px; }
+  .steps button { grid-template-columns: minmax(0, 1fr); gap: 4px; padding: 6px; }
   .steps .t { font-size: var(--fs-xs); line-height: 1.25; }
-  .steps .w { display: none; }
 }
-.stage { display: grid; gap: 14px; scroll-margin-top: calc(64px + env(safe-area-inset-top, 0px)); }
+.stage { display: grid; gap: 12px; }
+.walk-ctrl { scroll-margin-top: calc(64px + env(safe-area-inset-top, 0px)); }
 .hops { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; font-family: var(--font-mono); font-size: var(--fs-2xs); }
 .hops span { padding: 3px 7px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); background: var(--surface); transition: all 0.25s; }
 .hops span.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); font-weight: 600; }
@@ -302,9 +300,14 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .tl-range { opacity: 0.28; }
 .tl-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
 @media (min-width: 641px) { .tl-list { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } }
+.take { font-weight: 600; font-size: var(--fs-md); }
+.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: var(--fs-sm); }
+.kv dt { font-family: var(--font-mono); font-size: var(--fs-xs); }
+.kv dd { margin: 0; color: var(--muted); }
+@media (max-width: 520px) { .kv { grid-template-columns: minmax(0, 1fr); gap: 2px; } .kv dd { margin-bottom: 6px; } }
 
 /* ---------- data model ---------- */
-.dm-grid { display: grid; gap: 18px; grid-template-columns: minmax(0, 1fr); }
+.dm-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
 @media (min-width: 1120px) { .dm-grid { grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); } }
 .dm svg { display: block; width: 100%; max-width: 760px; height: auto; min-width: 600px; }
 .dm .ds rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
@@ -322,11 +325,10 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .fields code.key { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .fields code.flag { color: var(--raw); }
 .rules { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
-.rules .panel { display: grid; gap: 8px; align-content: start; }
-.rules ul { margin: 0; padding-left: 18px; display: grid; gap: 5px; font-size: var(--fs-md); }
+.rules .panel { display: grid; gap: 10px; align-content: start; }
 
 /* ---------- guarantees ---------- */
-.sim { display: grid; gap: 14px; align-content: start; }
+.sim { display: grid; gap: 12px; align-content: start; }
 .cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 @media (max-width: 640px) { .cmp { grid-template-columns: minmax(0, 1fr); } }
 .cmp .side { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; background: var(--surface-2); min-width: 0; }
@@ -336,7 +338,7 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .cmp dd.same { color: var(--processed); font-weight: 600; }
 .cmp dd.diff { color: var(--dlq); font-weight: 600; }
 .cmp .mk { display: inline-block; width: 1.4ch; }
-.verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 12px 14px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); }
+.verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); font-size: var(--fs-sm); }
 .verdict .tag { font-family: var(--font-mono); font-weight: 600; font-size: var(--fs-xs); padding: 4px 10px; border-radius: 4px; color: var(--bg); background: var(--c, var(--muted)); }
 .lifecycle svg { display: block; width: 100%; height: auto; min-width: 760px; }
 @media (max-width: 640px) { .lifecycle svg { min-width: 900px; } }
@@ -351,20 +353,20 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .crash:hover .dot, .crash.sel .dot { fill: var(--dlq); }
 .crash:hover text, .crash.sel text { fill: var(--surface); }
 .crash:focus-visible .dot { stroke: var(--accent); stroke-width: 3; }
-.outcome { display: flex; gap: 10px; flex-wrap: wrap; }
+.outcome { display: flex; gap: 8px; flex-wrap: wrap; }
 .parts { display: grid; gap: 6px; }
-.prow { display: grid; grid-template-columns: 70px minmax(0, 1fr) 120px; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: var(--fs-xs); }
+.prow { display: grid; grid-template-columns: 40px minmax(0, 1fr) 110px; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: var(--fs-xs); }
 .prow .bar { min-height: 26px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 8px; }
 .prow .bar span { white-space: nowrap; padding: 1px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); }
 .prow .bar.empty { background: var(--surface-2); color: var(--muted); }
 .prow .owner { color: var(--muted); }
-@media (max-width: 560px) { .prow { grid-template-columns: 54px minmax(0, 1fr); } .prow .owner { grid-column: 2; } }
+@media (max-width: 560px) { .prow { grid-template-columns: 34px minmax(0, 1fr); } .prow .owner { grid-column: 2; } }
 
 /* ---------- schemas ---------- */
-.schema-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); }
-.schema-cards .panel { display: grid; gap: 6px; align-content: start; }
+.schema-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.schema-cards .panel { display: grid; gap: 4px; align-content: start; }
 .schema-cards .sid { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
-.strict { justify-self: start; font-family: var(--font-mono); font-size: var(--fs-2xs); padding: 1px 6px; border-radius: 3px; border: 1px solid var(--line); color: var(--muted); }
+.schema-cards .file { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
 
 /* ---------- storage tree ---------- */
 .tree { font-family: var(--font-mono); font-size: var(--fs-xs); }
@@ -388,13 +390,12 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .boot .b.init rect { stroke: var(--accent); stroke-dasharray: 5 4; }
 .boot .col-title { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
 .boot .arr { stroke: var(--muted); stroke-width: 1.4; fill: none; }
-.metric-list { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); }
-.metric-list .panel { display: grid; gap: 8px; align-content: start; }
-.metric-list ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
-.metric-list li { display: grid; gap: 1px; }
-.metric-list li code { justify-self: start; }
-.metric-list li span { font-size: var(--fs-sm); color: var(--muted); }
-.alerts { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.metric-groups { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
+.metric-groups .panel { display: grid; gap: 8px; align-content: start; }
+.metric-groups .chips code { font-size: var(--fs-2xs); }
+.mlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-sm); }
+.mlist li span { color: var(--muted); }
+.alerts { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
 .alerts li { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; }
 .alerts li::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: var(--dlq); transform: translateY(2px); }
 
@@ -402,28 +403,27 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .dec-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
 .dec-row { border-bottom: 1px solid var(--line); }
 .dec-row:last-child { border-bottom: 0; }
-.dec-row summary { cursor: pointer; display: grid; grid-template-columns: minmax(0, 220px) minmax(0, 1fr) auto; gap: 12px; padding: 12px 14px; list-style: none; align-items: baseline; }
+.dec-row summary { cursor: pointer; display: grid; grid-template-columns: minmax(0, 200px) minmax(0, 1fr) auto; gap: 12px; padding: 10px 14px; list-style: none; align-items: baseline; font-size: var(--fs-sm); }
 .dec-row summary::-webkit-details-marker { display: none; }
 .dec-row summary .topic { font-weight: 600; }
 .dec-row summary .more { font-family: var(--font-mono); font-size: var(--fs-2xs); color: var(--muted); }
 .dec-row[open] summary .more { color: var(--accent); }
-.dec-row .why { padding: 0 14px 14px; display: grid; gap: 8px; font-size: var(--fs-md); }
-.dec-row .why p { max-width: 80ch; }
-@media (max-width: 640px) { .dec-row summary { grid-template-columns: minmax(0, 1fr); gap: 4px; } }
+.dec-row .why { padding: 0 14px 12px; display: grid; gap: 6px; font-size: var(--fs-sm); }
+@media (max-width: 640px) { .dec-row summary { grid-template-columns: minmax(0, 1fr); gap: 2px; } }
 
-footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); font-size: var(--fs-sm); border-top: 1px solid var(--line); margin-top: 48px; }
+footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); font-size: var(--fs-sm); border-top: 1px solid var(--line); margin-top: 40px; }
 </style>
 
 <div class="wrap">
   <header class="top">
     <div class="eyebrow">Take-home for the Trust Wallet Data Engineer role</div>
     <h1>CoinGecko ETL</h1>
-    <p class="lede">The pipeline polls CoinGecko every 30 seconds and keeps every API call in Postgres before any deduplication. It moves raw JSONL through an S3 lake and Redpanda, and writes cleaned, normalized snapshots to the processed zone exactly once, even when a step crashes and runs again.</p>
+    <p class="lede">Polls CoinGecko every 30 s, keeps every call in Postgres, streams it through an S3 lake and Redpanda, and writes each cleaned record to processed exactly once.</p>
     <div class="facts" role="group" aria-label="Key facts">
-      <div class="fact"><b>1 binary</b><span>five Go services as subcommands of <code>etl</code></span></div>
-      <div class="fact"><b>4 zones</b><span>raw, processed, rejected and dlq (dead-letter: records a stage could not process), as plain files</span></div>
-      <div class="fact"><b>1 dedup step</b><span>by natural record key, in the transformer</span></div>
-      <div class="fact"><b>~1.2 GB</b><span>RAM for about 12 containers</span></div>
+      <div class="fact"><b>1 binary</b>5 Go services</div>
+      <div class="fact"><b>4 zones</b>plain files</div>
+      <div class="fact"><b>1 dedup step</b>in the transformer</div>
+      <div class="fact"><b>~1.2 GB</b>RAM, 12 containers</div>
     </div>
   </header>
 </div>
@@ -431,10 +431,10 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
 <nav class="toc" aria-label="Sections">
   <ul>
     <li><a href="#pipeline">Pipeline</a></li>
-    <li><a href="#walkthrough">One snapshot, end to end</a></li>
-    <li><a href="#time">Time model</a></li>
+    <li><a href="#walkthrough">One snapshot</a></li>
+    <li><a href="#time">Time</a></li>
     <li><a href="#data">Data model</a></li>
-    <li><a href="#guarantees">Delivery guarantees</a></li>
+    <li><a href="#guarantees">Guarantees</a></li>
     <li><a href="#schemas">Schemas</a></li>
     <li><a href="#storage">Storage</a></li>
     <li><a href="#operations">Operations</a></li>
@@ -448,19 +448,19 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   <section class="block" id="pipeline" aria-labelledby="h-pipeline">
     <div class="section-head">
       <h2 id="h-pipeline">Pipeline</h2>
-      <p class="muted">Read the diagram from the top left. Ingest runs left to right along the top row, export drops to the raw bucket at the bottom right, and streaming runs right to left through the middle row into the processed, rejected and dlq buckets at the bottom left. Select any component to open its details.</p>
+      <p class="lead">Click any box for details.</p>
     </div>
     <div class="btn-row">
       <button class="btn" id="anim-toggle" type="button">Pause animation</button>
       <div class="legend" aria-hidden="true">
-        <span><span class="swatch"></span>data flow</span>
-        <span><span class="swatch dash"></span>pipeline state in Postgres</span>
+        <span><span class="swatch"></span>data</span>
+        <span><span class="swatch dash"></span>state in Postgres</span>
         <span class="pill processed">processed</span>
         <span class="pill rejected">rejected</span>
         <span class="pill dlq">dlq</span>
         <span class="pill raw">raw</span>
       </div>
-      <a class="skip" href="#cards">Skip the diagram</a>
+      <a class="skip" href="#comp">Skip the diagram</a>
     </div>
     <figure>
       <div class="diagram-wrap">
@@ -630,10 +630,10 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
           </g>
         </svg>
       </div>
-      <p class="scroll-hint">Scroll the diagram sideways to see every component.</p>
-      <figcaption>Solid arrows carry data; dashed arrows read and write pipeline state in Postgres. Packets show relative traffic: most records reach processed, a few are rejected by cleaning rules, broken records are rare. About half of the markets responses are CDN repeats; they still land in raw and are dropped as duplicates in the transformer. Schema codes on this page: S0 is CoinGecko's response, S1 the raw event envelope, S2 a processed row, S3 a rejected or dlq record. TX1 and TX2 are the transformer's two Postgres transactions per batch: TX1 plans the batch and claims keys, TX2 marks it written.</figcaption>
+      <p class="scroll-hint">Scroll sideways to see every component.</p>
+      <figcaption>About half of the markets responses are CDN repeats: they land in raw and are dropped in the transformer.</figcaption>
     </figure>
-    <div class="cards" id="cards" role="group" aria-label="Components" tabindex="-1"></div>
+    <div class="comp" id="comp" role="group" aria-label="Component details" tabindex="-1"></div>
   </section>
 
   <!-- ================= WALKTHROUGH ================= -->
@@ -641,9 +641,10 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     <div class="section-head">
       <div class="eyebrow">Recorded on 2026-10-10</div>
       <h2 id="h-walk">One snapshot, end to end</h2>
-      <p class="muted">Three polls of <code>/coins/markets</code> travel through the pipeline. Poll B got the same cached bytes as poll A; poll C carries the next snapshot. Prices, timestamps, cache headers and payload hashes come from those recordings, which asked for the top 10 coins (<code>per_page=10</code>) to keep them short; the pipeline asks for 100. Ids, sequence numbers and offsets are illustrative. For brevity, all three polls and the bitcoin <code>/coins/{id}</code> call between them travel in one export batch and one consumer batch, as after a short stall. At the normal cadence (export every 15 s, fetch wait 5 s) each call travels alone, and the deduplication decisions are the same.</p>
+      <p class="lead">Poll A, poll B (a cached copy of A) and poll C (the next snapshot) through every stage.</p>
+      <details class="more"><summary>About this data</summary><div><p class="note">Prices, headers and hashes come from recorded responses for the top 10 coins (<code>per_page=10</code>; the pipeline asks for 100). Ids and offsets are illustrative. For brevity all calls travel in one batch.</p></div></details>
     </div>
-    <div class="btn-row">
+    <div class="btn-row walk-ctrl" id="walk-ctrl">
       <button class="btn" id="walk-prev" type="button">← Previous</button>
       <button class="btn" id="walk-next" type="button">Next →</button>
       <button class="btn" id="walk-play" type="button">Play</button>
@@ -659,32 +660,27 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   <section class="block" id="time" aria-labelledby="h-time">
     <div class="section-head">
       <h2 id="h-time">Time model</h2>
-      <p class="muted">An event is a source snapshot. About every 60 seconds CoinGecko recomputes its coins in one pass and gives every recomputed coin the same <code>last_updated</code>; a coin it skips keeps its older stamp. <code>snapshot_at</code> is the newest stamp in a response. Pick a scenario to see which times exist and which one becomes the event time.</p>
+      <p class="lead">Event time is <code>snapshot_at</code>: when CoinGecko built the snapshot, not when we polled.</p>
     </div>
     <div class="btn-row" role="group" aria-label="Time scenarios" id="time-tabs"></div>
-    <div class="panel" style="display:grid;gap:14px">
+    <div class="panel" style="display:grid;gap:12px">
       <div class="timeline-wrap hscroll" id="timeline" aria-hidden="true"></div>
       <ol class="tl-list" id="timeline-list"></ol>
-      <div id="time-text" class="grid-2"></div>
+      <p class="take" id="time-take"></p>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Field</th><th>Source</th><th>Meaning</th></tr></thead>
-        <tbody>
-          <tr><td><code>snapshot_at</code></td><td>Derived: max <code>last_updated</code> in a markets response; the document's <code>last_updated</code> for <code>/coins/{id}</code></td><td>When CoinGecko assembled the snapshot. Event time, part of every natural key, and the partition date.</td></tr>
-          <tr><td><code>source_updated_at</code></td><td>API <code>last_updated</code> of the coin</td><td>When CoinGecko last recomputed this coin. Lags <code>snapshot_at</code> by hours for stale coins.</td></tr>
-          <tr><td><code>fetched_at</code></td><td>Ours, in <code>raw.api_calls</code></td><td>When we polled. Lineage: reachable from any processed row through <code>_event_id</code>.</td></tr>
-          <tr><td><code>last_traded_at</code>, <code>last_fetch_at</code></td><td>API, tickers only</td><td>Last trade on the exchange; when CoinGecko fetched the exchange's data.</td></tr>
-        </tbody>
-      </table>
-    </div>
+    <dl class="kv">
+      <dt>snapshot_at</dt><dd>newest <code>last_updated</code> in a response · event time, key, partition date</dd>
+      <dt>source_updated_at</dt><dd>the coin's own <code>last_updated</code> · drives <code>is_stale</code></dd>
+      <dt>fetched_at</dt><dd>our poll time · in <code>raw.api_calls</code></dd>
+      <dt>last_traded_at, last_fetch_at</dt><dd>tickers: trade time and CoinGecko's fetch time</dd>
+    </dl>
   </section>
 
   <!-- ================= DATA MODEL ================= -->
   <section class="block" id="data" aria-labelledby="h-data">
     <div class="section-head">
       <h2 id="h-data">Data model</h2>
-      <p class="muted">One <code>/coins/{id}</code> document becomes a parent row and three child datasets: maps keyed by currency turn into rows, arrays and maps of objects become child tables. Select a dataset to see its columns. Counts such as 223 of 250 come from a top-250 sample taken on 2026-10-10.</p>
+      <p class="lead">One coin document → a parent row and three child datasets. Click a dataset.</p>
     </div>
     <div class="dm-grid">
       <figure class="panel dm">
@@ -732,40 +728,41 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
             </g>
           </svg>
         </div>
-        <p class="scroll-hint">Scroll the diagram sideways to see every dataset.</p>
-        <figcaption>Children join the parent on <code>(coin_id, snapshot_at)</code>. Row counts are per snapshot of one coin, measured on bitcoin and USD Coin.</figcaption>
+        <p class="scroll-hint">Scroll sideways to see every dataset.</p>
+        <figcaption>Children join the parent on <code>(coin_id, snapshot_at)</code>.</figcaption>
       </figure>
       <div class="panel" id="ds-panel"></div>
     </div>
     <div class="rules">
       <div class="panel">
-        <h3>Normalize every row</h3>
-        <ul>
-          <li><code>""</code> and <code>[]</code> become <code>null</code>. CoinGecko marks a missing value four ways: <code>null</code>, <code>""</code>, <code>[]</code> or no key at all.</li>
-          <li>Timestamps become RFC 3339 UTC with milliseconds: <code>2026-10-10T10:07:55.000Z</code>. <code>genesis_date</code> stays a date.</li>
-          <li>Money and quantities become decimal strings, never float64. Values pass 2<sup>53</sup>: bitcoin's market cap in VND is <code>"43083803721443304"</code>.</li>
-          <li>Symbols upper-case, EVM addresses lower-case. <code>roi</code> (null in 223 of 250 rows) flattens to <code>roi_times</code>, <code>roi_currency</code>, <code>roi_pct</code>.</li>
-          <li>Dropped as unneeded: images, descriptions, links, sparklines, <code>trade_url</code>, <code>token_info_url</code> and duplicated fields such as <code>coin_mcap_usd</code>.</li>
-        </ul>
+        <h3>Normalize</h3>
+        <div class="chips">
+          <span class="chip"><b>"" [ ] → null</b></span>
+          <span class="chip"><b>UTC, ms</b><span>2026-10-10T10:07:55.000Z</span></span>
+          <span class="chip"><b>money → decimal string</b><span>never float64</span></span>
+          <span class="chip"><b>BTC · 0xa0b8…</b><span>symbols upper, EVM lower</span></span>
+          <span class="chip"><b>roi → 3 columns</b></span>
+          <span class="chip"><b>drop</b><span>images, links, sparklines</span></span>
+        </div>
       </div>
       <div class="panel">
         <h3>Reject to <code>rejected/</code></h3>
-        <ul>
-          <li><code>missing_id</code>: no coin id.</li>
-          <li><code>null_price</code>, <code>nonpositive_price</code>.</li>
-          <li><code>empty_platform</code>: bitcoin ships <code>platforms: {"": ""}</code>.</li>
-          <li><code>empty_record</code>: every metric is null.</li>
-          <li><code>snapshot_conflict</code>: same natural key, different content.</li>
-        </ul>
+        <div class="chips">
+          <span class="chip"><b>missing_id</b></span>
+          <span class="chip"><b>null_price</b></span>
+          <span class="chip"><b>nonpositive_price</b></span>
+          <span class="chip"><b>empty_platform</b><span>bitcoin's {"": ""}</span></span>
+          <span class="chip"><b>empty_record</b></span>
+          <span class="chip"><b>snapshot_conflict</b></span>
+        </div>
       </div>
       <div class="panel">
         <h3>Flag and keep</h3>
-        <ul>
-          <li><code>is_stale</code>: <code>snapshot_at − source_updated_at</code> &gt; 10 min; tickers: the upstream flag or a last trade older than 1 h.</li>
-          <li><code>is_inactive</code>: zero volume (14 coins in the top 250, mostly tokenized money-market and bond funds).</li>
-          <li><code>is_anomaly</code>: price outside <code>[low_24h, high_24h]</code> (3 coins in the top 250); tickers: the upstream flag or more than 2% from the coin's median.</li>
-          <li>Thresholds are configuration: <code>ETL_STALE_AFTER</code>, <code>ETL_TICKER_STALE_AFTER</code>, <code>ETL_TICKER_ANOMALY_PCT</code>.</li>
-        </ul>
+        <div class="chips">
+          <span class="chip"><b>is_stale</b><span>&gt; 10 min behind</span></span>
+          <span class="chip"><b>is_inactive</b><span>zero volume</span></span>
+          <span class="chip"><b>is_anomaly</b><span>outside 24h range, &gt; 2% off median</span></span>
+        </div>
       </div>
     </div>
   </section>
@@ -774,16 +771,16 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   <section class="block" id="guarantees" aria-labelledby="h-guar">
     <div class="section-head">
       <h2 id="h-guar">Delivery guarantees</h2>
-      <p class="muted">Every hop is at-least-once. The processed zone still holds each record once, because every step can run again safely: deterministic keys, ledgers in Postgres and write-once objects. Deduplication happens once, in the transformer; idempotency happens at every write.</p>
+      <p class="lead">At-least-once hops, exactly-once content: deterministic keys, Postgres ledgers, write-once objects.</p>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Hop</th><th>Mechanism</th><th>If the step runs again</th></tr></thead>
+        <thead><tr><th>Hop</th><th>Mechanism</th><th>On retry</th></tr></thead>
         <tbody>
-          <tr><td>fetcher → <code>api_calls</code></td><td>Primary key <code>(event_id, fetched_at)</code>, <code>ON CONFLICT DO NOTHING</code></td><td>No row is inserted twice. A crash before the commit loses one poll, visible in metrics.</td></tr>
-          <tr><td>exporter → <code>raw/</code></td><td>xid8 cursor and the <code>export_batches</code> ledger; PUT with <code>If-None-Match: *</code></td><td>Same object, byte for byte: a 412 with an equal checksum counts as done.</td></tr>
-          <tr><td>publisher → topic</td><td>Lease from the ledger; idempotent producer, <code>acks=all</code></td><td>The batch is published again with the same <code>event_id</code>s; the transformer drops the copies.</td></tr>
-          <tr><td>transformer → <code>processed/</code></td><td>Batch manifest, deduplication claims, write-once objects, offset commit after the write</td><td>Same decisions and the same bytes: a 412 with an equal checksum.</td></tr>
+          <tr><td>fetcher → api_calls</td><td>primary key, <code>ON CONFLICT DO NOTHING</code></td><td>no duplicate rows</td></tr>
+          <tr><td>exporter → raw/</td><td>xid8 cursor, ledger, <code>If-None-Match</code></td><td>same object, 412</td></tr>
+          <tr><td>publisher → topic</td><td>lease, idempotent producer</td><td>copies dropped downstream</td></tr>
+          <tr><td>transformer → processed/</td><td>manifest, claims, write-once</td><td>same bytes, 412</td></tr>
         </tbody>
       </table>
     </div>
@@ -791,37 +788,37 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     <div class="grid-2">
       <div class="panel sim">
         <div class="section-head">
-          <h3>Deduplication decision</h3>
-          <p class="muted text-md">Each record claims its natural key in <code>pipeline.dedup_claims</code>; the first claim wins. Choose what arrived to compare it with the stored claim. Ids and offsets are illustrative.</p>
+          <h3>Deduplication</h3>
+          <p class="note">The first claim of a natural key wins. Pick what arrived.</p>
         </div>
         <div class="btn-row" id="dedup-tabs" role="group" aria-label="Duplicate scenarios"></div>
         <div id="dedup-view"></div>
       </div>
       <div class="panel sim">
         <div class="section-head">
-          <h3>Topic partitions</h3>
-          <p class="muted text-md">Redpanda speaks the Kafka protocol, so Kafka terms apply. Partitions give ordering and parallelism; they do not split traffic by endpoint. The producer hashes each message key with murmur2 (Kafka's default partitioner), so every repeat of the same data lands on the same partition and deduplication sees it in offset order.</p>
+          <h3>Partitions</h3>
+          <p class="note">Same key, same partition: repeats are judged in offset order.</p>
         </div>
         <div class="parts" id="parts"></div>
-        <p class="muted text-sm">Six partitions, five keys and two consumers using the cooperative-sticky assignor, which moves only the partitions that change owner during a rebalance (one possible assignment shown). bitcoin hashes to the same partition as coins_markets, so only four partitions get data and at most four consumers can be busy. To scale out, publish one message per coin, which gives 100 keys.</p>
+        <p class="note">5 keys land on 4 partitions, so at most 4 consumers are busy. Assignment shown is one possibility.</p>
       </div>
     </div>
 
     <div class="panel sim lifecycle">
       <div class="section-head">
-        <h3>Transformer batch and crash points</h3>
-        <p class="muted text-md">One in-flight batch per partition: a contiguous offset range <code>[F..L]</code>. Select a crash point to see what is left behind and how the next owner recovers.</p>
+        <h3>Crash points</h3>
+        <p class="note">One in-flight batch per partition. Pick a crash point.</p>
       </div>
       <div class="btn-row">
         <button class="btn" id="naive-toggle" type="button" aria-pressed="false">Compare with the naive rule</button>
-        <span class="muted text-sm">The naive rule drops every record whose key is already claimed.</span>
+        <span class="note">naive: drop every key already claimed</span>
       </div>
       <div class="hscroll" id="lc-wrap">
         <svg viewBox="0 0 980 190" role="group" aria-label="Batch steps: input checks, TX1, PUT objects, TX2, commit offset, with five crash points." id="lc-svg"></svg>
       </div>
-      <p class="scroll-hint">Scroll sideways for crash points C3, C4 and Z.</p>
+      <p class="scroll-hint">Scroll sideways for C3, C4 and Z.</p>
       <div id="crash-view"></div>
-      <p class="note">Integration tests with testcontainers (Postgres, Redpanda, versitygw) crash after TX1 and after partial PUTs, run a zombie consumer and a publisher replay, and assert no loss and no duplicates in <code>processed/</code>. Out-of-order Postgres commits are tested against the exporter cursor.</p>
+      <p class="note">C2–C4 and Z each have an integration test (testcontainers).</p>
     </div>
   </section>
 
@@ -829,34 +826,33 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   <section class="block" id="schemas" aria-labelledby="h-sch">
     <div class="section-head">
       <h2 id="h-sch">Schemas</h2>
-      <p class="muted">JSON Schema 2020-12 files live in <code>schemas/</code>, are embedded into the binary with <code>go:embed</code> and validated with <code>santhosh-tekuri/jsonschema/v6</code>. The major version sits in the file name, the <code>$id</code>, <code>schema_version</code> on every record and the <code>v=</code> path segment of processed data.</p>
+      <p class="lead">JSON Schema 2020-12, embedded in the binary, checked at every hop.</p>
     </div>
     <div class="schema-cards">
-      <div class="panel"><div class="sid">S0 · source response</div><div><code>source/coingecko/coins_markets.v1.json</code>, <code>coin.v1.json</code></div><p class="muted text-sm">Permissive: only fields the transform reads are required and typed; extra fields pass, and nulls are allowed where observed. CoinGecko stopped returning <code>community_data</code> and <code>developer_data</code> on 2026-08-28; drift must not stop the pipeline.</p><span class="strict">checked in the transformer</span></div>
-      <div class="panel"><div class="sid">S1 · raw event</div><div><code>pipeline/raw_event.v1.json</code></div><p class="muted text-sm">Strict. One API call: the <code>api_calls</code> row, the raw JSONL line and the message value are the same bytes. <code>outcome = ok</code> requires a payload, its sha256 and an idempotency key.</p><span class="strict">fetcher · exporter · publisher · transformer</span></div>
-      <div class="panel"><div class="sid">S2 · processed row</div><div><code>processed/&lt;dataset&gt;.v1.json</code></div><p class="muted text-sm">Strict, one per dataset, including the <code>_</code> lineage columns. A row that fails never reaches <code>processed/</code>.</p><span class="strict">transformer output</span></div>
-      <div class="panel"><div class="sid">S3 · rejected and dlq records</div><div><code>pipeline/rejected_record.v1.json</code>, <code>dlq_record.v1.json</code></div><p class="muted text-sm">Strict. One dlq record shape for every stage. <code>error_class</code> is checked against a regex rather than a fixed list, so a new class needs no schema change and is still safe as a metric label.</p><span class="strict">all writers of rejected and dlq</span></div>
+      <div class="panel"><div class="sid">S0 · source response</div><div class="file">source/coingecko/*.v1.json</div><p class="text-sm">Permissive: tolerates upstream drift.</p></div>
+      <div class="panel"><div class="sid">S1 · raw event</div><div class="file">pipeline/raw_event.v1.json</div><p class="text-sm">Strict: same bytes in Postgres, raw and the topic.</p></div>
+      <div class="panel"><div class="sid">S2 · processed row</div><div class="file">processed/&lt;dataset&gt;.v1.json</div><p class="text-sm">Strict: failing rows never reach processed.</p></div>
+      <div class="panel"><div class="sid">S3 · rejected and dlq</div><div class="file">pipeline/*_record.v1.json</div><p class="text-sm">Strict: one record shape for every stage.</p></div>
     </div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Stage</th><th>Checks</th><th>On failure</th></tr></thead>
         <tbody>
-          <tr><td>fetcher, before INSERT</td><td>S1 envelope only; the payload is not inspected</td><td>Not inserted. ERROR log and <code class="wrap">etl_schema_validations_total{stage="fetch",result="fail"}</code>: this is our bug. No dedicated alert; if it persists, the stale-data alert fires.</td></tr>
-          <tr><td>exporter, publisher</td><td>S1 per line</td><td><span class="pill dlq">dlq</span> stage <code>export</code> or <code>publish</code>; the line is not passed on.</td></tr>
-          <tr><td>transformer, input</td><td>strict JSON, S1, <code>sha256(payload) = payload_sha256</code>, then S0</td><td><span class="pill dlq">dlq</span> <code>decode_error</code>, <code>schema_violation</code>, <code>integrity_error</code>, <code>source_schema_violation</code>, or <code>transform_error</code> when a payload passes S0 but cannot be transformed. After a schema fix, raw objects are republished.</td></tr>
-          <tr><td>transformer, output</td><td>S2 per row</td><td><span class="pill dlq">dlq</span> <code>output_schema_violation</code>; never written to processed.</td></tr>
-          <tr><td>writing rejected or dlq</td><td>S3 (rejected or dlq record schema)</td><td>ERROR log with the original bytes in base64.</td></tr>
+          <tr><td>fetcher</td><td>S1 envelope</td><td>not inserted · ERROR · metric</td></tr>
+          <tr><td>exporter, publisher</td><td>S1 per line</td><td><span class="pill dlq">dlq</span></td></tr>
+          <tr><td>transformer in</td><td>JSON · S1 · checksum · S0</td><td><span class="pill dlq">dlq</span></td></tr>
+          <tr><td>transformer out</td><td>S2</td><td><span class="pill dlq">dlq</span></td></tr>
         </tbody>
       </table>
     </div>
-    <p class="note">Rollout of a compatible schema change: the transformer first, then publisher, exporter and fetcher. CI checks that the new version still accepts every fixture of the previous one. A breaking change gets <code>v2</code> files, handled side by side in the same topic by dispatching on <code>schema_version</code>.</p>
+    <p class="note">Compatible change: consumers first, then producers. Breaking change: <code>v2</code> side by side.</p>
   </section>
 
   <!-- ================= STORAGE ================= -->
   <section class="block" id="storage" aria-labelledby="h-sto">
     <div class="section-head">
       <h2 id="h-sto">Storage</h2>
-      <p class="muted">versitygw serves <code>./data</code> over the S3 API; every bucket is a directory and every object a plain file, so <code>cat</code> works on the host. Postgres holds the raw call log and the pipeline state. Select a file to see a line from it; ids, batch numbers and offsets are illustrative.</p>
+      <p class="lead">Buckets are folders under <code>./data</code>; every object is a plain file. Click a file.</p>
     </div>
     <div class="grid-2">
       <div class="panel tree" id="tree">
@@ -877,8 +873,8 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
                 </details>
               </details>
             </details>
-            <details><summary>dataset=coin_snapshot/, coin_market_by_currency/, ticker/, coin_contract/</summary>
-              <div class="file muted">same layout: v=1/event_date=…/&lt;topic&gt;+&lt;partition&gt;+&lt;first offset&gt;.jsonl</div>
+            <details><summary>dataset={coin_snapshot, coin_market_by_currency, ticker, coin_contract}/</summary>
+              <div class="file muted">same layout</div>
             </details>
           </details>
           <details open><summary><span class="dot" style="--c: var(--rejected)"></span>rejected/</summary>
@@ -895,34 +891,34 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
               </details>
             </details>
             <details><summary>stage=export/, stage=publish/</summary>
-              <div class="file muted">export+batch+&lt;20-digit batch_id&gt;.jsonl and publish+batch+&lt;20-digit batch_id&gt;.jsonl, one object per batch. stage=transform/ holds the transform_input and transform_output records of one consumer batch.</div>
+              <div class="file muted">date=…/export+batch+&lt;id&gt;.jsonl, date=…/publish+batch+&lt;id&gt;.jsonl</div>
             </details>
           </details>
         </details>
-        <details><summary>.s3meta/ <span class="muted">· versitygw sidecar metadata (gitignored)</span></summary></details>
-        <details><summary>logs/ <span class="muted">· &lt;service&gt;/etl.log, &lt;container id&gt;/transformer/etl.log</span></summary></details>
+        <details><summary>.s3meta/ <span class="muted">· sidecar metadata</span></summary></details>
+        <details><summary>logs/ <span class="muted">· &lt;service&gt;/etl.log</span></summary></details>
       </div>
       <div class="panel" id="file-view" style="display:grid;gap:10px;align-content:start"></div>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>Postgres table</th><th>Holds</th><th>Retention</th></tr></thead>
+        <thead><tr><th>Postgres table</th><th>Holds</th><th>Kept</th></tr></thead>
         <tbody>
-          <tr><td><code>raw.api_calls</code></td><td>Every HTTP call with the response body as <code>json</code> (byte-exact), partitioned daily by <code>fetched_at</code>.</td><td>Never dropped by the pipeline: failed calls are not exported and live only here. Production: drop old daily partitions with pg_partman.</td></tr>
-          <tr><td><code>pipeline.export_batches</code></td><td>Ledger of raw objects: row range, object key, checksum, export and publish status, publish lease.</td><td>Not pruned; the raw zone is append-only.</td></tr>
-          <tr><td><code>pipeline.dedup_claims</code></td><td>First position, <code>event_id</code>, idempotency key and content hash per natural key, partitioned by <code>event_date</code>.</td><td>At least 30 days, longer than the 7-day topic retention. Not pruned locally; production drops old partitions with pg_partman.</td></tr>
-          <tr><td><code>pipeline.consumer_batches</code></td><td>Manifest of transformer batches: offset range, object keys, checksums, counts, planned or written. An EXCLUDE constraint (Postgres rejects a row whose range overlaps an existing one) forbids overlapping offset ranges.</td><td>At least 30 days (not pruned locally).</td></tr>
+          <tr><td><code>raw.api_calls</code></td><td>every HTTP call, body byte-exact</td><td>not pruned · pg_partman in prod</td></tr>
+          <tr><td><code>pipeline.export_batches</code></td><td>ledger of raw objects</td><td>not pruned</td></tr>
+          <tr><td><code>pipeline.dedup_claims</code></td><td>first claim per natural key</td><td>≥ 30 days</td></tr>
+          <tr><td><code>pipeline.consumer_batches</code></td><td>transformer batch manifest</td><td>≥ 30 days</td></tr>
         </tbody>
       </table>
     </div>
-    <p class="note">Persistence: <code>./data</code>, <code>./.s3meta</code> and <code>./logs</code> are bind mounts; Postgres and Redpanda keep their data in the named volumes <code>pgdata</code> and <code>redpanda</code>. <code>make down</code> keeps everything; <code>docker compose down -v</code> deletes the named volumes. Keep <code>./data</code> and <code>./.s3meta</code> together: the write-once check reads the stored sha256 from the sidecar. The README lists the same mounts as <code>docker run -v</code> commands.</p>
+    <p class="note">Persistence: bind mounts <code>./data</code>, <code>./.s3meta</code>, <code>./logs</code> · named volumes <code>pgdata</code>, <code>redpanda</code>.</p>
   </section>
 
   <!-- ================= OPERATIONS ================= -->
   <section class="block" id="operations" aria-labelledby="h-ops">
     <div class="section-head">
       <h2 id="h-ops">Operations</h2>
-      <p class="muted"><code>make up</code> builds one image and starts the stack. Startup order comes from healthchecks: infrastructure first, then a single idempotent <code>etl init</code>, then the services. <code>make demo</code> waits and prints file counts, the duplicate share and links.</p>
+      <p class="lead"><code>make up</code> starts everything in order; <code>make demo</code> prints what landed.</p>
     </div>
     <figure class="panel boot">
       <div class="hscroll" tabindex="0" role="region" aria-label="Startup order diagram">
@@ -931,9 +927,9 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
           <text class="col-title" x="20" y="24">1 · service_healthy</text>
           <text class="col-title" x="330" y="24">2 · completed_successfully</text>
           <text class="col-title" x="620" y="24">3 · long-running</text>
-          <g class="b"><rect x="20" y="40" width="230" height="40" rx="5"></rect><text x="34" y="65">postgres:18.6 · pg_isready</text></g>
-          <g class="b"><rect x="20" y="100" width="230" height="40" rx="5"></rect><text x="34" y="125">redpanda v26.2.4 · rpk health</text></g>
-          <g class="b"><rect x="20" y="160" width="230" height="40" rx="5"></rect><text x="34" y="185">versitygw v1.8.0 · /health</text></g>
+          <g class="b"><rect x="20" y="36" width="230" height="48" rx="5"></rect><text x="34" y="56">postgres:18.6</text><text x="34" y="74" style="fill: var(--muted)">pg_isready</text></g>
+          <g class="b"><rect x="20" y="96" width="230" height="48" rx="5"></rect><text x="34" y="116">redpanda v26.2.4</text><text x="34" y="134" style="fill: var(--muted)">rpk cluster health</text></g>
+          <g class="b"><rect x="20" y="156" width="230" height="48" rx="5"></rect><text x="34" y="176">versitygw v1.8.0</text><text x="34" y="194" style="fill: var(--muted)">/health</text></g>
           <g class="b init"><rect x="330" y="80" width="210" height="80" rx="5"></rect><text x="346" y="108">etl init</text><text x="346" y="128" style="fill: var(--muted)">migrate · partitions</text><text x="346" y="146" style="fill: var(--muted)">topic · buckets</text></g>
           <path class="arr" d="M250 60 H290 V110 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
           <path class="arr" d="M250 120 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
@@ -948,65 +944,60 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
           <path class="arr" d="M580 120 V179 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
         </svg>
       </div>
-      <figcaption>Also running: prometheus, grafana and redpanda-console. On first start Redpanda reads <code>deploy/redpanda/bootstrap.yaml</code>, which turns topic auto-creation off, so only <code>etl init</code> creates topics.</figcaption>
+      <figcaption>Topic auto-creation is off; only <code>etl init</code> creates topics.</figcaption>
     </figure>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Open on the host</th><th>Address</th><th>What you see</th></tr></thead>
-        <tbody>
-          <tr><td>Grafana</td><td><code>localhost:3000</code></td><td>Provisioned dashboard: records per stage, freshness, end-to-end latency, duplicate share, rejects, DLQ, consumer lag, API status codes, export lag with S3 PUT results, schema validations.</td></tr>
-          <tr><td>Prometheus</td><td><code>localhost:9090</code></td><td>Scrapes the etl services, both transformer replicas included; six alert rules with promtool unit tests.</td></tr>
-          <tr><td>Redpanda Console</td><td><code>localhost:8081</code></td><td>Topic <code>coingecko.raw</code>, messages with headers, consumer group lag.</td></tr>
-          <tr><td>S3 API</td><td><code>localhost:7070</code></td><td>versitygw; the same bytes are plain files under <code>./data</code>.</td></tr>
-          <tr><td>Kafka protocol</td><td><code>localhost:19092</code></td><td>External listener for tools on the host.</td></tr>
-          <tr><td>Postgres</td><td><code>localhost:5432</code></td><td><code>raw.api_calls</code> and <code>pipeline.*</code>.</td></tr>
-        </tbody>
-      </table>
+    <div class="chips" aria-label="Local addresses">
+      <span class="chip"><b>Grafana</b><span>:3000</span></span>
+      <span class="chip"><b>Prometheus</b><span>:9090</span></span>
+      <span class="chip"><b>Redpanda Console</b><span>:8081</span></span>
+      <span class="chip"><b>S3 API</b><span>:7070</span></span>
+      <span class="chip"><b>Kafka</b><span>:19092</span></span>
+      <span class="chip"><b>Postgres</b><span>:5432</span></span>
     </div>
-    <div class="metric-list">
-      <div class="panel"><h3>every stage</h3><ul>
-        <li><code>etl_schema_validations_total{stage,schema,result}</code><span>Validations by stage and schema, result pass or fail. The fail share of coins_markets.v1 and coin.v1 drives the source-schema alert.</span></li>
-        <li><code>etl_schema_violations_total{stage,schema,keyword}</code><span>Which JSON Schema keyword failed: required, type, pattern.</span></li>
-      </ul></div>
-      <div class="panel"><h3>fetcher</h3><ul>
-        <li><code>etl_api_requests_total{endpoint,status}</code><span>Calls by result; 429 and 5xx stand out here.</span></li>
-        <li><code>etl_api_request_duration_seconds{endpoint}</code><span>Latency of each call.</span></li>
-        <li><code>etl_api_rate_limited_total</code><span>429 responses; each starts a cooldown.</span></li>
-        <li><code>etl_last_success_timestamp_seconds{endpoint}</code><span>Drives the stale-data alert, per endpoint.</span></li>
-        <li><code>etl_source_data_age_seconds{endpoint}</code><span><code>fetched_at − last_updated</code>: how old CoinGecko's data was when we got it.</span></li>
-      </ul></div>
-      <div class="panel"><h3>exporter · publisher</h3><ul>
-        <li><code>etl_export_lag_seconds</code><span>Age of the oldest unexported row; a long transaction shows up here.</span></li>
-        <li><code>etl_export_batches_total{result}</code><span>Export batches by result: exported or error.</span></li>
-        <li><code>etl_s3_put_total{result}</code><span>created, exists (a 412 with an equal checksum), mismatch, error.</span></li>
-        <li><code>etl_published_records_total</code><span>Messages produced, plus franz-go client metrics as <code>etl_publisher_*</code>.</span></li>
-      </ul></div>
-      <div class="panel"><h3>transformer</h3><ul>
-        <li><code>etl_records_total{dataset,outcome}</code><span>written, duplicate, rejected, dlq.</span></li>
-        <li><code>etl_dedup_dropped_total{reason}</code><span>replay, duplicate_response, duplicate_record.</span></li>
-        <li><code>etl_rejected_total{reason}</code>, <code>etl_dlq_total{stage,error_class}</code><span>Why rows left the processed path.</span></li>
-        <li><code>etl_consumer_lag_records{partition}</code><span>Messages waiting per partition.</span></li>
-        <li><code>etl_batch_duration_seconds</code>, <code>etl_e2e_latency_seconds</code><span>Batch time and poll-to-processed latency.</span></li>
-      </ul></div>
+    <div class="metric-groups">
+      <div class="panel"><h3>fetcher</h3><div class="chips"><code>etl_api_requests_total</code><code>etl_api_request_duration_seconds</code><code>etl_api_rate_limited_total</code><code>etl_last_success_timestamp_seconds</code><code>etl_source_data_age_seconds</code></div></div>
+      <div class="panel"><h3>exporter · publisher</h3><div class="chips"><code>etl_export_lag_seconds</code><code>etl_export_batches_total</code><code>etl_s3_put_total</code><code>etl_published_records_total</code></div></div>
+      <div class="panel"><h3>transformer</h3><div class="chips"><code>etl_records_total</code><code>etl_dedup_dropped_total</code><code>etl_rejected_total</code><code>etl_dlq_total</code><code>etl_consumer_lag_records</code><code>etl_e2e_latency_seconds</code></div></div>
       <div class="panel"><h3>Alerts</h3>
         <ul class="alerts">
-          <li>No successful poll for more than 2 minutes.</li>
-          <li>Records appeared in <code>dlq/</code>.</li>
-          <li>More than 5% of responses fail S0 over 15 minutes: the upstream format changed.</li>
-          <li>Export lag above 5 minutes.</li>
-          <li>Consumer lag growing for 10 minutes.</li>
-          <li>Frequent 429 responses.</li>
+          <li>no successful poll for 2 min</li>
+          <li><span>records in <code>dlq/</code></span></li>
+          <li>&gt; 5% fail S0 over 15 min</li>
+          <li>export lag &gt; 5 min</li>
+          <li>consumer lag growing 10 min</li>
+          <li>frequent 429s</li>
         </ul>
       </div>
     </div>
-    <p class="note">Logs: <code>log/slog</code> JSON in UTC with <code>service</code>, <code>stage</code>, <code>event_id</code> and <code>batch</code>, written to <code>logs/&lt;service&gt;/etl.log</code> and stdout. The two transformer replicas share <code>./logs</code>, so each writes <code>logs/&lt;container id&gt;/transformer/etl.log</code> and no file has two writers.</p>
+    <details class="more">
+      <summary>What each metric means</summary>
+      <div class="grid-2">
+        <ul class="mlist">
+          <li><code>etl_schema_validations_total{stage,schema,result}</code> <span>pass or fail per stage; drives the source-schema alert</span></li>
+          <li><code>etl_schema_violations_total{stage,schema,keyword}</code> <span>which JSON Schema keyword failed</span></li>
+          <li><code>etl_api_requests_total{endpoint,status}</code> <span>calls by result; 429 and 5xx stand out</span></li>
+          <li><code>etl_last_success_timestamp_seconds{endpoint}</code> <span>drives the stale-data alert</span></li>
+          <li><code>etl_source_data_age_seconds{endpoint}</code> <span>how old CoinGecko's data was when fetched</span></li>
+          <li><code>etl_export_lag_seconds</code> <span>age of the oldest unexported row</span></li>
+        </ul>
+        <ul class="mlist">
+          <li><code>etl_s3_put_total{result}</code> <span>created, exists (412), mismatch, error</span></li>
+          <li><code>etl_records_total{dataset,outcome}</code> <span>written, duplicate, rejected, dlq</span></li>
+          <li><code>etl_dedup_dropped_total{reason}</code> <span>replay, duplicate_response, duplicate_record</span></li>
+          <li><code>etl_consumer_lag_records{partition}</code> <span>messages waiting per partition</span></li>
+          <li><code>etl_e2e_latency_seconds</code> <span>poll to processed</span></li>
+          <li><code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code> <span>on :8080 in every long-running service</span></li>
+        </ul>
+      </div>
+    </details>
+    <p class="note">Logs: slog JSON in UTC → <code>logs/&lt;service&gt;/etl.log</code> and stdout; each transformer replica writes its own file.</p>
   </section>
 
   <!-- ================= DECISIONS ================= -->
   <section class="block" id="decisions" aria-labelledby="h-dec">
     <div class="section-head">
       <h2 id="h-dec">Decisions</h2>
-      <p class="muted">What was decided, why, and what was considered and rejected. Filter by area; open a row for the reasoning.</p>
+      <p class="lead">Open a row for the reasoning and the rejected options.</p>
     </div>
     <div class="btn-row" id="dec-filter" role="group" aria-label="Filter decisions by area"></div>
     <div class="dec-list" id="dec-list"></div>
@@ -1015,7 +1006,7 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
 
 <footer class="wrap">
   <div>Data provided by CoinGecko.</div>
-  <div>Source of truth: <code>docs/superpowers/specs/2026-10-10-coingecko-etl-design.md</code> and <code>docs/superpowers/plans/2026-10-10-coingecko-etl.md</code>. This page is updated with every architecture change.</div>
+  <div>Source of truth: the spec and plan in <code>docs/superpowers/</code>. Updated with every architecture change.</div>
 </footer>
 
 <div class="scrim" id="scrim" hidden></div>
@@ -1040,128 +1031,118 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   function esc(s) { return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;"); }
   function announce(t) { if (ready) $("#sr-status").textContent = t; }
 
-  /* ------------------------------------------------------------------ components */
+  /* ------------------------------------------------------------------ components (details live here) */
   var C = {
     coingecko: {
       kicker: "External source", title: "CoinGecko API", role: "Market data source, polled without a key by default.",
       sections: [
-        ["Endpoints", "<ul><li><code>/coins/markets</code> every 30 s: top 100 by market cap in USD, <code>precision=full</code>, 1h/24h/7d changes. A flat 30-second time series.</li><li><code>/coins/{id}</code> once a minute, rotating over bitcoin, ethereum, tether and usd-coin, 15 s after the markets call. Deep nesting: 23 maps over 63 currencies, 100 tickers with nested objects, contracts per chain.</li></ul>"],
-        ["Observed behaviour", "<ul><li>All coins are recomputed in one pass every 60 s and share one <code>last_updated</code>; a coin the pass skips keeps its older stamp.</li><li>The CDN caches <code>/coins/markets</code> for 60 s (<code>s-maxage=60</code>; <code>/coins/{id}</code> for 30 s), so about half of the 30-second markets polls return byte-identical bodies.</li><li>The keyless limit is 10–30 calls a minute per IP; a 429 with <code>Retry-After: 60</code> arrived on the 6th call within 27 s.</li><li>Values exceed 2<sup>53</sup>, and a missing value arrives as <code>null</code>, <code>\"\"</code>, <code>[]</code> or no key at all.</li></ul>"],
-        ["Budget", "<p>About 3 calls a minute, one request in flight. An optional <code>COINGECKO_API_KEY</code> sends <code>x-cg-demo-api-key</code>: 100 calls a minute and 10,000 a month, which lasts about 2.3 days at this rate.</p>"]
+        ["Endpoints", "<ul><li><code>/coins/markets</code> every 30 s: top 100 in USD, <code>precision=full</code>.</li><li><code>/coins/{id}</code> once a minute, rotating over bitcoin, ethereum, tether, usd-coin. Deep nesting: 23 maps × 63 currencies, 100 tickers, contracts per chain.</li></ul>"],
+        ["Observed", "<ul><li>All coins recomputed in one pass every 60 s; a skipped coin keeps its old stamp.</li><li>CDN caches markets for 60 s (<code>/coins/{id}</code> 30 s): about half of 30-second polls are byte-identical.</li><li>Keyless limit 10–30 calls/min; a 429 with <code>Retry-After: 60</code> came on the 6th call in 27 s.</li><li>Values above 2<sup>53</sup>; a missing value comes as <code>null</code>, <code>\"\"</code>, <code>[]</code> or no key.</li></ul>"],
+        ["Budget", "<p>About 3 calls/min, one in flight. Optional <code>COINGECKO_API_KEY</code> (Demo: 100/min, 10,000/month).</p>"]
       ],
       chips: ["Data provided by CoinGecko"]
     },
     fetcher: {
-      kicker: "etl fetcher · 1 replica", title: "fetcher", role: "Transport only: polls, wraps the response in an event, inserts one row per call.",
+      kicker: "etl fetcher · 1 replica", title: "fetcher", role: "Transport only: poll, wrap in an event, insert one row per call.",
       sections: [
-        ["What it does", "<ul><li>Two schedules: markets every 30 s, coin detail every 60 s at a 15 s offset.</li><li>A limiter allows one request in flight and at least 15 s between request starts. A 429 starts a cooldown of <code>Retry-After</code> (60 s if missing); 5xx and timeouts back off 2 s × 2<sup>n−1</sup>, capped at 60 s, with jitter.</li><li>A tick is skipped, never queued, while the limiter cools down.</li></ul>"],
-        ["The event it builds (S1)", "<ul><li><code>event_id</code>: UUIDv7. <code>fetched_at</code>: UTC milliseconds.</li><li><code>outcome</code>: <code>ok</code>, <code>http_error</code> or <code>network_error</code>. A 200 whose body is not strict JSON (duplicate keys, invalid UTF-8, a bare <code>null</code>) is an <code>http_error</code>.</li><li><code>payload</code> verbatim, <code>payload_sha256</code>, and <code>idempotency_key = sha256(source | endpoint | params | payload_sha256)</code>.</li><li>HTTP metadata: status, latency, <code>Date</code>, <code>Age</code>, <code>cf-cache-status</code>, <code>ETag</code>, <code>Retry-After</code>.</li></ul>"],
-        ["No business logic", "<p>The payload is not validated here. Only the S1 envelope is checked before the INSERT. A violation means a bug in our code: the row is not inserted, an ERROR is logged and <code>etl_schema_validations_total{stage=\"fetch\"}</code> counts it. Source-schema checks live in the transformer.</p>"],
-        ["Code", "<p><code>internal/coingecko</code> (client, limiter) and <code>internal/fetcher</code>. The fetcher also creates daily partitions at start and every hour.</p>"]
+        ["Schedule and limits", "<ul><li>Markets every 30 s; coin detail every 60 s at a 15 s offset.</li><li>One request in flight, ≥ 15 s between starts. 429 → cooldown of <code>Retry-After</code>; 5xx and timeouts → backoff 2 s × 2<sup>n−1</sup>, ≤ 60 s, with jitter. Ticks are skipped, never queued.</li></ul>"],
+        ["Event (S1)", "<ul><li><code>event_id</code> UUIDv7, <code>fetched_at</code> UTC ms, <code>outcome</code> ok / http_error / network_error.</li><li><code>payload</code> verbatim, <code>payload_sha256</code>, <code>idempotency_key = sha256(source | endpoint | params | payload_sha256)</code>.</li><li>A 200 that is not strict JSON counts as <code>http_error</code>.</li></ul>"],
+        ["No business logic", "<p>Only the S1 envelope is checked before the INSERT; a failure is our bug: not inserted, ERROR, metric. Payload checks live in the transformer.</p>"]
       ],
-      chips: ["etl_api_requests_total", "etl_api_rate_limited_total", "etl_last_success_timestamp_seconds", "etl_source_data_age_seconds"]
+      chips: ["etl_api_requests_total", "etl_api_rate_limited_total", "etl_last_success_timestamp_seconds"]
     },
     apicalls: {
-      kicker: "Postgres 18.6 · schema raw", title: "raw.api_calls", role: "Every HTTP call, before any deduplication, including failures.",
+      kicker: "Postgres 18.6 · schema raw", title: "raw.api_calls", role: "Every HTTP call, before any deduplication, failures included.",
       sections: [
-        ["Shape", "<ul><li>One row per call, partitioned by day on <code>fetched_at</code>. Primary key <code>(event_id, fetched_at)</code>.</li><li><code>payload</code> is <code>json</code>, not <code>jsonb</code>: <code>json</code> keeps the exact bytes, so <code>payload_sha256</code> can be checked at every later hop. <code>jsonb</code> would reorder keys.</li><li><code>idempotency_key</code> is a plain, non-unique column. CDN repeats share it.</li><li><code>ingest_txid xid8</code> defaults to <code>pg_current_xact_id()</code>, the id of the inserting transaction, and drives the exporter cursor.</li></ul>"],
-        ["Inspecting failures", "<pre tabindex=\"0\">SELECT fetched_at, endpoint, http-&gt;&gt;'status', error\nFROM raw.api_calls\nWHERE outcome &lt;&gt; 'ok'\nORDER BY fetched_at DESC;</pre><p>Source-schema violations are not here: they are found in <code>dlq/</code>.</p>"],
-        ["Raw duplicates", "<pre tabindex=\"0\">SELECT idempotency_key, count(*)\nFROM raw.api_calls\nWHERE outcome = 'ok'\nGROUP BY 1 HAVING count(*) &gt; 1;</pre>"]
+        ["Shape", "<ul><li>Daily partitions on <code>fetched_at</code>; primary key <code>(event_id, fetched_at)</code>.</li><li><code>payload</code> is <code>json</code>, not <code>jsonb</code>: exact bytes, so the sha256 checks out downstream.</li><li><code>idempotency_key</code>: plain, non-unique column.</li><li><code>ingest_txid xid8</code>: id of the inserting transaction, used by the exporter.</li></ul>"],
+        ["Failed calls", "<pre tabindex=\"0\">SELECT fetched_at, endpoint, http-&gt;&gt;'status', error\nFROM raw.api_calls WHERE outcome &lt;&gt; 'ok';</pre>"]
       ],
       chips: ["CHECK ((outcome = 'ok') = (payload IS NOT NULL))"]
     },
     exporter: {
-      kicker: "etl exporter · 1 active instance", title: "exporter", role: "Moves new rows into one immutable raw JSONL object per batch.",
+      kicker: "etl exporter · 1 active instance", title: "exporter", role: "Turns new rows into one write-once raw JSONL object per batch.",
       sections: [
-        ["Cursor", "<p>xid8 is Postgres's 64-bit transaction id; every raw row records the id of the transaction that inserted it. The cursor walks <code>(ingest_txid, seq)</code> only below <code>pg_snapshot_xmin(pg_current_snapshot())</code>, the oldest transaction still running. An identity watermark loses rows when transactions commit out of order (reproduced on 18.6); this bound can stall behind a long transaction but never skips a row.</p>"],
-        ["Steps", "<ol><li>Short claim transaction: insert the range into <code>pipeline.export_batches</code>; the object key comes from the batch id.</li><li>Read the range, serialize deterministic JSONL (each line is the S1 event, payload embedded verbatim), validate each line.</li><li>PUT with <code>If-None-Match: *</code> and <code>x-amz-meta-sha256</code>. On 412, HEAD and compare checksums.</li><li>Mark the batch <code>exported</code>.</li></ol><p>No transaction is held across S3 I/O. Only <code>outcome = ok</code> rows are exported.</p>"],
-        ["Single instance", "<p><code>pg_try_advisory_lock</code> on a dedicated connection, held for the life of the process. A second exporter retries every 5 s for a minute, exits, and compose restarts it, so it stands by until the lock frees.</p>"]
+        ["Cursor", "<p>Walks <code>(ingest_txid, seq)</code> only below the oldest open transaction (<code>pg_snapshot_xmin</code>). Can stall, never skips. An id watermark loses rows on out-of-order commits (reproduced on 18.6).</p>"],
+        ["Steps", "<ol><li>Claim the range in <code>export_batches</code>.</li><li>Serialize deterministic JSONL, validate S1.</li><li>PUT with <code>If-None-Match: *</code>; on 412 compare sha256.</li><li>Mark exported.</li></ol>"],
+        ["One at a time", "<p><code>pg_try_advisory_lock</code>; a second exporter retries, exits and is restarted.</p>"]
       ],
       chips: ["etl_export_lag_seconds", "etl_export_batches_total", "etl_s3_put_total"]
     },
     state: {
-      kicker: "Postgres 18.6 · schema pipeline", title: "pipeline.*", role: "State that must survive crashes, be shared by replicas and change atomically.",
+      kicker: "Postgres 18.6 · schema pipeline", title: "pipeline.*", role: "State that survives crashes, is shared by replicas and changes atomically.",
       sections: [
-        ["Tables", "<ul><li><code>export_batches</code>: one row per raw object. Range, object key, checksum, status, publish lease and <code>published_at</code>.</li><li><code>dedup_claims</code>: first position, <code>event_id</code>, idempotency key and content hash per natural key. Partitioned by <code>event_date</code>.</li><li><code>consumer_batches</code>: the transformer's batch manifest. An EXCLUDE constraint over <code>int8range(first_offset, last_offset)</code> forbids overlapping ranges: Postgres rejects a row whose range overlaps an existing one.</li></ul>"],
-        ["Why Postgres", "<p>Broker offsets cannot answer \"was key X seen\". S3 can only guard single objects. In-memory state is lost on a rebalance: in a live test, one rebalance made the transformer write two records a second time. Postgres is already in the stack and gives transactions and constraints.</p>"],
-        ["Guards", "<p><code>idle_in_transaction_session_timeout = 60s</code> and <code>transaction_timeout = 5min</code> bound how long any transaction can hold back the exporter.</p>"]
+        ["Tables", "<ul><li><code>export_batches</code>: raw object ledger, publish lease.</li><li><code>dedup_claims</code>: first position, event_id, idempotency key, content hash per natural key.</li><li><code>consumer_batches</code>: transformer batch manifest; EXCLUDE forbids overlapping offset ranges.</li></ul>"],
+        ["Why Postgres", "<p>Offsets cannot answer \"was key X seen\", S3 guards single objects only, memory is lost on rebalance (reproduced).</p>"]
       ],
-      chips: ["kept ≥ 30 days", "TX1 · TX2"]
+      chips: ["kept ≥ 30 days"]
     },
     publisher: {
-      kicker: "etl publisher · 1 replica", title: "publisher", role: "Turns each raw line into one message, unchanged.",
+      kicker: "etl publisher · 1 replica", title: "publisher", role: "One raw line becomes one message, unchanged.",
       sections: [
-        ["Lease", "<pre tabindex=\"0\">UPDATE pipeline.export_batches\nSET publish_lease_until = now() + '2 min'\nWHERE batch_id = (SELECT batch_id ...\n  FOR UPDATE SKIP LOCKED LIMIT 1)\nRETURNING batch_id, object_key;</pre><p>Leases let several publishers run without stepping on each other.</p>"],
-        ["Produce", "<ul><li>GET the object and validate each line against S1 (failures go to <code>dlq/</code>, stage <code>publish</code>).</li><li>Key <code>coins_markets</code> or the coin id; the value is the line itself.</li><li>Headers: <code>event_id</code>, <code>idempotency_key</code>, <code>schema</code>, <code>raw_object</code>, <code>line_no</code>.</li><li>Idempotent producer, <code>acks=all</code>, zstd. <code>published_at</code> is set after a successful flush.</li></ul>"],
-        ["Crash", "<p>A crash before the mark republishes the whole object once the lease expires. The copies carry the same <code>event_id</code>s; the transformer drops them.</p>"]
+        ["Flow", "<ul><li>Lease a batch (<code>FOR UPDATE SKIP LOCKED</code>, 2 min).</li><li>GET the object, validate S1 per line (failures → dlq).</li><li>Key: <code>coins_markets</code> or the coin id. Headers: event_id, idempotency_key, schema, raw_object, line_no.</li><li>Idempotent producer, <code>acks=all</code>; <code>published_at</code> after the flush.</li></ul>"],
+        ["Crash", "<p>Lease expires, the batch is republished with the same event_ids; the transformer drops the copies.</p>"]
       ],
-      chips: ["etl_published_records_total", "kprom (franz-go Prometheus metrics)"]
+      chips: ["etl_published_records_total"]
     },
     redpanda: {
       kicker: "Redpanda v26.2.4 · Kafka protocol", title: "Redpanda", role: "Replayable log with per-key ordering and consumer groups.",
       sections: [
-        ["Topic", "<ul><li><code>coingecko.raw</code>: 6 partitions, retention 7 days. No version suffix: the version travels in every message (<code>schema_version</code>, <code>schema</code> header).</li><li>Auto-creation is off, set by <code>deploy/redpanda/bootstrap.yaml</code> on first start; only <code>etl init</code> creates topics.</li></ul>"],
-        ["Why Redpanda", "<p>The same Kafka protocol in one C++ binary without a JVM: lighter, faster to start. The franz-go code runs unchanged against Apache Kafka, MSK or Confluent Cloud. Its main gap, the Kafka Connect ecosystem, is not used here.</p>"],
-        ["Run mode", "<p>Image <code>redpandadata/redpanda:v26.2.4</code> in dev-container mode with one core and 1 GB. Internal listener <code>redpanda:9092</code>, host listener <code>localhost:19092</code>. Redpanda Console on <code>localhost:8081</code>.</p>"]
+        ["Topic", "<p><code>coingecko.raw</code>: 6 partitions, 7 days. No version suffix: the version travels in each message. Auto-creation off; only <code>etl init</code> creates topics.</p>"],
+        ["Why Redpanda", "<p>Kafka protocol in one C++ binary, no JVM. The same franz-go code runs on Apache Kafka, MSK or Confluent Cloud.</p>"]
       ],
-      chips: ["6 partitions", "7 days", "BSL 1.1 (source-available)"]
+      chips: ["6 partitions", "7 days", "BSL 1.1"]
     },
     transformer: {
-      kicker: "etl transformer · 2 replicas", title: "transformer", role: "Checks, cleans, deduplicates and normalizes; writes processed, rejected and dlq objects.",
+      kicker: "etl transformer · 2 replicas", title: "transformer", role: "Checks, cleans, deduplicates and normalizes.",
       sections: [
-        ["Consumer", "<p>Group <code>coingecko-transformer</code> on franz-go with manual commits. <code>BlockRebalanceOnPoll</code> holds a rebalance until the polled batch is committed; the cooperative-sticky assignor moves only the partitions that change owner. A fetch waits for at least 1 MiB or 5 s, and a poll takes at most 500 records. One in-flight batch per partition.</p>"],
-        ["Batch", "<ol><li>Input checks without the database: strict JSON, S1, checksum, S0.</li><li>TX1: plan the offset range in the manifest, transform, claim natural keys, decide, validate S2, store object keys and checksums.</li><li>PUT every object with <code>If-None-Match: *</code>.</li><li>TX2: mark the batch written.</li><li>Commit offset <code>L+1</code> synchronously.</li></ol>"],
-        ["Recovery", "<p>On partition assignment it looks up the manifest batch that covers the committed offset: written means skip past it, planned means reprocess exactly that range.</p>"],
-        ["Deterministic output", "<p>The output depends only on the input: the transform reads no clock and uses no random ordering. <code>_processed_at</code> is the manifest's <code>planned_at</code>, so a retried batch produces identical files.</p>"]
+        ["Batch", "<ol><li>Input checks: strict JSON, S1, checksum, S0.</li><li>TX1: plan the range, transform, claim keys, decide, validate S2.</li><li>PUT objects with <code>If-None-Match: *</code>.</li><li>TX2: mark written.</li><li>Commit offset <code>L+1</code>.</li></ol>"],
+        ["Recovery", "<p>On assignment: a written batch is skipped, a planned one is reprocessed exactly.</p>"],
+        ["Deterministic", "<p>No clock, no random order: <code>_processed_at</code> comes from the manifest, so retries produce identical files.</p>"]
       ],
-      chips: ["etl_records_total", "etl_dedup_dropped_total", "etl_consumer_lag_records", "etl_e2e_latency_seconds"]
+      chips: ["etl_records_total", "etl_dedup_dropped_total", "etl_consumer_lag_records"]
     },
     init: {
       kicker: "etl init · one-shot", title: "etl init", role: "Brings Postgres, the topic and the buckets to the expected state, then exits.",
       sections: [
-        ["Order", "<ol><li>goose migrations (a Go SQL migration tool; embedded SQL, advisory lock) and daily partitions for today−1 … today+3.</li><li>Topic <code>coingecko.raw</code> through kadm (franz-go's admin client): 6 partitions, 7-day retention. If it exists, its partition count and <code>retention.ms</code> must match, or init fails.</li><li>Buckets raw, processed, rejected, dlq. HeadBucket comes first: versitygw answers CreateBucket with 500 for a directory that exists on disk but was not created through the gateway.</li></ol>"],
-        ["Idempotent", "<p>Running it twice changes nothing. Each dependency is retried for up to 60 s with backoff. Compose starts it after postgres, redpanda and versitygw are healthy, and every service waits for it to complete successfully.</p>"]
+        ["Order", "<ol><li>goose migrations and daily partitions.</li><li>Topic via kadm: 6 partitions, 7 days; mismatched config fails init.</li><li>Buckets: HeadBucket first (versitygw answers 500 to CreateBucket on a folder it did not create).</li></ol>"],
+        ["Idempotent", "<p>Safe to run any number of times; starts after postgres, redpanda and versitygw are healthy.</p>"]
       ]
     },
     obs: {
-      kicker: "Every long-running service", title: "Observability", role: "Health, metrics and logs on every long-running etl service.",
+      kicker: "Every long-running service", title: "Observability", role: "Health, metrics and logs.",
       sections: [
-        ["Endpoints on :8080", "<ul><li><code>/healthz</code>: the process is alive.</li><li><code>/readyz</code>: its dependencies answer within 2 s; otherwise 503 with the failing checks as JSON.</li><li><code>/metrics</code>: Prometheus format. Pipeline metrics start with <code>etl_</code> (the publisher adds franz-go client metrics as <code>etl_publisher_*</code>), next to the standard <code>go_*</code> and <code>process_*</code> series.</li></ul>"],
-        ["Stack", "<p>Prometheus <code>v3.15.0</code> scrapes fetcher, exporter, publisher and both transformer replicas (found through Docker DNS) and evaluates six alert rules. Grafana <code>13.2.3</code> starts with a provisioned dashboard and anonymous viewer access. Distroless images have no curl, so compose healthchecks call <code>etl healthcheck</code>.</p>"],
-        ["Logs", "<p><code>log/slog</code> JSON in UTC, to <code>logs/&lt;service&gt;/etl.log</code> and stdout; the transformer replicas write <code>logs/&lt;container id&gt;/transformer/etl.log</code>. The logs cover API success and failure, transformation errors and data saved, as the assignment asks.</p>"]
+        ["Endpoints on :8080", "<ul><li><code>/healthz</code>: alive.</li><li><code>/readyz</code>: dependencies answer within 2 s, else 503.</li><li><code>/metrics</code>: <code>etl_*</code> plus <code>go_*</code> and <code>process_*</code>.</li></ul>"],
+        ["Stack", "<p>Prometheus v3.15.0 with six alert rules, Grafana 13.2.3 with a provisioned dashboard.</p>"]
       ]
     },
     "b-raw": {
-      kicker: "Bucket · ./data/raw", title: "s3://raw", role: "Immutable JSONL objects, one per export batch; every line is an S1 event.",
+      kicker: "Bucket · ./data/raw", title: "s3://raw", role: "One write-once JSONL object per export batch.",
       sections: [
-        ["Key", "<p><code>source=coingecko/ingest_date=&lt;claim date&gt;/batch=&lt;20-digit batch id&gt;.jsonl</code></p>"],
-        ["Append-only", "<p><code>If-None-Match: *</code> tells S3 to create the object only if the key is unused; if it exists, the answer is 412 Precondition Failed and nothing is overwritten. The writer then compares the stored sha256. Replaying a range means publishing these objects again; the transformer deduplicates.</p>"]
+        ["Key", "<p><code>source=coingecko/ingest_date=…/batch=&lt;20-digit id&gt;.jsonl</code></p>"],
+        ["If-None-Match: *", "<p>Create only if the key is unused; otherwise 412 and nothing is overwritten.</p>"]
       ]
     },
     "b-processed": {
-      kicker: "Bucket · ./data/processed", title: "s3://processed", role: "Clean, normalized rows with flags, once per natural key.",
+      kicker: "Bucket · ./data/processed", title: "s3://processed", role: "Clean rows with flags, once per natural key.",
       sections: [
-        ["Key", "<p><code>dataset=&lt;name&gt;/v=1/event_date=&lt;date of snapshot_at&gt;/coingecko.raw+&lt;partition&gt;+&lt;first offset&gt;.jsonl</code>. The name follows the Confluent S3 sink convention and is what makes a retried batch land on the same object.</p>"],
-        ["Datasets", "<p><code>market_snapshot</code>, <code>coin_snapshot</code>, <code>coin_market_by_currency</code>, <code>ticker</code>, <code>coin_contract</code>. The <code>v=</code> segment keeps files of different schema versions apart for lake readers.</p>"]
+        ["Key", "<p><code>dataset=…/v=1/event_date=…/coingecko.raw+&lt;partition&gt;+&lt;first offset&gt;.jsonl</code>: a retried batch lands on the same object.</p>"]
       ]
     },
     "b-rejected": {
-      kicker: "Bucket · ./data/rejected", title: "s3://rejected", role: "Records removed by cleaning rules, each with its reason and lineage.",
+      kicker: "Bucket · ./data/rejected", title: "s3://rejected", role: "Records removed by cleaning rules, with reason and lineage.",
       sections: [
-        ["Reasons", "<p><code>missing_id</code>, <code>null_price</code>, <code>nonpositive_price</code>, <code>empty_platform</code>, <code>empty_record</code>, <code>snapshot_conflict</code>.</p>"],
-        ["Expected outcome", "<p>Rejects are data quality outcomes, counted in <code>etl_rejected_total{reason}</code>. They go through the same claims as processed rows, so CDN repeats do not multiply them.</p>"]
+        ["Reasons", "<p><code>missing_id</code>, <code>null_price</code>, <code>nonpositive_price</code>, <code>empty_platform</code>, <code>empty_record</code>, <code>snapshot_conflict</code>.</p>"]
       ]
     },
     "b-dlq": {
-      kicker: "Bucket · ./data/dlq", title: "s3://dlq", role: "Records that broke a stage: bad input, or an output row that fails S2. A person needs to look; an alert fires.",
+      kicker: "Bucket · ./data/dlq", title: "s3://dlq", role: "Records that broke a stage. An alert fires.",
       sections: [
-        ["One record shape", "<p>Every stage writes the same record (schema S3, <code>dlq_record.v1.json</code>): <code>stage</code>, <code>error_class</code>, up to 20 <code>violations</code>, an <code>origin</code> (postgres, s3 or kafka), <code>original_base64</code> and <code>occurred_at</code>.</p>"],
-        ["Deterministic", "<p><code>occurred_at</code> comes from the batch (claimed, exported or planned time), never the clock, and violations are sorted. A retried batch writes the same bytes, so write-once still holds.</p>"],
-        ["Why a bucket", "<p>Two of the three writers run before the broker. A dlq topic would also sit outside the batch manifest and could collect duplicates on retries.</p>"]
+        ["Record", "<p>One shape for every stage: stage, error_class, violations, origin, original bytes, occurred_at.</p>"],
+        ["Why a bucket", "<p>Two of three writers run before the broker, and write-once naming keeps retries from duplicating entries.</p>"]
       ]
     }
   };
-  var CARD_ORDER = ["coingecko", "fetcher", "apicalls", "exporter", "state", "b-raw", "publisher", "redpanda", "transformer", "b-processed", "b-rejected", "b-dlq", "init", "obs"];
+  var COMP_ORDER = ["coingecko", "fetcher", "apicalls", "exporter", "state", "b-raw", "publisher", "redpanda", "transformer", "b-processed", "b-rejected", "b-dlq", "init", "obs"];
 
   /* ------------------------------------------------------------------ drawer */
   var drawer = $("#drawer"), scrim = $("#scrim"), lastFocus = null, closeTimer = null;
@@ -1242,79 +1223,72 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     mq.addEventListener("change", function (e) { reduceMotion = e.matches; setAnim(e.matches); });
   }
 
-  var cards = $("#cards");
-  CARD_ORDER.forEach(function (id) {
-    var c = C[id];
+  var comp = $("#comp");
+  COMP_ORDER.forEach(function (id) {
     var b = document.createElement("button");
-    b.type = "button"; b.className = "card";
-    b.innerHTML = "<span class=\"name\">" + esc(c.title) + "<span>" + esc(c.kicker.split(" · ")[0]) + "</span></span><span class=\"role\">" + esc(c.role) + "</span>";
+    b.type = "button"; b.textContent = C[id].title;
+    b.setAttribute("aria-label", C[id].title + ": open details");
     b.addEventListener("click", function () { openDrawer(id, b); });
-    cards.appendChild(b);
+    comp.appendChild(b);
   });
 
   /* ------------------------------------------------------------------ walkthrough */
   var HOPS = ["CoinGecko", "fetcher", "raw.api_calls", "exporter", "s3://raw", "publisher", "coingecko.raw", "transformer", "pipeline.*", "s3://processed"];
   var STEPS = [
     {
-      t: "Poll", w: "10:02:33 UTC", on: [0, 1],
-      p: "The fetcher calls <code>/coins/markets</code>. CoinGecko's CDN has no copy yet (<code>cf-cache-status: MISS</code>), so the response is fresh: every coin carries the snapshot stamp <code>10:01:51.000Z</code>, except figure-heloc, which CoinGecko last recomputed at <code>07:55:52</code>.",
-      a: "<span class=\"k\">GET</span> /api/v3/coins/markets?vs_currency=usd&amp;order=market_cap_desc&amp;per_page=10\n    &amp;page=1&amp;price_change_percentage=1h,24h,7d&amp;sparkline=true&amp;precision=full\n<span class=\"c\">-- the recorded request; the fetcher sends per_page=100&amp;sparkline=false</span>\n\n<span class=\"c\">HTTP/2 200</span>\ndate: Sat, 10 Oct 2026 10:02:33 GMT\ncache-control: max-age=30, public, must-revalidate, s-maxage=60\ncf-cache-status: <span class=\"s\">MISS</span>\n\n[{\"id\":\"bitcoin\",\"symbol\":\"btc\",\"current_price\":82800,\n  \"market_cap\":1663680829681,\"total_volume\":22361942086,\n  \"high_24h\":83398,\"low_24h\":82229,\"price_change_percentage_24h\":0.25599,\n  \"last_updated\":\"<span class=\"k\">2026-10-10T10:01:51.000Z</span>\", ...},\n ...\n {\"id\":\"figure-heloc\",\"current_price\":1.001,\n  \"price_change_percentage_24h\":null,\n  \"last_updated\":\"<span class=\"w\">2026-10-10T07:55:52.000Z</span>\", ...}]",
-      cap: "Recorded response A. sha256 of the body: 1350ae15534a2a76…"
+      t: "Poll", on: [0, 1],
+      p: "Fresh response (CDN <code>MISS</code>). Every coin carries snapshot <code>10:01:51</code>, except stale figure-heloc (<code>07:55:52</code>).",
+      a: "<span class=\"k\">GET</span> /api/v3/coins/markets?vs_currency=usd&amp;per_page=10&amp;precision=full ...\n<span class=\"c\">HTTP/2 200 · date 10:02:33 · cf-cache-status</span> <span class=\"s\">MISS</span>\n\n[{\"id\":\"bitcoin\",\"current_price\":82800,\"last_updated\":\"<span class=\"k\">2026-10-10T10:01:51.000Z</span>\",...},\n ...\n {\"id\":\"figure-heloc\",\"current_price\":1.001,\"last_updated\":\"<span class=\"w\">2026-10-10T07:55:52.000Z</span>\",...}]\n\n<span class=\"c\">sha256 of the body: 1350ae15534a2a76…</span>"
     },
     {
-      t: "Store the call", w: "raw.api_calls", on: [1, 2],
-      p: "One row per call, before any deduplication. The body goes into a <code>json</code> column byte for byte, next to its sha256. Five seconds later the bitcoin <code>/coins/{id}</code> call adds its own row. 34 seconds after poll A, poll B gets the same bytes from the CDN cache (<code>HIT</code>, <code>age: 34</code>): another row with a new <code>event_id</code> and the same <code>idempotency_key</code>. Raw keeps both.",
-      a: "<span class=\"c\">-- poll A</span>\nseq              1077\nevent_id         01a12543-a844-7cc2-9a51-3f1f2b9d8e11   <span class=\"c\">UUIDv7, 10:02:33.412Z</span>\nendpoint         coins_markets\nfetched_at       2026-10-10T10:02:33.412Z\noutcome          ok\nhttp             {\"status\":200,\"cf_cache_status\":\"MISS\",\"age_s\":null,...}\npayload_sha256   <span class=\"k\">1350ae15534a2a76…</span>\nidempotency_key  sha256(coingecko | coins_markets | params | 1350ae15…)\npayload          [{\"id\":\"bitcoin\",...}]                <span class=\"c\">json, byte-exact</span>\n\n<span class=\"c\">-- 10:02:38, /coins/bitcoin</span>\nseq 1078 · endpoint coin_detail · snapshot 10:01:51\n\n<span class=\"c\">-- poll B, 10:03:07, cf-cache-status: HIT, age: 34</span>\nseq 1079 · new event_id · payload_sha256 <span class=\"k\">1350ae15534a2a76…</span> · same idempotency_key\n\n<span class=\"c\">-- poll C, 10:03:43, cf-cache-status: EXPIRED</span>\nseq 1080 · payload_sha256 <span class=\"s\">02bb4dce488316d6…</span> · snapshot 10:02:51",
-      cap: "Columns follow schema S1. A 429 or a timeout would be a row with outcome http_error or network_error and no payload."
+      t: "Store", on: [1, 2],
+      p: "One row per call, body byte-exact. Poll B (CDN <code>HIT</code>) adds a second row with the same <code>idempotency_key</code>.",
+      a: "seq  event_id         endpoint       cf     payload_sha256\n1077 01a12543-a844-…  coins_markets  MISS   <span class=\"k\">1350ae15…</span>   <span class=\"c\">poll A</span>\n1078 01a12543-bd0b-…  coin_detail    EXP    …          <span class=\"c\">/coins/bitcoin</span>\n1079 01a12544-2c98-…  coins_markets  HIT    <span class=\"k\">1350ae15…</span>   <span class=\"c\">poll B, same bytes</span>\n1080 01a12544-bba1-…  coins_markets  EXP    <span class=\"s\">02bb4dce…</span>   <span class=\"c\">poll C</span>"
     },
     {
-      t: "Export a batch", w: "every 15 s", on: [2, 3, 4],
-      p: "The exporter claims the next range of committed rows below the oldest running transaction, records it as batch 42, writes one JSONL object with <code>If-None-Match: *</code> and marks the batch exported. Each line is the S1 event with the payload embedded verbatim.",
-      a: "<span class=\"c\">-- pipeline.export_batches</span>\nbatch_id 42 · rows 1077..1080 · status exported\nobject_key source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\n\n<span class=\"k\">PUT</span> /raw/source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\nIf-None-Match: *\nx-amz-meta-sha256: 7c41…\n<span class=\"s\">200 OK</span>\n\n<span class=\"c\">-- line 1 (poll A)</span>\n{\"schema_version\":1,\"event_id\":\"01a12543-a844-…\",\"idempotency_key\":\"…\",\n \"source\":\"coingecko\",\"endpoint\":\"coins_markets\",\"request\":{...},\n \"fetched_at\":\"2026-10-10T10:02:33.412Z\",\"outcome\":\"ok\",\"http\":{...},\n \"error\":null,\"payload_sha256\":\"1350ae15…\",\"payload\":[{\"id\":\"bitcoin\",...}]}",
-      cap: "A retry of the same batch writes the same bytes: the storage answers 412 and the checksums match."
+      t: "Export", on: [2, 3, 4],
+      p: "Rows below the oldest open transaction become batch 42: one write-once JSONL object.",
+      a: "<span class=\"k\">PUT</span> raw/source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\nIf-None-Match: *   →   <span class=\"s\">200 OK</span>\n\n{\"schema_version\":1,\"event_id\":\"01a12543-a844-…\",\"endpoint\":\"coins_markets\",\n \"outcome\":\"ok\",\"payload_sha256\":\"1350ae15…\",\"payload\":[...]}"
     },
     {
-      t: "Publish", w: "lease → produce", on: [4, 5, 6],
-      p: "The publisher leases batch 42, reads the object over S3, checks each line against S1 and produces it unchanged. All markets messages share the key <code>coins_markets</code>; bitcoin's key hashes to the same partition, so all four messages land on partition 0 in order.",
-      a: "topic      coingecko.raw\nkeys       coins_markets, bitcoin   <span class=\"c\">murmur2 % 6 = 0 for both</span>\npartition  0\noffsets    <span class=\"k\">1200</span> poll A · <span class=\"k\">1201</span> /coins/bitcoin · <span class=\"k\">1202</span> poll B · <span class=\"k\">1203</span> poll C\nheaders    event_id, idempotency_key,\n           schema = …/pipeline/raw_event.v1.json,\n           raw_object = source=coingecko/…/batch=…42.jsonl, line_no\nvalue      the raw line, byte for byte",
-      cap: "Idempotent producer, acks=all. published_at is set only after the flush."
+      t: "Publish", on: [4, 5, 6],
+      p: "Each line becomes one message. <code>coins_markets</code> and <code>bitcoin</code> both hash to partition 0.",
+      a: "topic coingecko.raw · partition 0\n<span class=\"k\">1200</span> poll A · <span class=\"k\">1201</span> /coins/bitcoin · <span class=\"k\">1202</span> poll B · <span class=\"k\">1203</span> poll C\nheaders: event_id, idempotency_key, schema, raw_object, line_no"
     },
     {
-      t: "Plan the batch", w: "partition 0 · [1200..1203]", on: [6, 7, 8],
-      p: "A transformer replica owns partition 0 and polls offsets 1200 to 1203. Input checks run first without the database: strict JSON, S1, the payload checksum and S0. All four pass. TX1 opens and records the range as planned.",
-      a: "<span class=\"c\">-- checks per message</span>\nstrict JSON                        <span class=\"s\">ok</span>\nS1 raw_event.v1                    <span class=\"s\">ok</span>\nsha256(payload) = payload_sha256   <span class=\"s\">ok</span>\nS0 coins_markets.v1 / coin.v1      <span class=\"s\">ok</span>\n\n<span class=\"c\">-- TX1</span>\nINSERT INTO pipeline.consumer_batches\n  (topic_id, kafka_partition, first_offset, last_offset, status)\nVALUES ('…', 0, 1200, 1203, 'planned');",
-      cap: "If a row with this start already exists, the stored range wins over the polled one."
+      t: "Plan", on: [6, 7, 8],
+      p: "Input checks pass; TX1 records offsets 1200–1203 as planned.",
+      a: "strict JSON <span class=\"s\">ok</span> · S1 <span class=\"s\">ok</span> · checksum <span class=\"s\">ok</span> · S0 <span class=\"s\">ok</span>\n\nINSERT INTO pipeline.consumer_batches\n  (topic_id, kafka_partition, first_offset, last_offset, status)\nVALUES (…, 0, 1200, 1203, 'planned');"
     },
     {
-      t: "Transform", w: "snapshot_at = max(last_updated)", on: [7],
-      p: "Each markets response becomes market_snapshot rows. Messages A and B give snapshot <code>10:01:51.000Z</code>; message C gives <code>10:02:51.000Z</code>. figure-heloc's own stamp is about two hours older than either snapshot, so both of its rows are flagged stale and kept. The bitcoin document at offset 1201 becomes rows in the four coin datasets.",
-      a: "<span class=\"c\">-- excerpt: bitcoin and figure-heloc only</span>\nbitcoin       snapshot_at 2026-10-10T10:01:51.000Z  price \"82800\"   is_stale false\nfigure-heloc  snapshot_at 2026-10-10T10:01:51.000Z  price \"1.001\"   <span class=\"w\">is_stale true</span>\n              source_updated_at 07:55:52.000Z → 2 h 6 min behind\n\n<span class=\"c\">-- message C</span>\nbitcoin       snapshot_at 2026-10-10T10:02:51.000Z  price \"82795\"\nfigure-heloc  snapshot_at 2026-10-10T10:02:51.000Z  <span class=\"w\">is_stale true</span>",
-      cap: "Money is written as decimal strings; percentages stay numbers."
+      t: "Transform", on: [7],
+      p: "<code>snapshot_at</code> = newest <code>last_updated</code>. figure-heloc is two hours behind, so both its rows are flagged stale.",
+      a: "bitcoin       10:01:51.000Z  price \"82800\"  is_stale false\nfigure-heloc  10:01:51.000Z  price \"1.001\"  <span class=\"w\">is_stale true</span>  <span class=\"c\">(2 h 6 min behind)</span>\n<span class=\"c\">-- message C</span>\nbitcoin       10:02:51.000Z  price \"82795\"\nfigure-heloc  10:02:51.000Z  <span class=\"w\">is_stale true</span>"
     },
     {
-      t: "Deduplicate", w: "claims in pipeline.dedup_claims", on: [7, 8],
-      p: "Every record claims its natural key; the first claim wins. Records from message B find claims that point to message A with the same content hash, so they are dropped. Message C carries a new snapshot, so its keys are new, including figure-heloc's.",
-      a: "<span class=\"c\">-- excerpt</span>\n<span class=\"c\">record key                                    offset  decision</span>\nmarket_snapshot | bitcoin|…T10:01:51.000Z      1200    <span class=\"s\">write</span>\nmarket_snapshot | bitcoin|…T10:01:51.000Z      1202    <span class=\"w\">drop · duplicate_response</span>\nmarket_snapshot | bitcoin|…T10:02:51.000Z      1203    <span class=\"s\">write</span>\nmarket_snapshot | figure-heloc|…T10:01:51.000Z 1200    <span class=\"s\">write</span> (is_stale)\nmarket_snapshot | figure-heloc|…T10:02:51.000Z 1203    <span class=\"s\">write</span> (is_stale)",
-      cap: "duplicate_response is only a metric label: the content hash matches, and the claim came from a message with the same idempotency_key."
+      t: "Deduplicate", on: [7, 8],
+      p: "B's records match A's claims with the same content: dropped. C is a new snapshot: written.",
+      a: "<span class=\"c\">key                          offset  decision</span>\nbitcoin|…T10:01:51.000Z       1200    <span class=\"s\">write</span>\nbitcoin|…T10:01:51.000Z       1202    <span class=\"w\">drop · duplicate_response</span>\nbitcoin|…T10:02:51.000Z       1203    <span class=\"s\">write</span>\nfigure-heloc|…T10:02:51.000Z  1203    <span class=\"s\">write</span> (stale)"
     },
     {
-      t: "Write and commit", w: "PUT · TX2 · offset 1204", on: [7, 8, 9],
-      p: "The rows are serialized in offset order with <code>_processed_at</code> taken from the manifest, written once, the batch is marked written, and offset 1204 is committed. A crash anywhere in this step replays the same range into the same object.",
-      a: "<span class=\"k\">PUT</span> /processed/dataset=market_snapshot/v=1/event_date=2026-10-10/\n    coingecko.raw+0+00000000000000001200.jsonl\nIf-None-Match: *            <span class=\"s\">200 OK</span>\n\n{\"coin_id\":\"bitcoin\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\"symbol\":\"BTC\",\n \"name\":\"Bitcoin\",\"vs_currency\":\"usd\",\"market_cap_rank\":1,\"price\":\"82800\",\n \"market_cap\":\"1663680829681\",\"fdv\":\"1663680829681\",\"total_volume\":\"22361942086\",\n \"high_24h\":\"83398\",\"low_24h\":\"82229\",\"price_change_24h\":\"211.42\",\n \"price_change_pct_1h\":0.0036,\"price_change_pct_24h\":0.25599,...,\n \"source_updated_at\":\"2026-10-10T10:01:51.000Z\",\"is_stale\":false,\n \"is_inactive\":false,\"is_anomaly\":false,\n \"_event_id\":\"01a12543-a844-…\",\"_raw_object\":\"source=coingecko/…/batch=…42.jsonl\",\n \"_kafka_partition\":0,\"_kafka_offset\":1200,\"_schema_version\":1,\n \"_processed_at\":\"2026-10-10T10:03:52.204Z\"}\n\nUPDATE pipeline.consumer_batches SET status = 'written' ...;   <span class=\"c\">TX2</span>\ncommit offset 1204",
-      cap: "The object holds one row per coin for each new snapshot: messages A and C each add a full set (10 rows in the recording, 100 at per_page=100), message B adds none. The excerpt shows bitcoin."
+      t: "Write", on: [7, 8, 9],
+      p: "Write-once PUT, TX2 marks the batch written, offset 1204 is committed.",
+      a: "<span class=\"k\">PUT</span> processed/dataset=market_snapshot/v=1/event_date=2026-10-10/\n    coingecko.raw+0+00000000000000001200.jsonl   →   <span class=\"s\">200 OK</span>\n\n{\"coin_id\":\"bitcoin\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\"symbol\":\"BTC\",\n \"price\":\"82800\",\"market_cap\":\"1663680829681\",...,\"is_stale\":false,\n \"_event_id\":\"01a12543-a844-…\",\"_kafka_offset\":1200,...}"
     }
   ];
   var stepIdx = 0, playTimer = null;
   var stepsEl = $("#steps"), stageEl = $("#stage");
   STEPS.forEach(function (s, i) {
     var li = document.createElement("li");
-    li.innerHTML = "<button type=\"button\"><span class=\"n\">" + (i + 1) + "</span><span><span class=\"t\">" + s.t + "</span><span class=\"w\">" + s.w + "</span></span></button>";
+    li.innerHTML = "<button type=\"button\"><span class=\"n\">" + (i + 1) + "</span><span class=\"t\">" + s.t + "</span></button>";
     li.firstChild.addEventListener("click", function () { stopPlay(); showStep(i); revealStage(); });
     stepsEl.appendChild(li);
   });
+  // Keep the controls clear of the sticky section bar and the stage heading on screen.
   function revealStage() {
-    var r = stageEl.getBoundingClientRect();
-    if (r.top < 0 || r.top > window.innerHeight * 0.6) stageEl.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
+    var ctrl = $("#walk-ctrl"), barBottom = $(".toc").getBoundingClientRect().bottom;
+    var c = ctrl.getBoundingClientRect(), s = stageEl.getBoundingClientRect();
+    if (c.top < barBottom + 4 || s.top > window.innerHeight * 0.6) ctrl.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
   }
   function showStep(i) {
     stepIdx = (i + STEPS.length) % STEPS.length;
@@ -1322,8 +1296,7 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     $all("button", stepsEl).forEach(function (b, j) { if (j === stepIdx) b.setAttribute("aria-current", "step"); else b.removeAttribute("aria-current"); });
     var hops = HOPS.map(function (h, j) { return "<span class=\"" + (s.on.indexOf(j) >= 0 ? "on" : "") + "\">" + h + "</span>"; }).join("<i>›</i>");
     stageEl.innerHTML = "<div class=\"hops\" aria-hidden=\"true\">" + hops + "</div>" +
-      "<h3>" + (stepIdx + 1) + ". " + s.t + " <span class=\"mono muted\" style=\"font-weight:400\">· " + s.w + "</span></h3><p>" + s.p + "</p>" +
-      "<figure><pre tabindex=\"0\">" + s.a + "</pre><figcaption>" + s.cap + "</figcaption></figure>";
+      "<h3>" + (stepIdx + 1) + ". " + s.t + "</h3><p class=\"text-sm\">" + s.p + "</p><pre tabindex=\"0\">" + s.a + "</pre>";
     stageEl.classList.remove("fade-in"); void stageEl.offsetWidth; stageEl.classList.add("fade-in");
     $("#walk-pos").textContent = "Step " + (stepIdx + 1) + " of " + STEPS.length + ": " + s.t;
   }
@@ -1337,7 +1310,7 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     if (playTimer) { stopPlay(); return; }
     $("#walk-play").textContent = "Pause";
     revealStage();
-    playTimer = setInterval(function () { showStep(stepIdx + 1); }, 6500);
+    playTimer = setInterval(function () { showStep(stepIdx + 1); }, 5000);
   });
   showStep(0);
 
@@ -1346,38 +1319,35 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     {
       label: "Two polls, one snapshot", from: "10:01:30", to: "10:04:00",
       marks: [
-        { at: "10:01:51", label: "snapshot 1", val: "last_updated 10:01:51.000Z", c: "var(--accent)", lvl: -1 },
-        { at: "10:02:33", label: "poll A", val: "MISS · fresh body", c: "var(--processed)", lvl: 1 },
-        { at: "10:02:51", label: "snapshot 2", val: "last_updated 10:02:51.000Z", c: "var(--accent)", lvl: -1 },
-        { at: "10:03:07", label: "poll B", val: "HIT · age 34 · same bytes", c: "var(--raw)", lvl: 2 },
-        { at: "10:03:43", label: "poll C", val: "EXPIRED · snapshot 2", c: "var(--processed)", lvl: 1 }
+        { at: "10:01:51", label: "snapshot 1", val: "last_updated", c: "var(--accent)", lvl: -1 },
+        { at: "10:02:33", label: "poll A", val: "MISS", c: "var(--processed)", lvl: 1 },
+        { at: "10:02:51", label: "snapshot 2", val: "last_updated", c: "var(--accent)", lvl: -1 },
+        { at: "10:03:07", label: "poll B", val: "HIT · same bytes", c: "var(--raw)", lvl: 2 },
+        { at: "10:03:43", label: "poll C", val: "snapshot 2", c: "var(--processed)", lvl: 1 }
       ],
-      ranges: [{ from: "10:02:33", to: "10:03:33", label: "CDN cache · s-maxage=60", c: "var(--raw)", lx: "10:03:10", anchor: "start" }],
-      left: "<h3>What becomes an event</h3><p>Polls A and B returned identical bytes (sha256 <code>1350ae15…</code>): one snapshot, one set of rows. Poll C returned snapshot 2, a new event. Event time is <code>snapshot_at</code>, never the poll time.</p>",
-      right: "<h3>Why it matters</h3><p>Polling every 30 s against a 60 s refresh and a 60 s CDN cache yields about 50% repeats. Raw keeps them all; the transformer drops them by natural key.</p>"
+      ranges: [{ from: "10:02:33", to: "10:03:33", label: "CDN cache · 60 s", c: "var(--raw)", lx: "10:03:10", anchor: "start" }],
+      take: "A and B are byte-identical: one event. C is the next snapshot: a new event."
     },
     {
       label: "Stale coin", from: "07:40:00", to: "10:20:00",
       marks: [
         { at: "07:55:52", label: "figure-heloc recomputed", val: "source_updated_at", c: "var(--raw)", lvl: -1, anchor: "start" },
-        { at: "10:01:51", label: "snapshot 1", val: "row 1 · is_stale", c: "var(--accent)", lvl: 1, anchor: "end" },
-        { at: "10:02:51", label: "snapshot 2", val: "row 2 · is_stale", c: "var(--accent)", lvl: -1, anchor: "end" }
+        { at: "10:01:51", label: "snapshot 1", val: "row 1 · stale", c: "var(--accent)", lvl: 1, anchor: "end" },
+        { at: "10:02:51", label: "snapshot 2", val: "row 2 · stale", c: "var(--accent)", lvl: -1, anchor: "end" }
       ],
-      ranges: [{ from: "07:55:52", to: "10:01:51", label: "2 h 6 min, over the 10 min threshold", c: "var(--raw)" }],
-      left: "<h3>Two rows, both valid</h3><p>The price stays 1.001 in both snapshots, but each snapshot is a new statement by the source: at 10:02:51 CoinGecko still reports it. The keys differ by <code>snapshot_at</code>, so deduplication keeps both.</p>",
-      right: "<h3>Flagged and kept</h3><p><code>is_stale = snapshot_at − source_updated_at &gt; 10 min</code>. Readers decide whether to use stale prices; the row stays in processed.</p>"
+      ranges: [{ from: "07:55:52", to: "10:01:51", label: "2 h 6 min behind", c: "var(--raw)" }],
+      take: "Same price in two snapshots: two valid rows, both is_stale."
     },
     {
-      label: "Where each time comes from", from: "09:59:30", to: "10:03:00",
+      label: "Where times come from", from: "09:59:30", to: "10:03:00",
       marks: [
         { at: "10:00:40", label: "CoinGecko fetched exchanges", val: "last_fetch_at", c: "var(--state)", lvl: 1, anchor: "end" },
-        { at: "10:00:45", label: "trade on CoinUp", val: "after the fetch: clock skew", c: "var(--dlq)", lvl: -1, anchor: "start" },
-        { at: "10:01:51", label: "snapshot", val: "last_updated → snapshot_at", c: "var(--accent)", lvl: 2 },
-        { at: "10:02:38", label: "CDN answered · we polled", val: "Date header · fetched_at", c: "var(--processed)", lvl: -2, anchor: "end" }
+        { at: "10:00:45", label: "trade on CoinUp", val: "after the fetch", c: "var(--dlq)", lvl: -1, anchor: "start" },
+        { at: "10:01:51", label: "snapshot", val: "snapshot_at", c: "var(--accent)", lvl: 2 },
+        { at: "10:02:38", label: "we polled", val: "fetched_at", c: "var(--processed)", lvl: -2, anchor: "end" }
       ],
-      ranges: [{ from: "09:40:53", to: "10:00:51", label: "trades: 09:40:53 to 10:00:51", c: "var(--muted)", lx: "09:59:31", anchor: "start" }],
-      left: "<h3>The chain for bitcoin</h3><p>Trades happen on exchanges, CoinGecko fetches tickers, recomputes the coin, the CDN serves the document, we poll. Recorded from <code>/coins/bitcoin</code> on 2026-10-10.</p>",
-      right: "<h3>Clocks disagree</h3><p>89 of the 100 tickers report a trade after CoinGecko's fetch at 10:00:40, for example CoinUp at 10:00:45. Times from different systems are stored as fields; no logic depends on their order.</p>"
+      ranges: [{ from: "09:40:53", to: "10:00:51", label: "trades 09:40:53 to 10:00:51", c: "var(--muted)", lx: "09:59:31", anchor: "start" }],
+      take: "Clocks disagree (89 of 100 tickers traded after CoinGecko's fetch), so no logic depends on their order."
     }
   ];
   function secs(hms) { var p = hms.split(":").map(Number); return p[0] * 3600 + p[1] * 60 + (p[2] || 0); }
@@ -1419,7 +1389,7 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     $("#timeline-list").innerHTML = sc.marks.slice().sort(function (p, q) { return secs(p.at) - secs(q.at); }).map(function (m) {
       return "<li><span class=\"mono\">" + m.at + "</span> " + esc(m.label) + ": " + esc(m.val) + "</li>";
     }).join("");
-    $("#time-text").innerHTML = "<div class=\"stack\">" + sc.left + "</div><div class=\"stack\">" + sc.right + "</div>";
+    $("#time-take").textContent = sc.take;
     announce("Time scenario: " + sc.label);
   }
   TIME.forEach(function (sc, i) {
@@ -1434,28 +1404,23 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   var DS = {
     market_snapshot: {
       src: "/coins/markets", rows: "100 per snapshot", key: ["coin_id", "snapshot_at"],
-      fields: ["coin_id", "snapshot_at", "symbol", "name", "vs_currency", "market_cap_rank", "price", "market_cap", "fdv", "total_volume", "high_24h", "low_24h", "price_change_24h", "price_change_pct_1h", "price_change_pct_24h", "price_change_pct_7d", "market_cap_change_24h", "market_cap_change_pct_24h", "circulating_supply", "total_supply", "max_supply", "ath", "ath_change_pct", "ath_at", "atl", "atl_change_pct", "atl_at", "roi_times", "roi_currency", "roi_pct", "source_updated_at", "is_stale", "is_inactive", "is_anomaly"],
-      note: "A flat row per coin. <code>roi</code> is flattened; money columns are decimal strings."
+      fields: ["coin_id", "snapshot_at", "symbol", "name", "vs_currency", "market_cap_rank", "price", "market_cap", "fdv", "total_volume", "high_24h", "low_24h", "price_change_24h", "price_change_pct_1h", "price_change_pct_24h", "price_change_pct_7d", "market_cap_change_24h", "market_cap_change_pct_24h", "circulating_supply", "total_supply", "max_supply", "ath", "ath_change_pct", "ath_at", "atl", "atl_change_pct", "atl_at", "roi_times", "roi_currency", "roi_pct", "source_updated_at", "is_stale", "is_inactive", "is_anomaly"]
     },
     coin_snapshot: {
       src: "/coins/{id} scalars", rows: "1 per snapshot", key: ["coin_id", "snapshot_at"],
-      fields: ["coin_id", "snapshot_at", "symbol", "name", "categories", "hashing_algorithm", "genesis_date", "market_cap_rank", "circulating_supply", "total_supply", "max_supply", "max_supply_infinite", "source_updated_at", "is_stale"],
-      note: "The parent row; children join on <code>(coin_id, snapshot_at)</code>. For bitcoin: SHA-256, genesis 2009-01-03."
+      fields: ["coin_id", "snapshot_at", "symbol", "name", "categories", "hashing_algorithm", "genesis_date", "market_cap_rank", "circulating_supply", "total_supply", "max_supply", "max_supply_infinite", "source_updated_at", "is_stale"]
     },
     coin_market_by_currency: {
-      src: "23 market_data maps × 63 currencies", rows: "63 per snapshot", key: ["coin_id", "currency", "snapshot_at"],
-      fields: ["coin_id", "currency", "snapshot_at", "price", "market_cap", "fdv", "total_volume", "high_24h", "low_24h", "ath", "ath_change_pct", "ath_at", "atl", "atl_change_pct", "atl_at", "price_change_24h", "price_change_pct_1h", "price_change_pct_24h", "price_change_pct_7d", "price_change_pct_14d", "price_change_pct_30d", "price_change_pct_60d", "price_change_pct_200d", "price_change_pct_1y", "market_cap_change_24h", "market_cap_change_pct_24h", "is_inactive", "is_anomaly"],
-      note: "The maps are zipped on the currency key into long rows. Bitcoin's <code>market_cap</code> in VND, 43083803721443304, is above 2<sup>53</sup>, beyond the integers float64 can hold exactly, so money is a decimal string."
+      src: "23 maps × 63 currencies", rows: "63 per snapshot", key: ["coin_id", "currency", "snapshot_at"],
+      fields: ["coin_id", "currency", "snapshot_at", "price", "market_cap", "fdv", "total_volume", "high_24h", "low_24h", "ath", "ath_change_pct", "ath_at", "atl", "atl_change_pct", "atl_at", "price_change_24h", "price_change_pct_1h", "price_change_pct_24h", "price_change_pct_7d", "price_change_pct_14d", "price_change_pct_30d", "price_change_pct_60d", "price_change_pct_200d", "price_change_pct_1y", "market_cap_change_24h", "market_cap_change_pct_24h", "is_inactive", "is_anomaly"]
     },
     ticker: {
-      src: "tickers[] · up to 100 per coin", rows: "100 per snapshot", key: ["coin_id", "exchange_id", "base", "target", "snapshot_at"],
-      fields: ["coin_id", "exchange_id", "base", "target", "snapshot_at", "exchange_name", "has_trading_incentive", "base_coin_id", "target_coin_id", "last", "volume", "last_usd", "last_btc", "last_eth", "volume_usd", "volume_btc", "volume_eth", "bid_ask_spread_pct", "trust_score", "ticker_timestamp", "last_traded_at", "last_fetch_at", "upstream_is_stale", "upstream_is_anomaly", "is_stale", "is_anomaly"],
-      note: "<code>market</code> becomes <code>exchange_id</code> and <code>exchange_name</code>; <code>converted_last</code> and <code>converted_volume</code> become <code>_usd</code>, <code>_btc</code>, <code>_eth</code> columns. Anomaly: more than 2% from the coin's median <code>last_usd</code>."
+      src: "tickers[]", rows: "100 per snapshot", key: ["coin_id", "exchange_id", "base", "target", "snapshot_at"],
+      fields: ["coin_id", "exchange_id", "base", "target", "snapshot_at", "exchange_name", "has_trading_incentive", "base_coin_id", "target_coin_id", "last", "volume", "last_usd", "last_btc", "last_eth", "volume_usd", "volume_btc", "volume_eth", "bid_ask_spread_pct", "trust_score", "ticker_timestamp", "last_traded_at", "last_fetch_at", "upstream_is_stale", "upstream_is_anomaly", "is_stale", "is_anomaly"]
     },
     coin_contract: {
       src: "platforms + detail_platforms", rows: "up to 36 per snapshot", key: ["coin_id", "platform_id", "snapshot_at"],
-      fields: ["coin_id", "platform_id", "snapshot_at", "contract_address", "decimal_place"],
-      note: "Two maps zipped on the chain key. USD Coin has 36 chains, e.g. ethereum <code>0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48</code> with 6 decimals. Bitcoin's <code>{\"\": \"\"}</code> goes to rejected as <code>empty_platform</code>."
+      fields: ["coin_id", "platform_id", "snapshot_at", "contract_address", "decimal_place"]
     }
   };
   var TECH = ["_event_id", "_raw_object", "_kafka_partition", "_kafka_offset", "_schema_version", "_processed_at"];
@@ -1469,7 +1434,7 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
       var cls = d.key.indexOf(x) >= 0 ? "key" : /^(is_|upstream_is_)/.test(x) ? "flag" : "";
       return "<code class=\"" + cls + "\">" + x + "</code>";
     }).join("");
-    $("#ds-panel").innerHTML = "<div class=\"stack fade-in\" style=\"gap:10px\"><div class=\"eyebrow\">" + esc(d.src) + " · " + esc(d.rows) + "</div><h3 class=\"mono\">" + name + "</h3><p class=\"text-md\">" + d.note + "</p><div class=\"fields\">" + f + "</div><div class=\"muted text-sm\">Lineage columns on every row:</div><div class=\"fields\">" + TECH.map(function (x) { return "<code>" + x + "</code>"; }).join("") + "</div><p class=\"muted text-sm\">Highlighted: the natural key. Amber: flags. The content hash used for deduplication covers business fields only, never the lineage columns.</p></div>";
+    $("#ds-panel").innerHTML = "<div class=\"stack fade-in\" style=\"gap:10px\"><div class=\"eyebrow\">" + esc(d.src) + " · " + esc(d.rows) + "</div><h3 class=\"mono\">" + name + "</h3><div class=\"fields\">" + f + "</div><div class=\"fields\">" + TECH.map(function (x) { return "<code>" + x + "</code>"; }).join("") + "</div><p class=\"note\">blue: key · amber: flags · last row: lineage</p></div>";
     announce(name + ", " + d.fields.length + " columns");
   }
   $all(".ds", $("#dm-svg")).forEach(function (g) {
@@ -1480,13 +1445,13 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   showDS("market_snapshot");
 
   /* ------------------------------------------------------------------ deduplication simulator */
-  var STORED = { pos: "p0 · offset 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" };
+  var STORED = { pos: "p0 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" };
   var DEDUP = [
-    { label: "Redelivery after a crash", inc: { pos: "p0 · offset 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Write", c: "var(--processed)", why: "The claim points to this record's own position. It is the first sight, delivered again after a crash between TX1 and the commit. Writing it again produces the same bytes in the same object." },
-    { label: "Publisher replay", inc: { pos: "p0 · offset 1310 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · replay", c: "var(--muted)", why: "Another position, the same content hash and the same event_id: the publisher sent batch 42 again after its lease expired." },
-    { label: "CDN repeat", inc: { pos: "p0 · offset 1202 · #0", event: "01a12544-2c98-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · duplicate_response", c: "var(--muted)", why: "Another position and event_id, the same content hash, and the claiming message had the same idempotency_key: poll B received poll A's cached bytes." },
-    { label: "Same record, other response", inc: { pos: "p0 · offset 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "c71e…" }, verdict: "Drop · duplicate_record", c: "var(--muted)", why: "The same snapshot of the same coin came inside a different response, for example after per_page changed. The content is the same, so it is a duplicate." },
-    { label: "Same key, other content", inc: { pos: "p0 · offset 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "5b90…" }, verdict: "Reject · snapshot_conflict", c: "var(--rejected)", why: "The key exists and the content differs. The first version stays in processed; this one goes to rejected with its reason, and a metric counts it. It means the snapshot assumption broke." }
+    { label: "Redelivery", inc: { pos: "p0 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Write", c: "var(--processed)", why: "The claim is this very record: write again, same bytes." },
+    { label: "Publisher replay", inc: { pos: "p0 · 1310 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · replay", c: "var(--muted)", why: "Same event_id at a new offset: the batch was republished." },
+    { label: "CDN repeat", inc: { pos: "p0 · 1202 · #0", event: "01a12544-2c98-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · duplicate_response", c: "var(--muted)", why: "Same content and idempotency_key: poll B got poll A's cached bytes." },
+    { label: "Other response", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "c71e…" }, verdict: "Drop · duplicate_record", c: "var(--muted)", why: "Same content from a different response." },
+    { label: "Other content", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "5b90…" }, verdict: "Reject · snapshot_conflict", c: "var(--rejected)", why: "Content differs: the first version stays, this one is rejected." }
   ];
   var dedupTabs = $("#dedup-tabs");
   function cell(a, b) {
@@ -1496,12 +1461,12 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
   function showDedup(i) {
     var s = DEDUP[i], inc = s.inc;
     $all("button", dedupTabs).forEach(function (b, j) { b.setAttribute("aria-pressed", j === i ? "true" : "false"); });
-    $("#dedup-view").innerHTML = "<div class=\"sim fade-in\"><div class=\"mono muted text-sm\">key: market_snapshot | bitcoin|2026-10-10T10:01:51.000Z</div>" +
+    $("#dedup-view").innerHTML = "<div class=\"sim fade-in\">" +
       "<div class=\"cmp\"><div class=\"side\"><div class=\"eyebrow\" style=\"margin-bottom:8px\">Stored claim</div><dl>" +
-      "<dt>position</dt><dd>" + STORED.pos + "</dd><dt>event_id</dt><dd>" + STORED.event + "</dd><dt>idempotency_key</dt><dd>" + STORED.idem + "</dd><dt>content hash</dt><dd>" + STORED.hash + "</dd></dl></div>" +
-      "<div class=\"side\"><div class=\"eyebrow\" style=\"margin-bottom:8px\">Incoming record</div><dl>" +
-      "<dt>position</dt>" + cell(inc.pos, STORED.pos) + "<dt>event_id</dt>" + cell(inc.event, STORED.event) + "<dt>idempotency_key</dt>" + cell(inc.idem, STORED.idem) + "<dt>content hash</dt>" + cell(inc.hash, STORED.hash) + "</dl></div></div>" +
-      "<div class=\"verdict\"><span class=\"tag\" style=\"--c:" + s.c + "\">" + s.verdict + "</span><span class=\"text-md\">" + s.why + "</span></div></div>";
+      "<dt>position</dt><dd>" + STORED.pos + "</dd><dt>event_id</dt><dd>" + STORED.event + "</dd><dt>idempotency</dt><dd>" + STORED.idem + "</dd><dt>content</dt><dd>" + STORED.hash + "</dd></dl></div>" +
+      "<div class=\"side\"><div class=\"eyebrow\" style=\"margin-bottom:8px\">Incoming</div><dl>" +
+      "<dt>position</dt>" + cell(inc.pos, STORED.pos) + "<dt>event_id</dt>" + cell(inc.event, STORED.event) + "<dt>idempotency</dt>" + cell(inc.idem, STORED.idem) + "<dt>content</dt>" + cell(inc.hash, STORED.hash) + "</dl></div></div>" +
+      "<div class=\"verdict\"><span class=\"tag\" style=\"--c:" + s.c + "\">" + s.verdict + "</span><span>" + s.why + "</span></div></div>";
     announce(s.label + ": " + s.verdict);
   }
   DEDUP.forEach(function (s, i) {
@@ -1522,7 +1487,7 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     { p: 5, keys: [], owner: "transformer-2" }
   ];
   $("#parts").innerHTML = PARTS.map(function (r) {
-    var bar = r.keys.length ? "<div class=\"bar\">" + r.keys.map(function (k) { return "<span>" + k + "</span>"; }).join("") + "</div>" : "<div class=\"bar empty\">no keys hash here</div>";
+    var bar = r.keys.length ? "<div class=\"bar\">" + r.keys.map(function (k) { return "<span>" + k + "</span>"; }).join("") + "</div>" : "<div class=\"bar empty\">empty</div>";
     return "<div class=\"prow\"><span>p" + r.p + "</span>" + bar + "<span class=\"owner\">" + r.owner + "</span></div>";
   }).join("");
 
@@ -1535,11 +1500,11 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
     { x: 800, w: 160, t: "Commit offset", s: "L+1, synchronous" }
   ];
   var CRASH = [
-    { x: 190, label: "C1", title: "Before TX1 commits", left: "Nothing durable for this batch.", rec: "The new owner polls from the committed offset and starts a fresh batch; its offset range does not have to match the lost one.", naive: null },
-    { x: 420, label: "C2", title: "After TX1, before any PUT", left: "Manifest row planned for [1200..1203] and claims that point to these offsets.", rec: "The new owner finds the planned range, reprocesses exactly it, sees claims that point to its own positions, makes the same decisions and writes the same bytes. PUT returns 200.", naive: "The naive rule sees every key already claimed and drops all records. The batch is lost for good. The position check exists to prevent this." },
-    { x: 515, label: "C3", title: "After some PUTs", left: "Some objects exist; the manifest is still planned.", rec: "Missing objects get 200; existing ones get 412 and their sha256 matches the manifest, which counts as done.", naive: "The naive rule drops every record of the planned range, because TX1 already claimed their keys. Objects written before the crash survive; the missing ones are never written." },
-    { x: 780, label: "C4", title: "After TX2, before the offset commit", left: "Manifest written; the committed offset still points at 1200.", rec: "The new owner sees that the covering batch is written, seeks to 1204 and commits.", naive: null },
-    { x: 605, label: "Z", title: "Zombie and new owner on the same range", left: "A zombie is a consumer that lost the partition in a rebalance but has not noticed yet. For a moment two consumers believe they own partition 0.", rec: "Both take the range from the manifest and build identical bytes. The first PUT wins, the second gets 412 with an equal checksum, and the zombie's offset commit is rejected.", naive: "If the zombie dies after its TX1, the new owner finds every key claimed and drops the whole range under the naive rule. Nothing reaches processed." }
+    { x: 190, label: "C1", title: "Before TX1 commits", left: "Nothing durable yet.", rec: "The next owner starts a fresh batch.", naive: null },
+    { x: 420, label: "C2", title: "After TX1, before any PUT", left: "Batch planned; claims point at its offsets.", rec: "Same range, same decisions, same bytes: PUT 200.", naive: "Every key is already claimed, so all records are dropped. The batch is lost." },
+    { x: 515, label: "C3", title: "After some PUTs", left: "Some objects written; batch still planned.", rec: "Missing objects 200; written ones 412 with an equal checksum.", naive: "Claims exist, so every record is dropped; unwritten objects never appear." },
+    { x: 780, label: "C4", title: "After TX2, before the commit", left: "Batch written; offset not committed.", rec: "The next owner skips to 1204 and commits.", naive: null },
+    { x: 605, label: "Z", title: "Zombie and new owner", left: "A zombie lost the partition and has not noticed.", rec: "Both write identical bytes; the second PUT gets 412; the zombie's commit is rejected.", naive: "If the zombie dies after TX1, the new owner drops the whole range." }
   ];
   var naive = false, crashSel = 1;
   function drawLC() {
@@ -1580,8 +1545,8 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
       ? "<span class=\"pill dlq\">loss: yes</span><span class=\"pill\">duplicates: no</span>"
       : "<span class=\"pill processed\">loss: no</span><span class=\"pill processed\">duplicates: no</span>";
     var head = bad ? "With the naive rule" : (naive ? "Same under the naive rule" : "Recovery");
-    $("#crash-view").innerHTML = "<div class=\"grid-2 fade-in\" style=\"gap:14px\"><div class=\"stack\"><div class=\"eyebrow\">" + c.label + " · left behind</div><h4>" + esc(c.title) + "</h4><p class=\"text-md\">" + esc(c.left) + "</p></div>" +
-      "<div class=\"stack\" style=\"gap:8px\"><div class=\"eyebrow\">" + head + "</div><p class=\"text-md\">" + esc(bad ? c.naive : c.rec) + "</p><div class=\"outcome\">" + outcome + "</div></div></div>";
+    $("#crash-view").innerHTML = "<div class=\"grid-2 fade-in\" style=\"gap:12px\"><div class=\"stack\"><div class=\"eyebrow\">" + c.label + " · left behind</div><h4>" + esc(c.title) + "</h4><p class=\"text-sm\">" + esc(c.left) + "</p></div>" +
+      "<div class=\"stack\" style=\"gap:8px\"><div class=\"eyebrow\">" + head + "</div><p class=\"text-sm\">" + esc(bad ? c.naive : c.rec) + "</p><div class=\"outcome\">" + outcome + "</div></div></div>";
     announce(c.label + ", " + c.title + (bad ? ": data lost under the naive rule" : ": no loss, no duplicates"));
   }
   $("#naive-toggle").addEventListener("click", function () {
@@ -1595,15 +1560,15 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ storage files */
   var FILES = {
-    raw: { title: "raw · batch 42", c: "var(--raw)", body: "{\"schema_version\":1,\"event_id\":\"01a12543-a844-7cc2-9a51-3f1f2b9d8e11\",\n \"idempotency_key\":\"…\",\"source\":\"coingecko\",\"endpoint\":\"coins_markets\",\n \"request\":{\"path\":\"/coins/markets\",\"params\":{\"order\":\"market_cap_desc\",...}},\n \"fetched_at\":\"2026-10-10T10:02:33.412Z\",\"outcome\":\"ok\",\n \"http\":{\"status\":200,\"latency_ms\":412,\"date\":\"Sat, 10 Oct 2026 10:02:33 GMT\",\n         \"age_s\":null,\"cf_cache_status\":\"MISS\",\"etag\":\"W/\\\"c4924cc4…\\\"\",\"retry_after_s\":null},\n \"error\":null,\"payload_sha256\":\"1350ae15534a2a76…\",\n \"payload\":[{\"id\":\"bitcoin\",\"symbol\":\"btc\",\"current_price\":82800,...}]}", note: "One line per API call, the S1 event. The payload sits inside verbatim." },
-    processed: { title: "processed · market_snapshot", c: "var(--processed)", body: "{\"coin_id\":\"figure-heloc\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\n \"symbol\":\"FIGR_HELOC\",\"name\":\"Figure Heloc\",\"vs_currency\":\"usd\",\"market_cap_rank\":9,\n \"price\":\"1.001\",\"market_cap\":\"23748077381\",\"fdv\":\"23748077381\",\n \"total_volume\":\"697180498\",\"high_24h\":\"1.035\",\"low_24h\":\"1.001\",\n \"price_change_24h\":null,\"price_change_pct_1h\":0.005,\"price_change_pct_24h\":null,...,\n \"source_updated_at\":\"2026-10-10T07:55:52.000Z\",\"is_stale\":true,\n \"is_inactive\":false,\"is_anomaly\":false,\"_event_id\":\"01a12543-a844-…\",\n \"_raw_object\":\"source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\",\n \"_kafka_partition\":0,\"_kafka_offset\":1200,\"_schema_version\":1,\n \"_processed_at\":\"2026-10-10T10:03:52.204Z\"}", note: "This row is stale, so is_stale is true and the row stays in processed. Money is a string; the 24h change is null because CoinGecko sent null." },
-    rejected: { title: "rejected · coin_contract", c: "var(--rejected)", body: "{\"schema_version\":1,\"dataset\":\"coin_contract\",\"reason\":\"empty_platform\",\n \"record_key\":\"bitcoin||2026-10-10T10:01:51.000Z\",\"event_date\":\"2026-10-10\",\n \"record\":{\"coin_id\":\"bitcoin\",\"platform_id\":\"\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\n   \"contract_address\":\"\",\"decimal_place\":null,...},\n \"_event_id\":\"01a12543-bd0b-…\",\n \"_raw_object\":\"source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\",\n \"_kafka_partition\":0,\"_kafka_offset\":1201,\"_processed_at\":\"2026-10-10T10:03:52.204Z\"}", note: "From the bitcoin /coins/{id} call at offset 1201. Bitcoin has no contracts; CoinGecko still sends an empty platform entry." },
-    dlq: { title: "dlq · stage=transform", c: "var(--dlq)", body: "{\"schema_version\":1,\"stage\":\"transform_output\",\"error_class\":\"output_schema_violation\",\n \"error\":\"processed row fails its schema\",\n \"violations\":[{\"instance_location\":\"/price\",\n   \"keyword_location\":\"…/processed/market_snapshot.v1.json#/properties/price/type\",\n   \"message\":\"got null, want string\"}],\n \"origin\":{\"kind\":\"kafka\",\"topic\":\"coingecko.raw\",\"partition\":0,\"offset\":1203,\n           \"dataset\":\"market_snapshot\",\"record_key\":\"bitcoin|2026-10-10T10:02:51.000Z\"},\n \"original_base64\":\"e30=\",\"occurred_at\":\"2026-10-10T10:03:52.204Z\"}", note: "A hypothetical failure, shaped as in the schema tests. In practice a null price is a reject, not a dlq entry; this shows the record format. transform_input and transform_output records of one batch share one object." }
+    raw: { title: "raw · batch 42", c: "var(--raw)", body: "{\"schema_version\":1,\n \"event_id\":\"01a12543-a844-7cc2-9a51-3f1f2b9d8e11\",\n \"endpoint\":\"coins_markets\",\n \"fetched_at\":\"2026-10-10T10:02:33.412Z\",\"outcome\":\"ok\",\n \"http\":{\"status\":200,\"cf_cache_status\":\"MISS\",...},\n \"payload_sha256\":\"1350ae15534a2a76…\",\n \"payload\":[{\"id\":\"bitcoin\",...}]}", note: "One line per API call; the payload sits inside verbatim." },
+    processed: { title: "processed · market_snapshot", c: "var(--processed)", body: "{\"coin_id\":\"figure-heloc\",\n \"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\n \"symbol\":\"FIGR_HELOC\",\"price\":\"1.001\",\n \"market_cap\":\"23748077381\",\"price_change_pct_24h\":null,...,\n \"source_updated_at\":\"2026-10-10T07:55:52.000Z\",\n \"is_stale\":true,\n \"_event_id\":\"01a12543-a844-…\",\"_kafka_offset\":1200,...}", note: "Stale but kept. Money as strings." },
+    rejected: { title: "rejected · coin_contract", c: "var(--rejected)", body: "{\"dataset\":\"coin_contract\",\"reason\":\"empty_platform\",\n \"record_key\":\"bitcoin||2026-10-10T10:01:51.000Z\",\n \"record\":{\"coin_id\":\"bitcoin\",\"platform_id\":\"\",\n           \"contract_address\":\"\",...},\n \"_kafka_offset\":1201,...}", note: "Bitcoin has no contracts; CoinGecko sends an empty platform anyway." },
+    dlq: { title: "dlq · stage=transform", c: "var(--dlq)", body: "{\"stage\":\"transform_output\",\n \"error_class\":\"output_schema_violation\",\n \"violations\":[{\"instance_location\":\"/price\",\n                \"message\":\"got null, want string\"}],\n \"origin\":{\"kind\":\"kafka\",\"topic\":\"coingecko.raw\",\n           \"partition\":0,\"offset\":1203},\n \"original_base64\":\"e30=\",\n \"occurred_at\":\"2026-10-10T10:03:52.204Z\"}", note: "Hypothetical record, to show the format." }
   };
   function showFile(k) {
     var f = FILES[k];
     $all(".file button", $("#tree")).forEach(function (b) { b.setAttribute("aria-pressed", b.getAttribute("data-file") === k ? "true" : "false"); });
-    $("#file-view").innerHTML = "<div class=\"fade-in stack\" style=\"gap:10px\"><span class=\"pill\" style=\"--c:" + f.c + ";justify-self:start\">" + esc(f.title) + "</span><pre tabindex=\"0\">" + esc(f.body) + "</pre><p class=\"muted text-sm\">" + esc(f.note) + "</p></div>";
+    $("#file-view").innerHTML = "<div class=\"fade-in stack\" style=\"gap:10px\"><span class=\"pill\" style=\"--c:" + f.c + ";justify-self:start\">" + esc(f.title) + "</span><pre tabindex=\"0\">" + esc(f.body) + "</pre><p class=\"note\">" + esc(f.note) + "</p></div>";
     announce("Showing " + f.title);
   }
   $all(".file button", $("#tree")).forEach(function (b) { b.addEventListener("click", function () { showFile(b.getAttribute("data-file")); }); });
@@ -1611,28 +1576,28 @@ footer { padding-block: 40px 0; display: grid; gap: 8px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ decisions */
   var DEC = [
-    { area: "Storage", topic: "Object storage", d: "versitygw, posix backend: plain files under ./data, S3 API on :7070.", why: "The assignment asks for data/raw and data/processed on disk; we also want the services to use the S3 API, as in production. versitygw does both and honours If-None-Match (a 412; exactly one winner among 20 parallel writers).", alt: "Local filesystem writes from Go: not the production code path, and create-if-absent plus checksum checks would be hand-built in every writer. MinIO: repository archived on 2026-04-24, official images no longer pullable, and its own on-disk format (xl.meta) instead of plain files. rclone serve s3: silently ignores If-None-Match." },
-    { area: "Data", topic: "Raw table", d: "One table raw.api_calls, one row per HTTP call, failures included.", why: "Postgres is where failed calls are inspected with SQL. Splitting responses into entities belongs to the transformer, so the fetcher stays a transport.", alt: "Two tables, one per call and one per entity: a second write path in the fetcher with no reader that needs it." },
-    { area: "Data", topic: "Event semantics", d: "An event is a source snapshot; snapshot_at is the newest last_updated in a response.", why: "A stale coin seen in two snapshots is two valid statements by the source. Two polls served by the same cached response are one.", alt: "Poll time as event time: every CDN repeat would be a new event. A coin's own last_updated as the key: stale coins would collapse into one row." },
-    { area: "Delivery", topic: "Deduplication", d: "One mechanism: natural record key, first claim wins, in the transformer.", why: "Record-level claims cover CDN repeats, replays and redeliveries. replay, duplicate_response and duplicate_record are metric labels, not separate logic.", alt: "A second, call-level deduplication by idempotency_key: redundant once records are claimed. idempotency_key stays as an informational column." },
-    { area: "Delivery", topic: "Pipeline state", d: "Postgres schema pipeline: export_batches, dedup_claims, consumer_batches.", why: "State must survive crashes, be shared by replicas and change atomically with the batch plan.", alt: "Broker offsets only: cannot answer \"was key X seen\". S3 conditional writes only: guard single objects, not multi-object batches. In-memory cache: lost on rebalance (reproduced). Kafka Streams: JVM-only, and exactly-once only from Kafka to Kafka. goka: no transactions spanning state and output." },
-    { area: "Delivery", topic: "Exporter cursor", d: "(ingest_txid, seq) bounded by the oldest running transaction.", why: "It stalls behind long transactions and never skips a row; transaction timeouts and the export-lag alert bound the stall.", alt: "Identity watermark: loses rows when commits arrive out of order (reproduced on 18.6). An outbox flag updated on every raw row: rewrites raw rows. Debezium CDC: the production option, a heavier stack." },
-    { area: "Platform", topic: "Message broker", d: "Redpanda v26.2.4, Kafka protocol, franz-go client.", why: "A replayable log, per-key ordering and consumer groups in one C++ binary without a JVM. The same code runs on Apache Kafka, MSK or Confluent Cloud.", alt: "NATS JetStream and Pulsar: viable with caveats. RabbitMQ classic queues, Redis Streams, SQS and Pub/Sub: no offset replay or per-key ordering." },
-    { area: "Platform", topic: "Topic name", d: "coingecko.raw, no version suffix.", why: "The version travels in every message (schema_version and the schema header); breaking changes are handled in the same topic by dispatching on version.", alt: "coingecko.raw.v1 with a new topic per breaking change: useful with many independent consumers, redundant here." },
-    { area: "Platform", topic: "Schemas", d: "JSON Schema 2020-12 in the repo, embedded with go:embed; no schema registry.", why: "One producer and one consumer in one repository; a schema change ships as a redeploy, and CI checks backward compatibility against old fixtures.", alt: "A schema registry: a production note. Its binary prefix with the schema id would also break byte equality between raw lines and messages." },
-    { area: "Delivery", topic: "Fetcher scope", d: "Transport only; S0 validation lives in the transformer.", why: "No business logic on the write path into Postgres. Broken payloads are found in dlq and can be replayed after a schema fix.", alt: "Validate S0 in the fetcher and store a flag: duplicated checks and a flag column nobody needs once the transformer validates." },
-    { area: "Operations", topic: "Bootstrapping", d: "One idempotent etl init for migrations, partitions, topic and buckets.", why: "Infrastructure state is described in code in one place and can run any number of times.", alt: "Postgres init scripts: run once on an empty volume, with no versions. A separate shell container for topics: one more moving part." },
-    { area: "Operations", topic: "DLQ location", d: "The dlq bucket, not a topic.", why: "Two of the three writers run before the broker, and dlq objects use the same write-once naming as the batch, so retries cannot duplicate them.", alt: "A dlq topic: easy to replay, but outside the batch manifest. A small replay command can be added if needed." },
-    { area: "Operations", topic: "Logs", d: "logs/<service>/etl.log plus stdout; transformer replicas write logs/<container id>/transformer/etl.log.", why: "No two processes append to one file through Docker Desktop's file sharing.", alt: "One shared logs/etl.log: literal to the assignment, but interleaved lines are possible. A log shipper: another container." },
-    { area: "Data", topic: "Cleaning", d: "Empty records to rejected with a reason; questionable records kept with flags.", why: "Readers keep stale and anomalous rows and decide; nothing disappears silently.", alt: "Dropping questionable rows: stale coins would vanish from the time series." },
-    { area: "Data", topic: "Numbers", d: "Money and quantities as decimal strings; percentages as numbers.", why: "Bitcoin's market cap in VND, 43083803721443304, is above 2^53, where float64 can no longer hold every integer (at this size it steps by 8). This value happens to survive; the next may not. Decimal strings keep every digit.", alt: "Numbers as-is: precision would depend on the reader (JavaScript, float64 in pandas)." }
+    { area: "Storage", topic: "Object storage", d: "versitygw: plain files, S3 API", why: "data/raw and data/processed stay plain folders while services use the S3 API, as in production. Honours If-None-Match (exactly one winner among 20 parallel writers).", alt: "MinIO: archived 2026-04-24, images no longer pullable, own on-disk format. rclone serve s3: ignores If-None-Match. Local file writes: not the production path." },
+    { area: "Data", topic: "Raw table", d: "one row per HTTP call", why: "Failed calls are inspected with SQL; splitting into entities belongs to the transformer.", alt: "A second, per-entity table: a write path nobody reads." },
+    { area: "Data", topic: "Event", d: "a source snapshot", why: "A stale coin in two snapshots is two valid statements; two polls of one cached response are one.", alt: "Poll time: every CDN repeat becomes an event. The coin's own last_updated: stale coins collapse into one row." },
+    { area: "Delivery", topic: "Deduplication", d: "one step, by natural key", why: "Record claims cover CDN repeats, replays and redeliveries; the reasons are metric labels only.", alt: "A second, call-level dedup by idempotency_key: redundant." },
+    { area: "Delivery", topic: "Pipeline state", d: "Postgres schema pipeline", why: "Survives crashes, shared by replicas, atomic with the batch plan.", alt: "In-memory: lost on rebalance. Kafka Streams: JVM, exactly-once only Kafka to Kafka. goka: no transactions." },
+    { area: "Delivery", topic: "Exporter cursor", d: "xid8, below the oldest open transaction", why: "Stalls instead of skipping rows; timeouts and an alert bound the stall.", alt: "Id watermark: loses rows (reproduced). Debezium CDC: production option, heavier stack." },
+    { area: "Platform", topic: "Broker", d: "Redpanda, Kafka protocol", why: "Replayable log, per-key order, consumer groups; no JVM; same code runs on Kafka or MSK.", alt: "NATS JetStream, Pulsar: viable with caveats. RabbitMQ classic queues, Redis Streams, SQS, Pub/Sub: no offset replay or per-key ordering at scale." },
+    { area: "Platform", topic: "Topic name", d: "coingecko.raw, no .v1", why: "The version travels in each message; breaking changes dispatch on version in the same topic.", alt: "A new topic per breaking change: useful with many consumers, redundant here." },
+    { area: "Platform", topic: "Schemas", d: "in the repo, no registry", why: "One producer, one consumer, one repo; changes ship as redeploys; CI checks compatibility.", alt: "A schema registry: production note; its wire prefix would break byte equality." },
+    { area: "Delivery", topic: "Fetcher", d: "transport only", why: "No business logic on the write path into Postgres; broken payloads go to dlq and can be replayed.", alt: "S0 checks plus a flag column in the fetcher: duplicated work." },
+    { area: "Operations", topic: "Bootstrapping", d: "one idempotent etl init", why: "Tables, topic and buckets described in code in one place.", alt: "Postgres init scripts: run once, unversioned. A shell topic container: one more part." },
+    { area: "Operations", topic: "DLQ", d: "a bucket, not a topic", why: "Two writers run before the broker; write-once naming keeps retries from duplicating entries.", alt: "A dlq topic: easy replay, but outside the batch manifest." },
+    { area: "Operations", topic: "Logs", d: "one writer per file", why: "No two containers append to the same file; each transformer replica gets its own.", alt: "One shared logs/etl.log: interleaved lines possible." },
+    { area: "Data", topic: "Cleaning", d: "reject empty, flag questionable", why: "Nothing disappears silently; readers decide about stale rows.", alt: "Dropping questionable rows: stale coins vanish from the series." },
+    { area: "Data", topic: "Numbers", d: "money as decimal strings", why: "Values pass 2^53 (bitcoin's VND market cap), where float64 stops holding every integer.", alt: "Plain JSON numbers: precision depends on the reader." }
   ];
   var AREAS = ["All", "Storage", "Data", "Delivery", "Platform", "Operations"];
   var decFilter = $("#dec-filter"), decArea = "All";
   function renderDec() {
     $("#dec-list").innerHTML = DEC.filter(function (r) { return decArea === "All" || r.area === decArea; }).map(function (r) {
       return "<details class=\"dec-row\"><summary><span class=\"topic\">" + esc(r.topic) + "</span><span>" + esc(r.d) + "</span><span class=\"more\">" + esc(r.area) + " ▾</span></summary>" +
-        "<div class=\"why\"><p><b>Why.</b> " + esc(r.why) + "</p><p class=\"muted\"><b>Considered.</b> " + esc(r.alt) + "</p></div></details>";
+        "<div class=\"why\"><p><b>Why.</b> " + esc(r.why) + "</p><p class=\"muted\"><b>Rejected.</b> " + esc(r.alt) + "</p></div></details>";
     }).join("");
   }
   AREAS.forEach(function (a) {
