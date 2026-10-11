@@ -121,6 +121,7 @@ The design needs a replayable log, per-key ordering within partitions, and consu
 | Schema distribution | Schemas embedded via `go:embed`; updates ship as redeploys; no schema registry |
 | Topic name | `coingecko.raw` without a version suffix: the version travels in every message (`schema_version`, `schema` header); breaking changes are handled in the same topic by dispatching on version |
 | Dedup content hash | Business fields only; excludes schema version and technical columns |
+| Exporter cursor | xid8 cursor below `pg_snapshot_xmin`: never skips, may stall; a pragmatic workaround for Postgres as the raw store (a transactional table is not a change log); production: raw events straight to a log or object storage, or Debezium CDC (ADR 0005) |
 | Polling cadence | 4 calls/min, 15 s apart: markets at :00 and :30 (the assignment's "every 30 s"), one coin at :15 and :45 in turn, so each coin every 2 min; all four coins every minute (6 calls/min) and markets every 60 s (breaks "every 30 s") were rejected |
 
 ## 3. Source: CoinGecko
@@ -181,6 +182,7 @@ CREATE INDEX ON raw.api_calls (idempotency_key);
 ### 4.2 Exporter → `s3://raw`
 
 - Single active instance via `pg_try_advisory_lock`.
+- Why an xid8 cursor: The assignment places raw data in Postgres first. That gives a queryable record of every API call, failures included, before any deduplication. But a transactional table is not a change log: reading "new rows" from it safely needs either change data capture or a cursor that respects commit order. We chose a cursor over `(ingest_txid, seq)` below `pg_snapshot_xmin`: it never skips a row, at the cost of depending on Postgres internals and stalling behind a long transaction (bounded by timeouts and the export-lag alert). It is a pragmatic workaround rather than an elegant one. In production we would land raw events directly in a log or object storage, or stream the table with Debezium CDC.
 - Cursor over `(ingest_txid, seq)` bounded by `pg_snapshot_xmin(pg_current_snapshot())`. An identity/BIGSERIAL watermark loses rows when transactions commit out of order (reproduced on 18.6); the xid8 bound can only stall, never skip.
 - Rejected alternative: an `exported` flag on `raw.api_calls` with `SELECT … WHERE NOT exported … FOR UPDATE SKIP LOCKED LIMIT n`. It never loses a late-committing row and never stalls, but it UPDATEs every raw row (the raw table stops being append-only: dead tuples, vacuum, a partial index) and a crash between PUT and the flag update lets the retry pick a different row set, so a byte-identical retry still needs a claimed batch — the ledger this design already has, at one row per batch instead of one update per raw row.
 - Steps: (1) short claim transaction inserts the range into `pipeline.export_batches` and derives the object key from the batch id; (2) read the range, serialize deterministic JSONL (each line is the S1 event, payload embedded verbatim), validate each line against S1; (3) PUT with `If-None-Match: *` and `x-amz-meta-sha256`; on 412, HEAD and compare the checksum; (4) mark `exported`.

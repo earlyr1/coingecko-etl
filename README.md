@@ -66,7 +66,7 @@ An interactive version of this architecture, with every stage and decision expla
 | Event | a source snapshot | poll time (every CDN repeat would be an event) |
 | Deduplication | one step, by natural record key, in the transformer ([ADR 0002](docs/adr/0002-single-dedup-in-transformer.md)) | a second, call-level dedup by `idempotency_key`; an in-memory cache (lost on rebalance) |
 | Pipeline state | Postgres schema `pipeline` ([ADR 0004](docs/adr/0004-postgres-pipeline-state.md)) | broker offsets, S3 alone, in-memory state |
-| Exporter cursor | xid8 range below the oldest open transaction: stalls, never skips ([ADR 0005](docs/adr/0005-exporter-xid8-cursor.md)) | an identity watermark (loses rows on out-of-order commits); an `exported` flag with `SKIP LOCKED` |
+| Exporter cursor | xid8 range below the oldest open transaction: stalls, never skips; a pragmatic workaround for using Postgres as the raw store ([ADR 0005](docs/adr/0005-exporter-xid8-cursor.md)) | an identity watermark (loses rows on out-of-order commits); an `exported` flag with `SKIP LOCKED` |
 | Broker | Kafka protocol, Redpanda locally ([ADR 0003](docs/adr/0003-redpanda.md)) | NATS JetStream, Pulsar, RabbitMQ, SQS, Pub/Sub (see the ADR) |
 | Schemas | JSON Schema files in the repo, embedded in the binary | a schema registry (production note) |
 | Cleaning | reject empty records, flag questionable ones | dropping questionable rows (stale coins would vanish from the series) |
@@ -235,7 +235,7 @@ Every hop is at-least-once. The processed zone nevertheless contains each record
 | publisher → broker | lease from the ledger; idempotent producer, `acks=all` | copies with the same `event_id`, dropped by the transformer |
 | transformer → `s3://processed` | batch manifest; write-once objects; offset commit after the write | same objects: 412, checksums equal |
 
-**Exporter cursor.** An identity-column watermark loses rows when transactions commit out of order. The exporter reads rows by `(ingest_txid, seq)` bounded by `pg_snapshot_xmin(pg_current_snapshot())`, so it can only stall behind a long transaction, never skip a row. Each range is first claimed in `pipeline.export_batches`, which fixes the object key and the row set, so a retry after a crash writes the same bytes. Why not an `exported` flag with `SKIP LOCKED`: [ADR 0005](docs/adr/0005-exporter-xid8-cursor.md).
+**Why an xid8 cursor.** The assignment places raw data in Postgres first. That gives a queryable record of every API call, failures included, before any deduplication. But a transactional table is not a change log: reading "new rows" from it safely needs either change data capture or a cursor that respects commit order. We chose a cursor over `(ingest_txid, seq)` below `pg_snapshot_xmin`: it never skips a row, at the cost of depending on Postgres internals and stalling behind a long transaction (bounded by timeouts and the export-lag alert). It is a pragmatic workaround rather than an elegant one. In production we would land raw events directly in a log or object storage, or stream the table with Debezium CDC ([ADR 0005](docs/adr/0005-exporter-xid8-cursor.md), which also covers why not an `exported` flag with `SKIP LOCKED`). Each range is first claimed in `pipeline.export_batches`, which fixes the object key and the row set, so a retry after a crash writes the same bytes.
 
 **Deduplication.** Every record bound for `processed/` or `rejected/` claims its natural key in `pipeline.dedup_claims` (`INSERT … ON CONFLICT DO NOTHING`); the first claimant wins:
 
