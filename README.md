@@ -54,7 +54,7 @@ All services are subcommands of one Go binary, `etl`, built into one container i
 
 Infrastructure: Postgres 18.6, Redpanda v26.2.4, versitygw v1.8.0 (S3 gateway over plain files), Redpanda Console v3.12.0, Prometheus v3.15.0 and Grafana 13.2.3.
 
-Why this chain and not a shorter one? Fetcher → broker directly would be simpler, but the assignment asks for raw data in Postgres first. Debezium CDC (Postgres → Kafka in commit order) is the production choice for the Postgres → broker leg, but it adds a JVM Kafka Connect stack. Kafka Streams would keep dedup state in RocksDB with a changelog, but it is JVM-only and its exactly-once stops at the Kafka boundary. All three are listed under [Productionization](#productionization).
+Fetcher → broker directly would be shorter, but the assignment asks for raw data in Postgres first; heavier JVM alternatives for the later legs are listed under [Productionization](#productionization).
 
 An interactive version of this architecture, with every stage and decision explained, is in [`docs/architecture/index.html`](docs/architecture/index.html) (open the file in a browser).
 
@@ -62,37 +62,24 @@ An interactive version of this architecture, with every stage and decision expla
 
 | Topic | Decision | Alternatives rejected |
 |---|---|---|
-| Object storage | versitygw: plain files behind the S3 API, write-once with `If-None-Match: *` ([ADR 0001](docs/adr/0001-object-storage-versitygw.md)) | MinIO (archived, images no longer pullable); `rclone serve s3` (ignores `If-None-Match`); direct file writes (not the production path) |
-| Raw table | one row per HTTP call, failures included | a per-entity raw table: a write path nobody reads |
+| Object storage | versitygw: plain files behind the S3 API, write-once with `If-None-Match: *` ([ADR 0001](docs/adr/0001-object-storage-versitygw.md)) | direct file writes (not the production path); other S3 servers (see the ADR) |
 | Event | a source snapshot | poll time (every CDN repeat would be an event) |
 | Deduplication | one step, by natural record key, in the transformer ([ADR 0002](docs/adr/0002-single-dedup-in-transformer.md)) | a second, call-level dedup by `idempotency_key`; an in-memory cache (lost on rebalance) |
-| Pipeline state | Postgres schema `pipeline` ([ADR 0004](docs/adr/0004-postgres-pipeline-state.md)) | broker offsets, S3 alone, Kafka Streams state stores, goka |
-| Exporter cursor | xid8 range below the oldest open transaction: stalls, never skips | an identity watermark (loses rows on out-of-order commits); an `exported` flag with `FOR UPDATE SKIP LOCKED` (updates every raw row and still needs a claimed batch for byte-identical retries, see [below](#delivery-guarantees)); Debezium CDC (production option) |
-| Broker | Kafka protocol, Redpanda locally ([ADR 0003](docs/adr/0003-redpanda.md)) | see the [broker table](#why-the-kafka-protocol-and-why-redpanda) |
+| Pipeline state | Postgres schema `pipeline` ([ADR 0004](docs/adr/0004-postgres-pipeline-state.md)) | broker offsets, S3 alone, in-memory state |
+| Exporter cursor | xid8 range below the oldest open transaction: stalls, never skips ([ADR 0005](docs/adr/0005-exporter-xid8-cursor.md)) | an identity watermark (loses rows on out-of-order commits); an `exported` flag with `SKIP LOCKED` |
+| Broker | Kafka protocol, Redpanda locally ([ADR 0003](docs/adr/0003-redpanda.md)) | NATS JetStream, Pulsar, RabbitMQ, SQS, Pub/Sub (see the ADR) |
 | Schemas | JSON Schema files in the repo, embedded in the binary | a schema registry (production note) |
-| DLQ | a bucket, not a topic: two of its writers run before the broker | a dlq topic outside the batch manifest |
-| Logs | one file per replica | one shared `logs/etl.log` (several writers) |
 | Cleaning | reject empty records, flag questionable ones | dropping questionable rows (stale coins would vanish from the series) |
 | Numbers | money and quantities as decimal strings | JSON numbers (values exceed 2^53) |
+| Polling cadence | 4 calls a minute, 15 s apart: markets at :00 and :30, one coin at :15 and :45 in turn | all four coins every minute (6 calls/min, too close to the limit); markets every 60 s (breaks "every 30 s") |
+
+Why the DLQ is a bucket and not a topic: [ADR 0006](docs/adr/0006-dlq-bucket.md).
 
 ## Why the Kafka protocol, and why Redpanda
 
-The design needs three things from the broker:
+The broker must provide a **replayable log** (republish after a schema fix, resume from a committed offset), **per-key ordering** (every repeat of the same endpoint or coin lands on one partition, so dedup decisions are sequential) and **consumer groups** (transformer replicas share partitions and take over on failure). The Kafka protocol provides all three.
 
-- a **replayable log**: after a schema fix, raw data is republished and reprocessed; a consumer crash resumes from a committed offset;
-- **per-key ordering**: every repeat of the same data (same endpoint or coin) lands on one partition, so deduplication decisions are made sequentially and deterministically;
-- **consumer groups**: transformer replicas share partitions and take over each other's work on failure.
-
-The Kafka protocol provides all three, and it is the de-facto standard for data engineering at this scale: connectors, stream processors, lakehouse sinks and managed offerings all speak it.
-
-Redpanda is used for the local stack because it speaks the same protocol as a single C++ binary without a JVM: it starts in about two seconds, uses about 300 MiB of memory in this stack and needs no separate controller. The Go client ([franz-go](https://github.com/twmb/franz-go)) does not know which broker it talks to, so the same code runs unchanged against Apache Kafka, Amazon MSK or Confluent Cloud in production. The main thing Redpanda lacks is the Kafka Connect ecosystem, and this project does not use Kafka Connect. Redpanda's licence (BSL 1.1) allows this use.
-
-| Broker | Verdict |
-|---|---|
-| Redpanda | Chosen for the local stack: same protocol and client code, no JVM, lighter and faster to start |
-| Apache Kafka, Amazon MSK, Confluent Cloud | Drop-in for production: the code speaks the Kafka protocol |
-| NATS JetStream, Apache Pulsar | Viable with caveats: a different consumer model (JetStream) or heavier operations (Pulsar, with BookKeeper), and a weaker data-engineering ecosystem |
-| RabbitMQ classic queues, Redis Streams, Amazon SQS, Google Pub/Sub | Rejected: no offset-based replay or per-key ordering at scale |
+Locally that protocol is served by Redpanda: one binary, no JVM, fast to start. The Go client ([franz-go](https://github.com/twmb/franz-go)) does not know which broker it talks to, so the same code runs against Apache Kafka or Amazon MSK in production. The comparison with other brokers is in [ADR 0003](docs/adr/0003-redpanda.md).
 
 ## Quick start
 
@@ -122,13 +109,13 @@ Lake on disk:     /path/to/coingecko-etl/data/{raw,processed,rejected,dlq}
 
 A duplicate share around one third to one half is expected: CoinGecko's CDN caches responses for 60 s and the fetcher polls every 30 s, so roughly every second markets response is byte-identical to the previous one.
 
-Configuration lives in `.env` (see `.env.example`): an optional `COINGECKO_API_KEY` (sent as `x-cg-demo-api-key`; the keyless tier works at the default ~4 calls per minute), host ports, polling intervals and cleaning thresholds. The containers run as your user so that the files under `./data`, `./logs` and `./.s3meta` belong to you: `make up` passes your uid and gid to compose and writes them into `.env` when it creates it, so later plain `docker compose` commands use the same ids (on Linux, check `ETL_UID` and `ETL_GID` in an `.env` you wrote yourself).
+Configuration lives in `.env` (see `.env.example`): an optional `COINGECKO_API_KEY` (sent as `x-cg-demo-api-key`; the keyless tier works at the default ~4 calls per minute), host ports, polling intervals and cleaning thresholds. The containers run with your uid and gid (`ETL_UID`/`ETL_GID` in `.env`), so the files under `./data`, `./logs` and `./.s3meta` belong to you.
 
-To wipe everything and start from scratch: `make clean` (`docker compose down -v`, then `rm -rf data logs .s3meta`). Reset the lake and the Postgres/Redpanda volumes together, never one without the other: object keys are unique only within one Postgres and Redpanda lifetime (batch ids restart at 1, topic offsets at 0), so a lake kept across `docker compose down -v` would collide with the new keys. `etl init` refuses to start on a raw bucket that already holds objects while the export ledger is empty, and its log says so.
+`make clean` resets the lake and the Postgres/Redpanda volumes together, which is the only safe reset: object keys are unique only within one Postgres and Redpanda lifetime (batch ids restart at 1, topic offsets at 0). `etl init` refuses to start on a raw bucket that already holds objects while the export ledger is empty.
 
 ## Browsing the lake
 
-The S3 gateway (versitygw, posix backend) stores every bucket as a directory and every object as a plain file under `./data`. Object metadata (content type, the `sha256` we attach) lives separately in `./.s3meta`, because Docker Desktop bind mounts do not support extended attributes.
+The S3 gateway (versitygw, posix backend) stores every bucket as a directory and every object as a plain file under `./data`; object metadata (the `sha256` we attach) lives in `./.s3meta`.
 
 ```
 data/raw/source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl
@@ -154,7 +141,7 @@ Five ways to look at it:
   SELECT idempotency_key, count(*) FROM raw.api_calls WHERE outcome = 'ok'
   GROUP BY 1 HAVING count(*) > 1;                          -- identical responses before dedup
   ```
-- **Grafana** at <http://localhost:3000> (anonymous viewer; admin password in `.env`): the provisioned dashboard *ETL / CoinGecko ETL*.
+- **Grafana** at <http://localhost:3000> (anonymous viewer): the provisioned dashboard *ETL / CoinGecko ETL*.
 
 ## Data model and time model
 
@@ -165,11 +152,11 @@ Five ways to look at it:
 | `/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&price_change_percentage=1h,24h,7d&sparkline=false&precision=full` | every 30 s | a flat 30-second time series of the top 100 coins |
 | `/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | every 30 s, between the markets calls (at :15 and :45), one coin per call, in turn: bitcoin → ethereum → tether → usd-coin → bitcoin …, so each coin is refreshed every 2 min | deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, contracts per chain |
 
-The keyless CoinGecko tier allows a dynamic 10–30 calls per minute per IP; we saw HTTP 429 with `Retry-After: 60` on the sixth call within 27 s. The fetcher therefore spends 4 calls per minute, 15 s apart (markets at :00 and :30, a coin at :15 and :45), keeps one request in flight with a 10 s timeout per request, honours `Retry-After` (capped at 15 minutes, since the header is untrusted), backs off exponentially with jitter on 5xx and network errors, and skips ticks instead of queueing them. It accepts response bodies up to 900 KiB (real ones are about 95 KB): a larger 200 is stored as `http_error`, because the event, body plus envelope, must fit into one broker message (Redpanda's default limit and franz-go's batch limit are about 1 MiB) or the publisher could never produce it.
+The keyless tier allows 10–30 calls per minute per IP, so the fetcher spends 4, 15 s apart, with one request in flight; it honours `Retry-After`, backs off with jitter on 5xx and network errors, skips ticks instead of queueing them, and stores a 200 too large for one broker message as `http_error`.
 
 ### Raw zone
 
-`raw.api_calls` in Postgres has one row per HTTP call, including failures (`outcome` is `ok`, `http_error` or `network_error`). The response body is stored in a `json` column (not `jsonb`), which keeps the exact bytes, so `payload_sha256` can be re-verified at every hop. The fetcher stores the body as received, minus surrounding whitespace; a body with line breaks between tokens is stored compacted (insignificant whitespace removed, strings and numbers untouched), so one call is always one JSONL line and one message, and `payload_sha256` is the hash of the stored bytes. Each row also carries `idempotency_key = sha256(source | endpoint | canonical params | payload_sha256)`; two polls that received the same cached response share the key. The table is partitioned by day on `fetched_at`.
+`raw.api_calls` in Postgres has one row per HTTP call, including failures (`outcome` is `ok`, `http_error` or `network_error`). The response body is stored as received in a `json` column (not `jsonb`), which keeps the exact bytes (a body with line breaks is compacted, so one call is one JSONL line), so `payload_sha256`, the hash of the stored bytes, can be re-verified at every hop. Each row also carries `idempotency_key = sha256(source | endpoint | canonical params | payload_sha256)`; two polls that received the same cached response share the key. The table is partitioned by day on `fetched_at`.
 
 The exporter writes the same rows (successful calls only) as JSON Lines into `s3://raw`, one line per call, with the stored payload embedded verbatim.
 
@@ -187,9 +174,9 @@ The child datasets reference `coin_snapshot` by `(coin_id, snapshot_at)`. Images
 
 ### Formats
 
-- Timestamps: RFC 3339 in UTC with milliseconds, e.g. `2026-10-10T10:07:55.000Z`; `genesis_date` as `YYYY-MM-DD`.
+- Timestamps: RFC 3339 in UTC with milliseconds, e.g. `2026-10-10T10:07:55.000Z`; dates as `YYYY-MM-DD`.
 - Money and quantities (prices, market caps, volumes, supplies) are decimal strings in plain notation, e.g. `"43083803721443304"`. They are decoded with `json.Number` and a decimal type and never pass through `float64`: some values exceed 2^53. Percentages and ratios are JSON numbers.
-- Symbols are upper-case; currency codes (`vs_currency`, `currency`, `roi_currency`) and EVM contract addresses lower-case.
+- Symbols upper-case; currency codes and EVM addresses lower-case.
 - Files are plain `.jsonl` (no compression) so they can be read with `cat`.
 
 ### Cleaning rules
@@ -199,7 +186,7 @@ The child datasets reference `coin_snapshot` by `(coin_id, snapshot_at)`. Images
 - **Flag and keep:**
   - `is_stale`: `snapshot_at − source_updated_at > 10 min`; for tickers, the upstream flag or a last trade older than 1 h;
   - `is_inactive`: zero volume (`market_snapshot` and `coin_market_by_currency` only: the other datasets have no volume of their own);
-  - `is_anomaly`: price outside `[low_24h, high_24h]`; for tickers, the upstream flag or `last_usd` more than 2% away from the coin's median over all its tickers in the snapshot. For `market_snapshot` the range is widened by `ETL_ANOMALY_TOLERANCE_PCT` (default 0.5%) on each side, `price < low_24h × (1 − t/100)` or `price > high_24h × (1 + t/100)`, because with `precision=full` the price carries more digits than the rounded 24 h bounds (USYC `1.140213` against `[1.14, 1.14]`; strict, 69 of 700 rows of a live run were flagged); `0` restores the strict check. `coin_market_by_currency` stays strict: `/coins/{id}` sends price and bounds at one precision.
+  - `is_anomaly`: price outside `[low_24h, high_24h]`; for tickers, the upstream flag or `last_usd` more than 2% away from the coin's median over all its tickers in the snapshot. For `market_snapshot` the range is widened by `ETL_ANOMALY_TOLERANCE_PCT` (default 0.5%) on each side, because with `precision=full` the price carries more digits than the rounded 24 h bounds; `0` restores the strict check. `coin_market_by_currency` stays strict.
 
 The thresholds are configuration (`ETL_STALE_AFTER`, `ETL_TICKER_STALE_AFTER`, `ETL_TICKER_ANOMALY_PCT`, `ETL_ANOMALY_TOLERANCE_PCT`).
 
@@ -235,7 +222,7 @@ Every stage has a JSON Schema (draft 2020-12) in `schemas/`, embedded into the b
 
 `rejected/` is for records removed by a cleaning rule; `dlq/` means "something broke and a human is needed". After a schema fix, the raw objects are republished and reprocessed: a row that went to `dlq/` never claimed its deduplication key, so the republished copy is written, while the rows of the same message that were already written are dropped as replays.
 
-**Schema evolution.** Because schemas ship inside the binary, a schema change is a redeploy: consumers (transformer) first, then producers. A compatible change edits `<name>.v1.json` in place. The compatibility gate is the fixture contract test (`TestSchemaFixtures`, run by CI): the valid fixtures under `schemas/testdata/` are append-only and form the corpus every in-place change must keep accepting, together with the recorded CoinGecko responses that must keep passing S0. A breaking change, one that would reject an existing valid fixture, adds `<name>.v2.json` side by side. The topic stays `coingecko.raw`: the version travels in every message (`schema_version` and the `schema` header), so a v2-aware transformer dispatches on it.
+**Schema evolution.** Because schemas ship inside the binary, a schema change is a redeploy: consumers (transformer) first, then producers. A compatible change edits `<name>.v1.json` in place. The compatibility gate is the fixture contract test (`TestSchemaFixtures`, run by CI): the valid fixtures under `schemas/testdata/` are append-only and form the corpus every in-place change must keep accepting, together with the recorded CoinGecko responses that must keep passing S0. A breaking change, one that would reject an existing valid fixture, adds `<name>.v2.json` side by side in the same topic: the version travels in every message.
 
 ## Delivery guarantees
 
@@ -248,9 +235,7 @@ Every hop is at-least-once. The processed zone nevertheless contains each record
 | publisher → broker | lease from the ledger; idempotent producer, `acks=all` | copies with the same `event_id`, dropped by the transformer |
 | transformer → `s3://processed` | batch manifest; write-once objects; offset commit after the write | same objects: 412, checksums equal |
 
-**Exporter cursor.** An identity-column watermark loses rows when transactions commit out of order. The exporter reads rows by `(ingest_txid, seq)` bounded by `pg_snapshot_xmin(pg_current_snapshot())`, so it can only stall behind a long transaction, never skip a row. Each range is first claimed in `pipeline.export_batches`, which fixes the object key and the row set, so a retry after a crash writes the same bytes.
-
-The rejected alternative is an `exported` flag on `raw.api_calls` with `SELECT … WHERE NOT exported … FOR UPDATE SKIP LOCKED LIMIT n`. It never loses a late-committing row and never stalls, but it UPDATEs every raw row (the raw table stops being append-only: dead tuples, vacuum, a partial index), and a crash between the PUT and the flag update lets the retry pick a different row set, so a byte-identical retry still needs a claimed batch: the ledger this design already has, at one row per batch instead of one update per raw row.
+**Exporter cursor.** An identity-column watermark loses rows when transactions commit out of order. The exporter reads rows by `(ingest_txid, seq)` bounded by `pg_snapshot_xmin(pg_current_snapshot())`, so it can only stall behind a long transaction, never skip a row. Each range is first claimed in `pipeline.export_batches`, which fixes the object key and the row set, so a retry after a crash writes the same bytes. Why not an `exported` flag with `SKIP LOCKED`: [ADR 0005](docs/adr/0005-exporter-xid8-cursor.md).
 
 **Deduplication.** Every record bound for `processed/` or `rejected/` claims its natural key in `pipeline.dedup_claims` (`INSERT … ON CONFLICT DO NOTHING`); the first claimant wins:
 
@@ -260,11 +245,11 @@ The rejected alternative is an `exported` flag on `raw.api_calls` with `SELECT �
 | another position, same content hash | drop as a duplicate |
 | another position, different content hash | write to `rejected/` as `snapshot_conflict` |
 
-The content hash covers business fields only, so the same record arriving in two messages matches even though its lineage columns differ. Broker offsets cannot answer "was key X seen?", S3 can only guard single objects, and in-memory state is lost on rebalance, which is why the claims live in Postgres.
+The content hash covers business fields only, so the same record arriving in two messages matches even though its lineage columns differ.
 
 **Transformer batch.** A batch is a contiguous offset range of one partition. (1) Input checks without the database. (2) A short transaction records the range in `pipeline.consumer_batches` (`planned`), validates the rows against their dataset schema (a row that fails goes to `dlq/` without claiming its key), claims the keys of the other rows, decides, and stores the object keys and checksums. (3) Objects are written with `If-None-Match: *`. (4) The batch is marked `written`. (5) The offset is committed. On partition assignment the manifest decides: `written` → skip past it, `planned` → reprocess exactly that range.
 
-If a key already holds different bytes (412 with another checksum), or a re-planned batch would store other checksums than the manifest, the transformer halts that partition in place: it stops fetching it, commits nothing, keeps reporting its growing lag, keeps the other partitions and `/metrics` running, and `ETLObjectChecksumMismatch` fires until a human resolves the conflict and restarts the transformer.
+If a key already holds different bytes (412 with another checksum), or a re-planned batch would store other checksums than the manifest, the transformer halts that partition (no fetching, no commits, growing lag; the other partitions keep running) and `ETLObjectChecksumMismatch` fires until a human resolves the conflict and restarts it.
 
 | Crash point | Recovery | Loss | Duplicates |
 |---|---|---|---|
@@ -276,9 +261,9 @@ If a key already holds different bytes (412 with another checksum), or a re-plan
 
 The naive rule "drop if the key was already claimed" would lose every record of a batch that crashed between its transaction and the PUT; claims that remember their position avoid that.
 
-Invariants: transforms are pure (no clock, no random order); `dedup_claims` and `consumer_batches` must outlive the topic's 7-day retention, so that a replay within retention is still deduplicated (nothing in this stack deletes them; a production retention job would keep at least 30 days); Postgres runs with `idle_in_transaction_session_timeout = 60s` and `transaction_timeout = 5min`, so a stuck transaction cannot stall the exporter forever.
+Invariants: transforms are pure (no clock, no random order); `dedup_claims` and `consumer_batches` must outlive the topic's 7-day retention, so that a replay within retention is still deduplicated (nothing in this stack deletes them); Postgres session and transaction timeouts keep a stuck transaction from stalling the exporter forever.
 
-Known limitation: if the topic's 7-day retention deletes the records of a transformer batch that is still `planned` (for example after a week-long transformer outage), that batch cannot be redone, because its range is fixed in the manifest. It needs a manual repair: delete the `planned` row of `pipeline.consumer_batches` and that batch's claims by position (`pipeline.dedup_claims` rows with its topic id and partition and offsets in its range; `dedup_claims_position_idx` covers that lookup).
+Known limitation: a transformer batch still `planned` when the 7-day retention deletes its records (a week-long transformer outage) needs a manual repair, described in [ADR 0004](docs/adr/0004-postgres-pipeline-state.md).
 
 ## Metrics
 
@@ -320,7 +305,7 @@ Nine rules; the severity is `warning` unless marked critical.
 | `ETLDataStale` (critical) | no successful CoinGecko call on an endpoint for more than 2 minutes, or no successful markets call yet | rate limiting, network, CoinGecko outage, fetcher down |
 | `ETLDeadLetterRecords` | any record reached `dlq/` in the last 10 minutes | a bug, a broken message, an integrity failure |
 | `ETLSourceSchemaDrift` (critical) | more than 5% of CoinGecko responses fail the source schema over 15 minutes | CoinGecko changed its response format |
-| `ETLExportLagHigh` | the exporter's lag is above 5 minutes, or the exporter reports no lag at all (only the exporter's series counts: every service exports the gauge, the others at 0) | a long Postgres transaction, S3 failures, exporter down |
+| `ETLExportLagHigh` | the exporter's lag is above 5 minutes, or the exporter reports none | a long Postgres transaction, S3 failures, exporter down |
 | `ETLConsumerLagGrowing` | consumer lag has grown for 10 minutes | transformers too slow, a batch that keeps failing, a halted partition |
 | `ETLServiceDown` (critical) | for 2 minutes a pipeline service fails its scrape (`up == 0`) or has no scrape target at all (Prometheus finds the containers through Docker DNS) | the container is stopped, crash-looping or hung |
 | `ETLPipelineNotProgressing` | CoinGecko calls succeed, but for 5 minutes no transformer counted a record (written, duplicate, rejected or dlq) over the last 15 minutes | a stopped or failing publisher (for example the broker is down), a stalled exporter, transformers that cannot write |
@@ -331,7 +316,7 @@ Alertmanager is not part of the stack; in production the rules route to on-call 
 
 ## Logs
 
-Every service logs JSON through Go's `log/slog`, in UTC, to stdout (`docker compose logs -f fetcher`) and to one file per replica: `logs/<service>/etl.log`. The two transformer replicas share the `./logs` mount, so each writes its own file, `logs/<container id>/transformer/etl.log` (the short container id that `docker ps` shows; a recreated container starts a new directory), and no file ever has two writers. Lines carry `service`, `stage` and, where relevant, `event_id` and `batch`. They cover API success and failure, transformation errors and every object saved.
+Every service logs JSON through Go's `log/slog`, in UTC, to stdout (`docker compose logs -f fetcher`) and to its own file under `logs/` (paths under [Assumptions](#assumptions)). Lines carry `service`, `stage` and, where relevant, `event_id` and `batch`. They cover API success and failure, transformation errors and every object saved.
 
 ## Running the image with `docker run -v`
 
@@ -378,7 +363,7 @@ What persists where, by how the stack was started:
 | Postgres (raw calls, ledgers, dedup claims) | volume `coingecko-etl_pgdata`, deleted by `docker compose down -v` | volume `pgdata`, deleted only by `docker volume rm pgdata` |
 | broker log and consumer offsets | volume `coingecko-etl_redpanda`, deleted by `docker compose down -v` | volume `redpanda`, deleted only by `docker volume rm redpanda` |
 
-`./data`, `./.s3meta` and `./logs` survive both ways of stopping, but they belong to the Postgres and Redpanda volumes next to them: object keys are unique only within one Postgres/Redpanda lifetime, so reset everything together or nothing. For compose that is `make clean`; for the `docker run` stack, `docker rm -f postgres redpanda versitygw fetcher exporter publisher transformer`, `docker volume rm pgdata redpanda`, `docker network rm etl` and `rm -rf data logs .s3meta`. Compose and `docker run` use different volume names but the same `./data`, so run them from different checkouts. `etl init` refuses to start when the raw bucket already holds objects but the export ledger is empty.
+Reset all of it together, as in [Quick start](#quick-start); for this stack: `docker rm -f postgres redpanda versitygw fetcher exporter publisher transformer`, `docker volume rm pgdata redpanda`, `docker network rm etl` and `rm -rf data logs .s3meta`. Compose and `docker run` use different volume names but the same `./data`, so run them from different checkouts.
 
 ## Assumptions
 
@@ -391,7 +376,7 @@ The assignment leaves some points open. This is how they were read:
 - **"Timestamps in UTC ISO 8601"**: RFC 3339 with milliseconds and a `Z` suffix.
 - **Duplicates** come in two kinds and both are removed from the processed zone: redelivered messages (same event) and true duplicates (the same snapshot polled twice, or the same record in two messages).
 - **Questionable data** is kept with flags (`is_stale`, `is_inactive`, `is_anomaly`) instead of being dropped; only empty or unusable records are rejected.
-- **"`logs/etl.log`"**: one file per replica, `logs/<service>/etl.log`, and `logs/<container id>/transformer/etl.log` for each transformer replica, because several containers cannot safely append to one file.
+- **"`logs/etl.log`"**: one file per replica, `logs/<service>/etl.log`, and `logs/<container id>/transformer/etl.log` for each transformer replica (the short id `docker ps` shows), because several containers cannot safely append to one file.
 - **Scale**: the free CoinGecko tier caps the volume at a few calls per minute; the design does not depend on that (see scalability below).
 
 ## Productionization

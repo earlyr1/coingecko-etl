@@ -1273,7 +1273,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       kicker: "External source", title: "CoinGecko API", role: "Market data source, polled without a key by default.",
       sections: [
         ["Endpoints", "<ul><li><code>/coins/markets</code> every 30 s: top 100 in USD, <code>precision=full</code>.</li><li><code>/coins/{id}</code> every 30 s, between the markets calls (at :15 and :45), one coin per call, in turn: bitcoin → ethereum → tether → usd-coin, so each coin is refreshed every 2 min. Deep nesting: 23 maps × 63 currencies, 100 tickers, contracts per chain.</li></ul>"],
-        ["Observed", "<ul><li>All coins recomputed in one pass every 60 s; a skipped coin keeps its old stamp.</li><li>CDN caches markets for 60 s (<code>/coins/{id}</code> 30 s): about half of 30-second polls are byte-identical.</li><li>Keyless limit 10–30 calls/min; a 429 with <code>Retry-After: 60</code> came on the 6th call in 27 s.</li><li>Values above 2<sup>53</sup>; a missing value comes as <code>null</code>, <code>\"\"</code>, <code>[]</code> or no key.</li></ul>"],
+        ["Observed", "<ul><li>All coins recomputed in one pass every 60 s; the CDN caches for up to 60 s, so about half of 30-second polls are byte-identical.</li><li>Keyless limit 10–30 calls/min. Values above 2<sup>53</sup>.</li></ul>"],
         ["Budget", "<p>4 calls a minute, 15 s apart: markets at :00 and :30, a coin at :15 and :45; one in flight. Optional <code>COINGECKO_API_KEY</code> (Demo: 100/min, 10,000/month).</p>"]
       ],
       chips: ["Data provided by CoinGecko"]
@@ -1281,8 +1281,8 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     fetcher: {
       kicker: "etl fetcher · 1 replica", title: "fetcher", role: "Transport only: poll, wrap in an event, insert one row per call.",
       sections: [
-        ["Schedule and limits", "<ul><li>Markets at :00 and :30; one coin at :15 and :45, in turn, so each coin every 2 min: 4 calls a minute.</li><li>One request in flight, ≥ 15 s between starts. 429 → cooldown of <code>Retry-After</code>, capped at 15 min; 5xx and timeouts → backoff 2 s × 2<sup>n−1</sup>, ≤ 60 s, with jitter. Ticks are skipped, never queued.</li></ul>"],
-        ["Event (S1)", "<ul><li><code>event_id</code> UUIDv7, <code>fetched_at</code> UTC ms, <code>outcome</code> ok / http_error / network_error.</li><li><code>payload</code> verbatim, <code>payload_sha256</code>, <code>idempotency_key = sha256(source | endpoint | params | payload_sha256)</code>.</li><li>A 200 that is not strict JSON, or larger than 900 KiB (Redpanda's message limit is ~1 MiB), counts as <code>http_error</code>.</li><li>A body containing line breaks is stored compacted, so one call stays one JSONL line; others are stored byte for byte.</li></ul>"],
+        ["Schedule and limits", "<ul><li>Markets at :00 and :30; one coin at :15 and :45, in turn: 4 calls a minute.</li><li>One request in flight; 429 → wait <code>Retry-After</code>; 5xx and timeouts → backoff with jitter. Ticks are skipped, never queued.</li></ul>"],
+        ["Event (S1)", "<ul><li><code>event_id</code> UUIDv7, <code>fetched_at</code> UTC ms, <code>outcome</code> ok / http_error / network_error.</li><li><code>payload</code> verbatim, <code>payload_sha256</code>, <code>idempotency_key = sha256(source | endpoint | params | payload_sha256)</code>.</li><li>A 200 that is not strict JSON, or too large for one broker message, counts as <code>http_error</code>.</li></ul>"],
         ["No business logic", "<p>Only the S1 envelope is checked before the INSERT; a failure is our bug: not inserted, ERROR, metric. Payload checks live in the transformer.</p>"]
       ],
       chips: ["etl_api_requests_total", "etl_api_rate_limited_total", "etl_last_success_timestamp_seconds"]
@@ -1290,18 +1290,16 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     apicalls: {
       kicker: "Postgres 18.6 · schema raw", title: "raw.api_calls", role: "Every HTTP call, before any deduplication, failures included.",
       sections: [
-        ["Shape", "<ul><li>Daily partitions on <code>fetched_at</code>; primary key <code>(event_id, fetched_at)</code>.</li><li><code>payload</code> is <code>json</code>, not <code>jsonb</code>: exact bytes, so the sha256 checks out downstream.</li><li><code>idempotency_key</code>: plain, non-unique column.</li><li><code>ingest_txid xid8</code>: id of the inserting transaction, used by the exporter.</li></ul>"],
-        ["Failed calls", "<pre tabindex=\"0\">SELECT fetched_at, endpoint, http-&gt;&gt;'status', error\nFROM raw.api_calls WHERE outcome &lt;&gt; 'ok';</pre>"]
+        ["Shape", "<ul><li>Daily partitions on <code>fetched_at</code>; primary key <code>(event_id, fetched_at)</code>.</li><li><code>payload</code> is <code>json</code>, not <code>jsonb</code>: exact bytes, so the sha256 checks out downstream.</li><li><code>idempotency_key</code>: plain, non-unique column.</li><li><code>ingest_txid xid8</code>: id of the inserting transaction, used by the exporter.</li></ul>"]
       ],
       chips: ["CHECK ((outcome = 'ok') = (payload IS NOT NULL))"]
     },
     exporter: {
       kicker: "etl exporter · 1 active instance", title: "exporter", role: "Turns new rows into one write-once raw JSONL object per batch.",
       sections: [
-        ["Cursor", "<p>Walks <code>(ingest_txid, seq)</code> only below the oldest open transaction (<code>pg_snapshot_xmin</code>). Can stall, never skips. An id watermark loses rows on out-of-order commits (reproduced on 18.6).</p>"],
+        ["Cursor", "<p>Walks <code>(ingest_txid, seq)</code> only below the oldest open transaction (<code>pg_snapshot_xmin</code>). Can stall, never skips. One active instance (<code>pg_try_advisory_lock</code>).</p>"],
         ["Steps", "<ol><li>Claim the range in <code>export_batches</code>.</li><li>Serialize deterministic JSONL, validate S1.</li><li>PUT with <code>If-None-Match: *</code>; on 412 compare sha256.</li><li>Mark exported.</li></ol>"],
-        ["One at a time", "<p><code>pg_try_advisory_lock</code>; a second exporter retries, exits and is restarted.</p>"],
-        ["Timeouts", "<p>Every S3 call times out (2 min overall, 30 s for headers), so a hung gateway cannot stall the exporter, publisher or transformer.</p>"]
+        ["Timeouts", "<p>Every S3 call times out, so a hung gateway cannot stall a stage.</p>"]
       ],
       chips: ["etl_export_lag_seconds", "etl_export_batches_total", "etl_s3_put_total"]
     },
@@ -1324,17 +1322,17 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     redpanda: {
       kicker: "Redpanda v26.2.4 · Kafka protocol", title: "Redpanda", role: "Replayable log with per-key ordering and consumer groups.",
       sections: [
-        ["Topic", "<p><code>coingecko.raw</code>: 6 partitions, retention (TTL) 7 days — older messages are deleted; s3://raw and raw.api_calls keep the history. No version suffix: the version travels in each message. Auto-creation off; only <code>etl init</code> creates topics.</p>"],
+        ["Topic", "<p><code>coingecko.raw</code>: 6 partitions, retention (TTL) 7 days; s3://raw and raw.api_calls keep the history. Only <code>etl init</code> creates topics.</p>"],
         ["Why Redpanda", "<p>Kafka protocol in one C++ binary, no JVM. The same franz-go code runs on Apache Kafka, MSK or Confluent Cloud.</p>"]
       ],
-      chips: ["6 partitions", "retention (TTL) 7 days", "BSL 1.1"]
+      chips: ["6 partitions", "retention (TTL) 7 days"]
     },
     transformer: {
       kicker: "etl transformer · 2 replicas", title: "transformer", role: "Checks, cleans, deduplicates and normalizes.",
       sections: [
         ["Batch", "<ol><li>Input checks: strict JSON, S1, checksum, S0.</li><li>TX1: plan the range, transform, validate S2 (failures → dlq, no claim), claim keys, decide.</li><li>PUT objects with <code>If-None-Match: *</code>.</li><li>TX2: mark written.</li><li>Commit offset <code>L+1</code>.</li></ol>"],
         ["Recovery", "<p>On assignment: a written batch is skipped, a planned one is reprocessed exactly.</p>"],
-        ["Alert and stop", "<p>An object that exists with different bytes, or a re-plan that differs, halts only that partition: fetching paused, nothing committed, lag keeps growing, <code>ETLObjectChecksumMismatch</code> fires. Other partitions keep flowing.</p>"],
+        ["Alert and stop", "<p>An object with different bytes halts only that partition and fires <code>ETLObjectChecksumMismatch</code>; the others keep flowing.</p>"],
         ["Deterministic", "<p>No clock, no random order: <code>_processed_at</code> comes from the manifest, so retries produce identical files.</p>"]
       ],
       chips: ["etl_records_total", "etl_dedup_dropped_total", "etl_consumer_lag_records"]
@@ -1342,8 +1340,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     init: {
       kicker: "etl init · one-shot", title: "etl init", role: "Brings Postgres, the topic and the buckets to the expected state, then exits.",
       sections: [
-        ["Order", "<ol><li>goose migrations and daily partitions.</li><li>Topic via kadm: 6 partitions, retention (TTL) 7 days; mismatched config fails init.</li><li>Buckets: HeadBucket first (versitygw answers 500 to CreateBucket on a folder it did not create).</li><li>Lake check: refuses to start when <code>./data</code> holds objects from another Postgres lifetime; <code>make clean</code> resets both.</li></ol>"],
-        ["Idempotent", "<p>Safe to run any number of times; starts after postgres, redpanda and versitygw are healthy.</p>"]
+        ["Order", "<ol><li>goose migrations and daily partitions.</li><li>Topic via kadm; a mismatched config fails init.</li><li>The four buckets.</li><li>Lake check: refuses a <code>./data</code> from another Postgres lifetime; <code>make clean</code> resets both.</li></ol><p>Idempotent; starts after its dependencies are healthy.</p>"]
       ]
     },
     obs: {
@@ -1375,8 +1372,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     "b-dlq": {
       kicker: "Bucket · ./data/dlq", title: "s3://dlq", role: "Records that broke a stage. An alert fires.",
       sections: [
-        ["Record", "<p>One shape for every stage: stage, error_class, violations, origin, original bytes, occurred_at.</p>"],
-        ["Why a bucket", "<p>Two of three writers run before the broker, and write-once naming keeps retries from duplicating entries.</p>"]
+        ["Record", "<p>One shape for every stage: stage, error_class, violations, origin, original bytes, occurred_at.</p>"]
       ]
     }
   };
@@ -1826,18 +1822,13 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ decisions */
   var DEC = [
-    { area: "Storage", topic: "Object storage", d: "versitygw: plain files, S3 API", why: "data/raw and data/processed stay plain folders while services use the S3 API, as in production. Honours If-None-Match (exactly one winner among 20 parallel writers).", alt: "MinIO: archived 2026-04-24, images no longer pullable, own on-disk format. rclone serve s3: ignores If-None-Match. Local file writes: not the production path." },
-    { area: "Data", topic: "Raw table", d: "one row per HTTP call", why: "Failed calls are inspected with SQL; splitting into entities belongs to the transformer.", alt: "A second, per-entity table: a write path nobody reads." },
+    { area: "Storage", topic: "Object storage", d: "versitygw: plain files, S3 API", why: "data/raw and data/processed stay plain folders while services use the S3 API, as in production. Honours If-None-Match (exactly one winner among 20 parallel writers).", alt: "Local file writes: not the production path. Other S3 servers: see ADR 0001." },
     { area: "Data", topic: "Event", d: "a source snapshot", why: "A stale coin in two snapshots is two valid statements; two polls of one cached response are one.", alt: "Poll time: every CDN repeat becomes an event. The coin's own last_updated: stale coins collapse into one row." },
     { area: "Delivery", topic: "Deduplication", d: "one step, by natural key", why: "Record claims cover CDN repeats, replays and redeliveries; the reasons are metric labels only.", alt: "A second, call-level dedup by idempotency_key: redundant." },
     { area: "Delivery", topic: "Pipeline state", d: "Postgres schema pipeline", why: "Survives crashes, shared by replicas, atomic with the batch plan.", alt: "In-memory: lost on rebalance. Kafka Streams: JVM, exactly-once only Kafka to Kafka. goka: no transactions." },
     { area: "Delivery", topic: "Exporter cursor", d: "xid8, below the oldest open transaction", why: "Stalls instead of skipping rows; timeouts and an alert bound the stall.", alt: "Id watermark: loses rows (reproduced). exported flag + SKIP LOCKED: updates every raw row and still needs a claimed batch for byte-identical retries. Debezium CDC: production option, heavier stack." },
     { area: "Platform", topic: "Broker", d: "Redpanda, Kafka protocol", why: "Replayable log, per-key order, consumer groups; no JVM; same code runs on Kafka or MSK.", alt: "NATS JetStream, Pulsar: viable with caveats. RabbitMQ classic queues, Redis Streams, SQS, Pub/Sub: no offset replay or per-key ordering at scale." },
-    { area: "Platform", topic: "Topic name", d: "coingecko.raw, no .v1", why: "The version travels in each message; breaking changes dispatch on version in the same topic.", alt: "A new topic per breaking change: useful with many consumers, redundant here." },
     { area: "Platform", topic: "Schemas", d: "in the repo, no registry", why: "One producer, one consumer, one repo; changes ship as redeploys; CI checks compatibility.", alt: "A schema registry: production note; its wire prefix would break byte equality." },
-    { area: "Delivery", topic: "Fetcher", d: "transport only", why: "No business logic on the write path into Postgres; broken payloads go to dlq and can be replayed.", alt: "S0 checks plus a flag column in the fetcher: duplicated work." },
-    { area: "Operations", topic: "Bootstrapping", d: "one idempotent etl init", why: "Tables, topic and buckets described in code in one place.", alt: "Postgres init scripts: run once, unversioned. A shell topic container: one more part." },
-    { area: "Operations", topic: "DLQ", d: "a bucket, not a topic", why: "Two writers run before the broker; write-once naming keeps retries from duplicating entries.", alt: "A dlq topic: easy replay, but outside the batch manifest." },
     { area: "Operations", topic: "Logs", d: "one log file per replica", why: "No two containers append to the same file; each transformer replica gets its own.", alt: "One shared logs/etl.log: interleaved lines possible." },
     { area: "Data", topic: "Cleaning", d: "reject empty, flag questionable", why: "Nothing disappears silently; readers decide about stale rows.", alt: "Dropping questionable rows: stale coins vanish from the series." },
     { area: "Data", topic: "Polling cadence", d: "4 calls a minute, 15 s apart", why: "Markets at :00 and :30 meets the assignment's 'every 30 s'; a coin at :15 and :45 refreshes each of the four coins every 2 min, far below the keyless limit (10 calls/min at worst).", alt: "All four coins every minute: 6 calls/min, too close to the limit. Markets every 60 s: breaks 'every 30 s'. One coin a minute: each coin only every 4 min." },

@@ -28,5 +28,6 @@ Transactions are short and never span S3 or broker I/O. Postgres runs with `idle
 
 - Batch planning, claims and object checksums commit atomically, which is what makes the crash table in the README hold.
 - Postgres is on the critical path of every stage; in production it is RDS/Aurora Multi-AZ.
-- The exporter uses a transaction-id (xid8) cursor rather than an identity watermark, which loses rows when transactions commit out of order. An `exported` flag on `raw.api_calls` with `FOR UPDATE SKIP LOCKED` was rejected too: it never loses a late-committing row and never stalls, but it UPDATEs every raw row (the raw table stops being append-only) and still needs a claimed batch for byte-identical retries, which `pipeline.export_batches` already provides at one row per batch.
+- The exporter ledger is driven by a transaction-id (xid8) cursor; the alternatives are compared in [ADR 0005](0005-exporter-xid8-cursor.md).
 - `dedup_claims` grows with data; daily partitions make retention a `DROP TABLE` (pg_partman in production).
+- Known limitation: a transformer batch fixes its offset range in the manifest. If the topic's 7-day retention deletes the records of a batch that is still `planned` (for example after a week-long transformer outage), that batch cannot be redone. It needs a manual repair: delete the `planned` row of `pipeline.consumer_batches` and that batch's claims by position (`pipeline.dedup_claims` rows with its topic id and partition and offsets in its range; `dedup_claims_position_idx` covers that lookup).
