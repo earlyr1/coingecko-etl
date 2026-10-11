@@ -27,7 +27,7 @@ Data provided by [CoinGecko](https://www.coingecko.com/en/api).
 
 ```mermaid
 flowchart LR
-    CG[CoinGecko API] -->|"/coins/markets every 30 s<br/>/coins/{id} every 60 s"| F[etl fetcher]
+    CG[CoinGecko API] -->|"/coins/markets every 30 s<br/>/coins/{id} every 60 s, one coin in turn"| F[etl fetcher]
     F -->|"INSERT, one row per HTTP call"| PG[("Postgres<br/>raw.api_calls")]
     PG -->|"xid8 cursor +<br/>pipeline.export_batches"| E[etl exporter]
     E -->|"PUT If-None-Match: *"| RAW[("s3://raw<br/>./data/raw")]
@@ -163,7 +163,7 @@ Five ways to look at it:
 | Endpoint | Schedule | Why |
 |---|---|---|
 | `/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&price_change_percentage=1h,24h,7d&sparkline=false&precision=full` | every 30 s | a flat 30-second time series of the top 100 coins |
-| `/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | every 60 s, rotating over bitcoin, ethereum, tether, usd-coin, 15 s after the markets call | deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, contracts per chain |
+| `/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | every 60 s, one coin per call, in turn: bitcoin → ethereum → tether → usd-coin → bitcoin …, so each coin is refreshed every 4 min; 15 s after the markets call | deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, contracts per chain |
 
 The keyless CoinGecko tier allows a dynamic 10–30 calls per minute per IP; we saw HTTP 429 with `Retry-After: 60` on the sixth call within 27 s. The fetcher therefore spends ~3 calls per minute (at least 15 s between calls), keeps one request in flight with a 10 s timeout per request, honours `Retry-After` (capped at 15 minutes, since the header is untrusted), backs off exponentially with jitter on 5xx and network errors, and skips ticks instead of queueing them. It accepts response bodies up to 900 KiB (real ones are about 95 KB): a larger 200 is stored as `http_error`, because the event, body plus envelope, must fit into one broker message (Redpanda's default limit and franz-go's batch limit are about 1 MiB) or the publisher could never produce it.
 

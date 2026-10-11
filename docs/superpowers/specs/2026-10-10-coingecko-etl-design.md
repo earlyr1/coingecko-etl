@@ -38,7 +38,7 @@
 ## 2. Architecture
 
 ```
-CoinGecko ──(markets every 30 s, /coins/{id} once a minute)──▶ fetcher
+CoinGecko ──(markets every 30 s, /coins/{id} every 60 s: one coin per call, in turn)──▶ fetcher
                                                                   │ INSERT, one row per HTTP call
                                                                   ▼
                                           Postgres raw.api_calls (pre-dedup, includes failed calls)
@@ -129,7 +129,7 @@ The design needs a replayable log, per-key ordering within partitions, and consu
 | Endpoint | Schedule | Purpose |
 |---|---|---|
 | `GET /api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&price_change_percentage=1h,24h,7d&sparkline=false&precision=full` | Every 30 s | Flat 30-second time series |
-| `GET /api/v3/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | Every 60 s, rotating over `bitcoin, ethereum, tether, usd-coin`, offset 15 s from the markets call | Deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, platforms by chain |
+| `GET /api/v3/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | Every 60 s, one coin per call, in turn: `bitcoin → ethereum → tether → usd-coin → bitcoin …`, so each coin is refreshed every 4 min; offset 15 s from the markets call | Deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, platforms by chain |
 
 ### 3.2 Observed source behaviour (2026-10-10)
 
