@@ -301,10 +301,6 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .tl-list { margin: 0; padding-left: 20px; display: grid; gap: 4px; font-size: var(--fs-sm); }
 @media (min-width: 641px) { .tl-list { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } }
 .take { font-weight: 600; font-size: var(--fs-md); }
-.kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: var(--fs-sm); }
-.kv dt { font-family: var(--font-mono); font-size: var(--fs-xs); }
-.kv dd { margin: 0; color: var(--muted); }
-@media (max-width: 520px) { .kv { grid-template-columns: minmax(0, 1fr); gap: 2px; } .kv dd { margin-bottom: 6px; } }
 
 /* ---------- data model ---------- */
 .dm-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); }
@@ -315,20 +311,21 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .dm .ds:hover rect, .dm .ds.sel rect { stroke: var(--processed); stroke-width: 2.4; }
 .dm .ds:focus-visible rect { stroke: var(--accent); stroke-width: 2.4; fill: var(--accent-soft); }
 .dm .ds .title { font-family: var(--font-mono); font-size: 13px; font-weight: 600; }
-.dm .ds .sub { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.dm .ds .sub { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
 .dm .src rect { fill: var(--surface-2); stroke: var(--line); stroke-dasharray: 5 4; }
 .dm .src text { font-family: var(--font-mono); font-size: 12px; }
 .dm .rel { fill: none; stroke: var(--muted); stroke-width: 1.4; }
-.dm .rlabel { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.dm .rlabel { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
 .fields { display: flex; flex-wrap: wrap; gap: 6px; }
 .fields code { font-size: var(--fs-xs); }
 .fields code.key { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
 .fields code.flag { color: var(--raw); }
-.rules { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr)); }
-.rules .panel { display: grid; gap: 10px; align-content: start; }
 
 /* ---------- guarantees ---------- */
 .sim { display: grid; gap: 12px; align-content: start; }
+.dedup-grid { display: grid; gap: 16px; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.dedup-grid > * { min-width: 0; }
+@media (min-width: 1100px) { .dedup-grid { grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); } }
 .cmp { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 10px; }
 @media (max-width: 640px) { .cmp { grid-template-columns: minmax(0, 1fr); } }
 .cmp .side { border: 1px solid var(--line); border-radius: var(--radius); padding: 12px; background: var(--surface-2); min-width: 0; }
@@ -340,12 +337,12 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .cmp .mk { display: inline-block; width: 1.4ch; }
 .verdict { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; padding: 10px 12px; border-radius: var(--radius); border: 1px solid var(--line); background: var(--surface); font-size: var(--fs-sm); }
 .verdict .tag { font-family: var(--font-mono); font-weight: 600; font-size: var(--fs-xs); padding: 4px 10px; border-radius: 4px; color: var(--bg); background: var(--c, var(--muted)); }
-.lifecycle svg { display: block; width: 100%; height: auto; min-width: 760px; }
-@media (max-width: 640px) { .lifecycle svg { min-width: 900px; } }
 .lc-step rect { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
 .lc-step text { font-size: 12.5px; font-weight: 600; }
-.lc-step .s2 { font-family: var(--font-mono); font-size: 10.5px; font-weight: 400; fill: var(--muted); }
+.lc-step .s2 { font-family: var(--font-mono); font-size: 11px; font-weight: 400; fill: var(--muted); }
 .lc-arrow { stroke: var(--muted); stroke-width: 1.5; fill: none; }
+.lc-exit rect { fill: var(--surface); stroke: var(--dlq); stroke-width: 1.2; }
+.lc-exit text { font-size: 12px; fill: var(--ink); }
 .crash { cursor: pointer; outline: none; }
 .crash .hit { fill: transparent; }
 .crash .dot { fill: var(--surface); stroke: var(--dlq); stroke-width: 2; }
@@ -354,7 +351,7 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .crash:hover text, .crash.sel text { fill: var(--surface); }
 .crash:focus-visible .dot { stroke: var(--accent); stroke-width: 3; }
 .outcome { display: flex; gap: 8px; flex-wrap: wrap; }
-.parts { display: grid; gap: 6px; }
+.parts { display: grid; gap: 6px; max-width: 760px; }
 .prow { display: grid; grid-template-columns: 40px minmax(0, 1fr) 110px; gap: 10px; align-items: center; font-family: var(--font-mono); font-size: var(--fs-xs); }
 .prow .bar { min-height: 26px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 2px 8px; }
 .prow .bar span { white-space: nowrap; padding: 1px 6px; border-radius: 3px; background: var(--accent-soft); color: var(--accent); }
@@ -362,11 +359,53 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .prow .owner { color: var(--muted); }
 @media (max-width: 560px) { .prow { grid-template-columns: 34px minmax(0, 1fr); } .prow .owner { grid-column: 2; } }
 
-/* ---------- schemas ---------- */
-.schema-cards { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
-.schema-cards .panel { display: grid; gap: 4px; align-content: start; }
-.schema-cards .sid { font-family: var(--font-mono); font-weight: 600; color: var(--accent); }
-.schema-cards .file { font-family: var(--font-mono); font-size: var(--fs-xs); color: var(--muted); overflow-wrap: anywhere; }
+/* ---------- shared diagram vocabulary (every section's figure) ---------- */
+.defs-svg { position: absolute; width: 0; height: 0; overflow: hidden; }
+.dg { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.dg.flat { border: 0; border-radius: 0; background: transparent; }
+.dg svg { display: block; width: 100%; height: auto; min-width: var(--minw, 900px); }
+@media (max-width: 640px) { .dg svg { min-width: var(--minw-m, var(--minw, 900px)); } }
+.dg .bx { fill: var(--surface); stroke: var(--line); stroke-width: 1.5; }
+.dg .bx.soft { fill: var(--surface-2); }
+.dg .bx.pg { stroke: var(--state); }
+.dg .bx.acc { stroke: var(--accent); fill: var(--accent-soft); }
+.dg .bx.bad { stroke: var(--dlq); }
+.dg .bx.good { stroke: var(--processed); }
+.dg .bx.rej { stroke: var(--rejected); }
+.dg .bx.dash { stroke-dasharray: 5 4; }
+.dg .stripe { stroke: none; }
+.dg .t { font-size: 13px; font-weight: 600; }
+.dg .tm { font-family: var(--font-mono); font-size: 12.5px; font-weight: 600; }
+.dg .s { font-size: 12px; fill: var(--muted); }
+.dg .si { font-size: 12px; }
+.dg tspan.s, .dg tspan.si { font-family: var(--font-body); }
+.dg .m { font-family: var(--font-mono); font-size: 11px; }
+.dg .mm { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); }
+.dg .lbl { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); paint-order: stroke; stroke: var(--surface); stroke-width: 4px; stroke-linejoin: round; }
+.dg .ar { fill: none; stroke: var(--muted); stroke-width: 1.5; }
+.dg .ar.p { stroke: var(--processed); }
+.dg .ar.r { stroke: var(--rejected); }
+.dg .ar.d { stroke: var(--dlq); }
+.dg .ar.st { stroke: var(--state); stroke-dasharray: 4 4; }
+.dg .ar.lead { stroke: var(--line); stroke-dasharray: 3 3; }
+.dg .c-p { fill: var(--processed); } .dg .c-r { fill: var(--rejected); } .dg .c-d { fill: var(--dlq); }
+.dg .c-raw { fill: var(--raw); } .dg .c-acc { fill: var(--accent); } .dg .c-st { fill: var(--state); } .dg .c-mu { fill: var(--muted); }
+.dg .col { fill: var(--surface-2); stroke: none; }
+/* dedup decision tree: the branch for the picked scenario lights up */
+.dg .br { fill: none; stroke: var(--line); stroke-width: 1.6; transition: stroke 0.2s; }
+.dg .br.on { stroke: var(--accent); stroke-width: 2.6; }
+.dg .res.on > rect.bx { stroke: var(--accent); stroke-width: 2.4; fill: var(--accent-soft); }
+.dg .rs > rect { fill: transparent; stroke: none; }
+.dg .rs.on > rect { fill: var(--surface); stroke: var(--accent); stroke-width: 1.4; }
+@media (prefers-reduced-motion: reduce) { .dg .br { transition: none; } }
+.ports { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); margin: 0; padding: 0; list-style: none; }
+.mdef { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 14px; margin: 0; font-size: var(--fs-sm); }
+.mdef dt { font-family: var(--font-mono); font-size: var(--fs-xs); overflow-wrap: anywhere; }
+.mdef dd { margin: 0; color: var(--muted); }
+@media (max-width: 720px) { .mdef { grid-template-columns: minmax(0, 1fr); gap: 2px; } .mdef dd { margin-bottom: 6px; } }
+.ports li { display: grid; gap: 0; padding: 8px 12px; border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: 4px; background: var(--surface); }
+.ports b { font-family: var(--font-mono); font-size: var(--fs-md); font-weight: 600; color: var(--accent); }
+.ports span { font-size: var(--fs-xs); color: var(--muted); }
 
 /* ---------- storage tree ---------- */
 .tree { font-family: var(--font-mono); font-size: var(--fs-xs); }
@@ -390,14 +429,6 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .boot .b.init rect { stroke: var(--accent); stroke-dasharray: 5 4; }
 .boot .col-title { font-family: var(--font-mono); font-size: 11px; fill: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; }
 .boot .arr { stroke: var(--muted); stroke-width: 1.4; fill: none; }
-.metric-groups { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); }
-.metric-groups .panel { display: grid; gap: 8px; align-content: start; }
-.metric-groups .chips code { font-size: var(--fs-2xs); }
-.mlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: var(--fs-sm); }
-.mlist li span { color: var(--muted); }
-.alerts { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; font-size: var(--fs-sm); }
-.alerts li { display: grid; grid-template-columns: 10px 1fr; gap: 10px; align-items: baseline; }
-.alerts li::before { content: ""; width: 10px; height: 10px; border-radius: 2px; background: var(--dlq); transform: translateY(2px); }
 
 /* ---------- decisions ---------- */
 .dec-list { border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
@@ -443,6 +474,16 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 </nav>
 
 <main class="wrap">
+  <svg class="defs-svg" aria-hidden="true" focusable="false">
+    <defs>
+      <marker id="m-mu" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--muted)"></path></marker>
+      <marker id="m-p" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--processed)"></path></marker>
+      <marker id="m-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--rejected)"></path></marker>
+      <marker id="m-d" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--dlq)"></path></marker>
+      <marker id="m-st" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--state)"></path></marker>
+      <marker id="m-acc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" style="fill: var(--accent)"></path></marker>
+    </defs>
+  </svg>
 
   <!-- ================= PIPELINE ================= -->
   <section class="block" id="pipeline" aria-labelledby="h-pipeline">
@@ -668,12 +709,40 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       <ol class="tl-list" id="timeline-list"></ol>
       <p class="take" id="time-take"></p>
     </div>
-    <dl class="kv">
-      <dt>snapshot_at</dt><dd>newest <code>last_updated</code> in a response · event time, key, partition date</dd>
-      <dt>source_updated_at</dt><dd>the coin's own <code>last_updated</code> · drives <code>is_stale</code></dd>
-      <dt>fetched_at</dt><dd>our poll time · in <code>raw.api_calls</code></dd>
-      <dt>last_traded_at, last_fetch_at</dt><dd>tickers: trade time and CoinGecko's fetch time</dd>
-    </dl>
+    <figure class="panel">
+      <div class="dg flat" style="--minw: 760px; --minw-m: 920px">
+        <svg id="clock-svg" viewBox="0 40 1000 200" role="img" aria-label="Four clocks. source_updated_at, the coin's own last_updated, comes first and is kept per row. snapshot_at, the newest last_updated in the response, is the event time, the key and the event_date. fetched_at, our poll time, comes last and lives only in the raw event. When snapshot_at is more than 10 minutes after source_updated_at the row is flagged is_stale. Ticker clocks last_traded_at and last_fetch_at are kept but no logic depends on their order.">
+          <line class="ar" x1="40" y1="120" x2="958" y2="120" marker-end="url(#m-mu)"></line>
+          <text class="lbl" x="958" y="142" text-anchor="end">time</text>
+          <g>
+            <circle cx="170" cy="120" r="7" class="c-raw"></circle>
+            <text class="tm" x="170" y="68" text-anchor="middle">source_updated_at</text>
+            <text class="s" x="170" y="88" text-anchor="middle">the coin's own last_updated</text>
+            <text class="s" x="170" y="152" text-anchor="middle">kept per row</text>
+          </g>
+          <g>
+            <circle cx="540" cy="120" r="7" class="c-acc"></circle>
+            <text class="tm c-acc" x="540" y="68" text-anchor="middle">snapshot_at</text>
+            <text class="s" x="540" y="88" text-anchor="middle">newest last_updated in the response</text>
+            <text class="si" x="540" y="152" text-anchor="middle">event time · key · event_date</text>
+          </g>
+          <g>
+            <circle cx="820" cy="120" r="7" class="c-p"></circle>
+            <text class="tm" x="820" y="68" text-anchor="middle">fetched_at</text>
+            <text class="s" x="820" y="88" text-anchor="middle">our poll time</text>
+            <text class="s" x="820" y="152" text-anchor="middle">raw event only</text>
+          </g>
+          <path class="ar" d="M170 176 V186 H540 V176" style="stroke: var(--raw)"></path>
+          <text class="lbl" x="355" y="206" text-anchor="middle">gap &gt; 10 min → is_stale</text>
+          <g>
+            <rect class="bx dash" x="610" y="182" width="350" height="50" rx="5"></rect>
+            <text class="m" x="626" y="202">last_traded_at · last_fetch_at</text>
+            <text class="s" x="626" y="221">ticker clocks: no logic depends on their order</text>
+          </g>
+        </svg>
+      </div>
+      <figcaption>Only <code>snapshot_at</code> is event time; <code>source_updated_at</code> just sets <code>is_stale</code>, and <code>fetched_at</code> never leaves the raw event.</figcaption>
+    </figure>
   </section>
 
   <!-- ================= DATA MODEL ================= -->
@@ -733,38 +802,101 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       </figure>
       <div class="panel" id="ds-panel"></div>
     </div>
-    <div class="rules">
-      <div class="panel">
-        <h3>Normalize</h3>
-        <div class="chips">
-          <span class="chip"><b>"" [ ] → null</b></span>
-          <span class="chip"><b>UTC, ms</b><span>2026-10-10T10:07:55.000Z</span></span>
-          <span class="chip"><b>money → decimal string</b><span>never float64</span></span>
-          <span class="chip"><b>BTC · 0xa0b8…</b><span>symbols upper, EVM lower</span></span>
-          <span class="chip"><b>roi → 3 columns</b></span>
-          <span class="chip"><b>drop</b><span>images, links, sparklines</span></span>
-        </div>
+    <figure class="panel">
+      <div class="dg flat" style="--minw: 940px; --minw-m: 1100px">
+        <svg id="clean-svg" viewBox="0 0 1200 380" role="img" aria-label="Cleaning flow for one record. Normalize, then reject rules send empty or invalid records to rejected with a reason, then flags are set and the record is kept, then S2 validation sends failures to dlq without a claim, then the dedup claim writes the record to processed, drops a duplicate, or rejects a conflicting version as snapshot_conflict.">
+          <g>
+            <rect class="bx rej" x="370" y="14" width="690" height="48" rx="5"></rect>
+            <rect class="stripe" x="370" y="14" width="5" height="48" style="fill: var(--rejected)"></rect>
+            <text class="tm" x="388" y="43">s3://rejected</text>
+            <text class="s" x="500" y="43">the record, its reason and its lineage</text>
+          </g>
+          <g>
+            <rect class="bx soft dash" x="10" y="110" width="124" height="170" rx="5"></rect>
+            <text class="t" x="22" y="136">Record</text>
+            <text class="s" x="22" y="160">one dataset row,</text>
+            <text class="s" x="22" y="177">cut from a payload</text>
+            <text class="s" x="22" y="194">that passed S0</text>
+          </g>
+          <g>
+            <rect class="bx" x="164" y="110" width="180" height="170" rx="5"></rect>
+            <text class="t" x="176" y="136">1 · Normalize</text>
+            <text class="m" x="176" y="160">"" and [ ] → null</text>
+            <text class="si" x="176" y="178">times → UTC, ms</text>
+            <text class="si" x="176" y="196">money → decimal string</text>
+            <text class="si" x="176" y="214">symbols upper, EVM lower</text>
+            <text class="si" x="176" y="232">roi → 3 columns</text>
+            <text class="s" x="176" y="250">drop images, links</text>
+          </g>
+          <g>
+            <rect class="bx" x="374" y="110" width="170" height="170" rx="5"></rect>
+            <text class="t" x="386" y="136">2 · Reject rules</text>
+            <text class="m" x="386" y="160">missing_id</text>
+            <text class="m" x="386" y="178">null_price</text>
+            <text class="m" x="386" y="196">nonpositive_price</text>
+            <text class="m" x="386" y="214">empty_platform</text>
+            <text class="m" x="386" y="232">empty_record</text>
+          </g>
+          <g>
+            <rect class="bx" x="574" y="110" width="210" height="170" rx="5"></rect>
+            <text class="t" x="586" y="136">3 · Flag and keep</text>
+            <text class="m c-raw" x="586" y="162">is_stale<tspan class="s" dx="6">&gt; 10 min behind</tspan></text>
+            <text class="m c-raw" x="586" y="184">is_inactive<tspan class="s" dx="6">zero volume</tspan></text>
+            <text class="m c-raw" x="586" y="206">is_anomaly<tspan class="s" dx="6">outside 24 h range,</tspan></text>
+            <text class="s" x="586" y="224">±0.5% for market_snapshot;</text>
+            <text class="s" x="586" y="242">tickers: &gt; 2% off median</text>
+          </g>
+          <g>
+            <rect class="bx acc" x="814" y="110" width="104" height="170" rx="5"></rect>
+            <text class="t" x="826" y="136">4 · S2</text>
+            <text class="s" x="826" y="160">strict schema</text>
+            <text class="mm" x="826" y="178">processed/</text>
+            <text class="mm" x="826" y="194">&lt;dataset&gt;.v1</text>
+          </g>
+          <g>
+            <rect class="bx" x="948" y="110" width="112" height="170" rx="5"></rect>
+            <text class="t" x="960" y="136">5 · Claim</text>
+            <text class="s" x="960" y="160">natural key,</text>
+            <text class="s" x="960" y="177">first claim wins</text>
+          </g>
+          <g>
+            <rect class="bx good" x="1088" y="110" width="104" height="170" rx="5"></rect>
+            <rect class="stripe" x="1088" y="110" width="104" height="5" rx="2" style="fill: var(--processed)"></rect>
+            <text class="tm" x="1100" y="138">processed/</text>
+            <text class="s" x="1100" y="160">clean row</text>
+            <text class="s" x="1100" y="177">+ flags</text>
+            <text class="s" x="1100" y="194">+ lineage</text>
+          </g>
+          <path class="ar" d="M134 195 H160" marker-end="url(#m-mu)"></path>
+          <path class="ar" d="M344 195 H370" marker-end="url(#m-mu)"></path>
+          <path class="ar" d="M544 195 H570" marker-end="url(#m-mu)"></path>
+          <path class="ar" d="M784 195 H810" marker-end="url(#m-mu)"></path>
+          <path class="ar" d="M918 195 H944" marker-end="url(#m-mu)"></path>
+          <path class="ar p" d="M1060 195 H1084" marker-end="url(#m-p)"></path>
+          <path class="ar r" d="M459 110 V66" marker-end="url(#m-r)"></path>
+          <text class="lbl" x="466" y="92">reason</text>
+          <path class="ar r" d="M1004 110 V66" marker-end="url(#m-r)"></path>
+          <text class="lbl" x="1011" y="92">snapshot_conflict</text>
+          <path class="ar d" d="M866 280 V316" marker-end="url(#m-d)"></path>
+          <text class="lbl" x="873" y="302">fails</text>
+          <path class="ar" d="M1004 280 V316" marker-end="url(#m-mu)"></path>
+          <text class="lbl" x="1011" y="302">same content</text>
+          <g>
+            <rect class="bx bad" x="790" y="320" width="152" height="50" rx="5"></rect>
+            <rect class="stripe" x="790" y="320" width="5" height="50" style="fill: var(--dlq)"></rect>
+            <text class="tm" x="806" y="341">s3://dlq</text>
+            <text class="s" x="806" y="359">no claim taken</text>
+          </g>
+          <g>
+            <rect class="bx dash" x="958" y="320" width="200" height="50" rx="5"></rect>
+            <text class="t" x="972" y="341">dropped</text>
+            <text class="s" x="972" y="359">counted by reason only</text>
+          </g>
+        </svg>
       </div>
-      <div class="panel">
-        <h3>Reject to <code>rejected/</code></h3>
-        <div class="chips">
-          <span class="chip"><b>missing_id</b></span>
-          <span class="chip"><b>null_price</b></span>
-          <span class="chip"><b>nonpositive_price</b></span>
-          <span class="chip"><b>empty_platform</b><span>bitcoin's {"": ""}</span></span>
-          <span class="chip"><b>empty_record</b></span>
-          <span class="chip"><b>snapshot_conflict</b></span>
-        </div>
-      </div>
-      <div class="panel">
-        <h3>Flag and keep</h3>
-        <div class="chips">
-          <span class="chip"><b>is_stale</b><span>&gt; 10 min behind</span></span>
-          <span class="chip"><b>is_inactive</b><span>zero volume</span></span>
-          <span class="chip"><b>is_anomaly</b><span>outside 24h range ±0.5% · tickers &gt; 2% off median</span></span>
-        </div>
-      </div>
-    </div>
+      <p class="scroll-hint">Scroll sideways to follow the record.</p>
+      <figcaption>Nothing disappears silently: an empty record goes to <code>rejected/</code>, a questionable one is kept with a flag, a broken one goes to <code>dlq/</code>.</figcaption>
+    </figure>
   </section>
 
   <!-- ================= GUARANTEES ================= -->
@@ -773,28 +905,78 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       <h2 id="h-guar">Delivery guarantees</h2>
       <p class="lead">At-least-once hops, exactly-once content: deterministic keys, Postgres ledgers, write-once objects.</p>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Hop</th><th>Mechanism</th><th>On retry</th></tr></thead>
-        <tbody>
-          <tr><td>fetcher → api_calls</td><td>primary key, <code>ON CONFLICT DO NOTHING</code></td><td>no duplicate rows</td></tr>
-          <tr><td>exporter → raw/</td><td>xid8 cursor, ledger, <code>If-None-Match</code></td><td>same object, 412</td></tr>
-          <tr><td>publisher → topic</td><td>lease, idempotent producer</td><td>copies dropped downstream</td></tr>
-          <tr><td>transformer → processed/</td><td>manifest, claims, write-once</td><td>same bytes, 412</td></tr>
-        </tbody>
-      </table>
-    </div>
-
-    <div class="grid-2">
-      <div class="panel sim">
-        <div class="section-head">
-          <h3>Deduplication</h3>
-          <p class="note">The first claim of a natural key wins. Pick what arrived.</p>
-        </div>
-        <div class="btn-row" id="dedup-tabs" role="group" aria-label="Duplicate scenarios"></div>
-        <div id="dedup-view"></div>
+    <figure>
+      <div class="dg" style="--minw: 940px; --minw-m: 1030px">
+        <svg id="hops-svg" viewBox="0 0 1120 256" role="img" aria-label="Four hops, each at least once. fetcher to raw.api_calls: primary key and ON CONFLICT DO NOTHING, a retry adds no row. raw.api_calls to s3://raw by the exporter: xid8 cursor, ledger and If-None-Match, a retry rewrites the same object and gets 412. s3://raw to coingecko.raw by the publisher: lease and idempotent producer, copies are dropped downstream. coingecko.raw to s3://processed by the transformer: manifest, claims and write-once PUT, a retry produces the same bytes and gets 412.">
+          <g><rect class="bx" x="10" y="20" width="140" height="52" rx="5"></rect><text class="t" x="24" y="42">fetcher</text><text class="s" x="24" y="61">polls CoinGecko</text></g>
+          <g><rect class="bx pg" x="250" y="20" width="140" height="52" rx="5"></rect><text class="tm c-st" x="264" y="42">raw.api_calls</text><text class="s" x="264" y="61">Postgres</text></g>
+          <g><rect class="bx" x="490" y="20" width="140" height="52" rx="5"></rect><rect class="stripe" x="490" y="20" width="140" height="5" rx="2" style="fill: var(--raw)"></rect><text class="tm" x="504" y="44">s3://raw</text><text class="s" x="504" y="62">JSONL objects</text></g>
+          <g><rect class="bx" x="730" y="20" width="140" height="52" rx="5"></rect><text class="tm" x="744" y="42">coingecko.raw</text><text class="s" x="744" y="61">Redpanda topic</text></g>
+          <g><rect class="bx good" x="970" y="20" width="140" height="52" rx="5"></rect><rect class="stripe" x="970" y="20" width="140" height="5" rx="2" style="fill: var(--processed)"></rect><text class="tm" x="984" y="44">s3://processed</text><text class="s" x="984" y="62">+ rejected, dlq</text></g>
+          <path class="ar" d="M150 50 H246" marker-end="url(#m-mu)"></path><text class="lbl" x="198" y="40" text-anchor="middle">INSERT</text>
+          <path class="ar" d="M390 50 H486" marker-end="url(#m-mu)"></path><text class="lbl" x="438" y="40" text-anchor="middle">exporter</text>
+          <path class="ar" d="M630 50 H726" marker-end="url(#m-mu)"></path><text class="lbl" x="678" y="40" text-anchor="middle">publisher</text>
+          <path class="ar" d="M870 50 H966" marker-end="url(#m-mu)"></path><text class="lbl" x="918" y="40" text-anchor="middle">transformer</text>
+          <path class="ar lead" d="M198 54 V100"></path><path class="ar lead" d="M438 54 V100"></path><path class="ar lead" d="M678 54 V100"></path><path class="ar lead" d="M918 54 V100"></path>
+          <g><rect class="bx soft" x="88" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="102" y="121">HOP 1</text><text class="si" x="102" y="142">primary key</text><text class="m" x="102" y="160">ON CONFLICT DO NOTHING</text><text class="si c-p" x="102" y="192">retry → no duplicate row</text></g>
+          <g><rect class="bx soft" x="328" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="342" y="121">HOP 2</text><text class="si" x="342" y="142">xid8 cursor · ledger</text><text class="m" x="342" y="160">If-None-Match: *</text><text class="si c-p" x="342" y="192">retry → same object, 412</text></g>
+          <g><rect class="bx soft" x="568" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="582" y="121">HOP 3</text><text class="si" x="582" y="142">lease (SKIP LOCKED)</text><text class="si" x="582" y="160">idempotent producer, acks=all</text><text class="si c-p" x="582" y="192">retry → copies dropped later</text></g>
+          <g><rect class="bx soft" x="808" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="822" y="121">HOP 4</text><text class="si" x="822" y="142">manifest · dedup claims</text><text class="si" x="822" y="160">write-once PUT</text><text class="si c-p" x="822" y="192">retry → same bytes, 412</text></g>
+          <text class="s" x="560" y="238" text-anchor="middle">every hop may repeat; deterministic keys and write-once objects make the repeat harmless</text>
+        </svg>
       </div>
-      <div class="panel sim">
+      <p class="scroll-hint">Scroll sideways for every hop.</p>
+      <figcaption>At-least-once on every hop, exactly-once content in <code>processed/</code>.</figcaption>
+    </figure>
+
+    <div class="panel sim">
+      <div class="section-head">
+        <h3>Deduplication</h3>
+        <p class="note">The first claim of a natural key wins. Pick what arrived.</p>
+      </div>
+      <div class="dedup-grid">
+        <figure>
+          <div class="dg flat" style="--minw: 520px; --minw-m: 560px">
+            <svg id="dedup-svg" viewBox="0 0 600 344" role="img" aria-label="Dedup decision. The record claims its natural key; the first claim wins. If the claim holds this record's own position, write it. If another position holds it with the same content, drop it, counted as replay for the same event_id, duplicate_response for the same idempotency_key, otherwise duplicate_record. If the content differs, reject it as snapshot_conflict.">
+              <g><rect class="bx acc" x="170" y="8" width="260" height="50" rx="5"></rect><text class="t" x="300" y="29" text-anchor="middle">Claim the natural key</text><text class="m" x="300" y="47" text-anchor="middle">INSERT … ON CONFLICT DO NOTHING</text></g>
+              <path class="ar" d="M300 58 V82" marker-end="url(#m-mu)"></path>
+              <g><rect class="bx" x="190" y="86" width="220" height="34" rx="5"></rect><text class="t" x="300" y="108" text-anchor="middle">Who holds the claim?</text></g>
+              <path class="br" data-br="own" d="M300 120 V140 H95 V176"></path>
+              <path class="br" data-br="same" d="M300 120 V176"></path>
+              <path class="br" data-br="diff" d="M300 120 V140 H505 V176"></path>
+              <g class="res" data-br="own"><rect class="bx" x="10" y="178" width="170" height="156" rx="5"></rect>
+                <text class="s" x="22" y="198">this record's position</text>
+                <text class="t c-p" x="22" y="220">Write</text>
+                <text class="si" x="22" y="242">first sight, or a</text>
+                <text class="si" x="22" y="259">redelivery after</text>
+                <text class="si" x="22" y="276">a crash</text>
+                <text class="m" x="22" y="312">→ processed/</text></g>
+              <g class="res" data-br="same"><rect class="bx" x="190" y="178" width="220" height="156" rx="5"></rect>
+                <text class="s" x="202" y="198">other position, same content</text>
+                <text class="t" x="202" y="220">Drop, counted as</text>
+                <g class="rs" data-rs="replay"><rect x="196" y="228" width="208" height="32" rx="3"></rect><text class="m" x="204" y="242">replay</text><text class="s" x="204" y="256">same event_id</text></g>
+                <g class="rs" data-rs="duplicate_response"><rect x="196" y="262" width="208" height="32" rx="3"></rect><text class="m" x="204" y="276">duplicate_response</text><text class="s" x="204" y="290">same idempotency_key</text></g>
+                <g class="rs" data-rs="duplicate_record"><rect x="196" y="296" width="208" height="32" rx="3"></rect><text class="m" x="204" y="310">duplicate_record</text><text class="s" x="204" y="324">any other response</text></g></g>
+              <g class="res" data-br="diff"><rect class="bx" x="420" y="178" width="170" height="156" rx="5"></rect>
+                <text class="s" x="432" y="198">other position,</text>
+                <text class="s" x="432" y="214">different content</text>
+                <text class="t c-r" x="432" y="236">Reject</text>
+                <text class="m" x="432" y="256">snapshot_conflict</text>
+                <text class="si" x="432" y="278">the first version</text>
+                <text class="si" x="432" y="295">stays</text>
+                <text class="m" x="432" y="320">→ rejected/</text></g>
+            </svg>
+          </div>
+          <p class="scroll-hint">Scroll sideways for all three branches.</p>
+          <figcaption>The picked scenario lights its branch; the comparison of stored and incoming claim shows why.</figcaption>
+        </figure>
+        <div class="sim">
+          <div class="btn-row" id="dedup-tabs" role="group" aria-label="Duplicate scenarios"></div>
+          <div id="dedup-view"></div>
+        </div>
+      </div>
+    </div>
+    <div class="panel sim">
         <div class="section-head">
           <h3>Partitions</h3>
           <p class="note">Same key, same partition: repeats are judged in offset order.</p>
@@ -802,21 +984,22 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
         <div class="parts" id="parts"></div>
         <p class="note">5 keys land on 4 partitions, so at most 4 consumers are busy. Assignment shown is one possibility.</p>
       </div>
-    </div>
-
     <div class="panel sim lifecycle">
       <div class="section-head">
-        <h3>Crash points</h3>
-        <p class="note">One in-flight batch per partition. Pick a crash point.</p>
+        <h3>Transformer batch and crash points</h3>
+        <p class="note">Pick a crash point (red circle).</p>
       </div>
       <div class="btn-row">
         <button class="btn" id="naive-toggle" type="button" aria-pressed="false">Compare with the naive rule</button>
         <span class="note">naive: drop every key already claimed</span>
       </div>
-      <div class="hscroll" id="lc-wrap">
-        <svg viewBox="0 0 980 190" role="group" aria-label="Batch steps: input checks, TX1, PUT objects, TX2, commit offset, with five crash points." id="lc-svg"></svg>
-      </div>
-      <p class="scroll-hint">Scroll sideways for C3, C4 and Z.</p>
+      <figure>
+        <div class="dg flat hscroll" id="lc-wrap" style="--minw: 900px; --minw-m: 1010px">
+          <svg viewBox="0 0 1100 244" role="group" aria-label="Transformer batch sequence: input checks, then TX1 (manifest row planned, transform, S2 check, dedup claims, objects and checksums), then PUT objects with If-None-Match, then TX2 marks the batch written, then the offset L+1 is committed. Failed checks go to dlq; an object with other bytes halts the partition. Five crash points: C1, C2, C3, C4 and Z." id="lc-svg"></svg>
+        </div>
+        <p class="scroll-hint">Scroll sideways for C4 and Z.</p>
+        <figcaption>One in-flight batch per partition: TX1 decides everything before any network write, so a retry replays the same decisions.</figcaption>
+      </figure>
       <div id="crash-view"></div>
       <p class="note">C2–C4 and Z each have an integration test (testcontainers).</p>
     </div>
@@ -828,24 +1011,49 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       <h2 id="h-sch">Schemas</h2>
       <p class="lead">JSON Schema 2020-12, embedded in the binary, checked at every hop.</p>
     </div>
-    <div class="schema-cards">
-      <div class="panel"><div class="sid">S0 · source response</div><div class="file">source/coingecko/*.v1.json</div><p class="text-sm">Permissive: tolerates upstream drift.</p></div>
-      <div class="panel"><div class="sid">S1 · raw event</div><div class="file">pipeline/raw_event.v1.json</div><p class="text-sm">Strict: same bytes in Postgres, raw and the topic.</p></div>
-      <div class="panel"><div class="sid">S2 · processed row</div><div class="file">processed/&lt;dataset&gt;.v1.json</div><p class="text-sm">Strict: failing rows never reach processed.</p></div>
-      <div class="panel"><div class="sid">S3 · rejected and dlq</div><div class="file">pipeline/*_record.v1.json</div><p class="text-sm">Strict: one record shape for every stage.</p></div>
-    </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Stage</th><th>Checks</th><th>On failure</th></tr></thead>
-        <tbody>
-          <tr><td>fetcher</td><td>S1 envelope</td><td>not inserted · ERROR · metric</td></tr>
-          <tr><td>exporter, publisher</td><td>S1 per line</td><td><span class="pill dlq">dlq</span></td></tr>
-          <tr><td>transformer in</td><td>JSON · S1 · checksum · S0</td><td><span class="pill dlq">dlq</span></td></tr>
-          <tr><td>transformer out</td><td>S2</td><td><span class="pill dlq">dlq</span></td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="note">Compatible change: consumers first, then producers. Breaking change: <code>v2</code> side by side.</p>
+    <figure>
+      <div class="dg" style="--minw: 960px; --minw-m: 1080px">
+        <svg id="schema-svg" viewBox="0 0 1170 362" role="img" aria-label="Schema checkpoints. The fetcher checks the S1 envelope before the INSERT; a failure is our bug, logged and counted, not sent to dlq. The exporter and publisher check S1 per line, the transformer checks strict JSON, S1, the payload checksum and S0 on input and S2 on output; every one of those failures goes to s3://dlq. Records written to rejected and dlq are checked against S3; a failure is logged with the original bytes in base64.">
+          <g><rect class="bx soft" x="10" y="10" width="280" height="68" rx="5"></rect><text class="tm c-acc" x="24" y="32">S0 · source response</text><text class="mm" x="24" y="50">source/coingecko/*.v1.json</text><text class="si" x="24" y="68">permissive: tolerates upstream drift</text></g>
+          <g><rect class="bx soft" x="300" y="10" width="280" height="68" rx="5"></rect><text class="tm c-acc" x="314" y="32">S1 · raw event</text><text class="mm" x="314" y="50">pipeline/raw_event.v1.json</text><text class="si" x="314" y="68">strict: identical bytes at every hop</text></g>
+          <g><rect class="bx soft" x="590" y="10" width="280" height="68" rx="5"></rect><text class="tm c-acc" x="604" y="32">S2 · processed row</text><text class="mm" x="604" y="50">processed/&lt;dataset&gt;.v1.json</text><text class="si" x="604" y="68">strict: the gate to processed/</text></g>
+          <g><rect class="bx soft" x="880" y="10" width="280" height="68" rx="5"></rect><text class="tm c-acc" x="894" y="32">S3 · rejected and dlq</text><text class="mm" x="894" y="50">pipeline/*_record.v1.json</text><text class="si" x="894" y="68">strict: one record shape per zone</text></g>
+          <g><rect class="bx" x="10" y="170" width="140" height="52" rx="5"></rect><text class="t" x="22" y="192">fetcher</text><text class="s" x="22" y="211">before INSERT</text></g>
+          <g><rect class="bx acc" x="10" y="114" width="140" height="32" rx="16"></rect><text class="m c-acc" x="80" y="134" text-anchor="middle">S1 envelope</text></g>
+          <path class="ar" d="M80 146 V168" style="stroke: var(--accent)"></path>
+          <g><rect class="bx" x="210" y="170" width="140" height="52" rx="5"></rect><text class="t" x="222" y="192">exporter</text><text class="s" x="222" y="211">per JSONL line</text></g>
+          <g><rect class="bx acc" x="210" y="114" width="140" height="32" rx="16"></rect><text class="m c-acc" x="280" y="134" text-anchor="middle">S1</text></g>
+          <path class="ar" d="M280 146 V168" style="stroke: var(--accent)"></path>
+          <g><rect class="bx" x="410" y="170" width="140" height="52" rx="5"></rect><text class="t" x="422" y="192">publisher</text><text class="s" x="422" y="211">per line</text></g>
+          <g><rect class="bx acc" x="410" y="114" width="140" height="32" rx="16"></rect><text class="m c-acc" x="480" y="134" text-anchor="middle">S1</text></g>
+          <path class="ar" d="M480 146 V168" style="stroke: var(--accent)"></path>
+          <g><rect class="bx" x="610" y="170" width="140" height="52" rx="5"></rect><text class="t" x="622" y="192">transformer in</text><text class="s" x="622" y="211">per message</text></g>
+          <g><rect class="bx acc" x="610" y="114" width="140" height="32" rx="16"></rect><text class="m c-acc" x="680" y="134" text-anchor="middle">JSON·S1·sha256·S0</text></g>
+          <path class="ar" d="M680 146 V168" style="stroke: var(--accent)"></path>
+          <g><rect class="bx" x="810" y="170" width="140" height="52" rx="5"></rect><text class="t" x="822" y="192">transformer out</text><text class="s" x="822" y="211">per record</text></g>
+          <g><rect class="bx acc" x="810" y="114" width="140" height="32" rx="16"></rect><text class="m c-acc" x="880" y="134" text-anchor="middle">S2</text></g>
+          <path class="ar" d="M880 146 V168" style="stroke: var(--accent)"></path>
+          <g><rect class="bx good" x="1010" y="170" width="140" height="52" rx="5"></rect><rect class="stripe" x="1010" y="170" width="140" height="5" rx="2" style="fill: var(--processed)"></rect><text class="t" x="1022" y="192">processed/</text><text class="s" x="1022" y="211">clean rows</text></g>
+          <path class="ar" d="M150 196 H206" marker-end="url(#m-mu)"></path><text class="lbl" x="180" y="188" text-anchor="middle">rows</text>
+          <path class="ar" d="M350 196 H406" marker-end="url(#m-mu)"></path><text class="lbl" x="380" y="188" text-anchor="middle">raw/</text>
+          <path class="ar" d="M550 196 H606" marker-end="url(#m-mu)"></path><text class="lbl" x="580" y="188" text-anchor="middle">topic</text>
+          <path class="ar" d="M750 196 H806" marker-end="url(#m-mu)"></path><text class="lbl" x="780" y="188" text-anchor="middle">records</text>
+          <path class="ar" d="M950 196 H1006" marker-end="url(#m-mu)"></path><text class="lbl" x="980" y="188" text-anchor="middle">pass</text>
+          <path class="ar" d="M80 222 V266" marker-end="url(#m-mu)"></path><text class="lbl" x="87" y="250">fail</text>
+          <g><rect class="bx dash" x="10" y="270" width="140" height="80" rx="5"></rect><text class="t" x="22" y="292">not inserted</text><text class="s" x="22" y="311">ERROR log, metric</text><text class="s" x="22" y="328">our bug: no dlq</text></g>
+          <path class="ar d" d="M280 222 V282" marker-end="url(#m-d)"></path><text class="lbl" x="287" y="252">fail</text>
+          <path class="ar d" d="M480 222 V282" marker-end="url(#m-d)"></path><text class="lbl" x="487" y="252">fail</text>
+          <path class="ar d" d="M680 222 V282" marker-end="url(#m-d)"></path><text class="lbl" x="687" y="252">fail</text>
+          <path class="ar d" d="M880 222 V282" marker-end="url(#m-d)"></path><text class="lbl" x="887" y="252">fail</text>
+          <g><rect class="bx bad" x="210" y="286" width="740" height="64" rx="5"></rect><rect class="stripe" x="210" y="286" width="5" height="64" style="fill: var(--dlq)"></rect><text class="tm" x="228" y="310">s3://dlq</text><text class="s" x="228" y="331">stage=export · publish · transform · error_class names the failed check · alert ETLDeadLetterRecords</text></g>
+          <path class="ar" d="M950 318 H1006" marker-end="url(#m-mu)"></path><text class="lbl" x="978" y="310" text-anchor="middle">write</text>
+          <g><rect class="bx acc" x="1010" y="286" width="150" height="64" rx="5"></rect><text class="m c-acc" x="1022" y="306">S3 on every write</text><text class="s" x="1022" y="324">fail → ERROR log,</text><text class="s" x="1022" y="341">original in base64</text></g>
+        </svg>
+      </div>
+      <p class="scroll-hint">Scroll sideways for every checkpoint.</p>
+      <figcaption>Every hop re-checks its contract and never passes a failure on: only the fetcher's own envelope bug stays out of <code>dlq/</code>.</figcaption>
+    </figure>
+    <details class="more"><summary>Schema evolution</summary><div><p class="note">Compatible change: consumers first, then producers. Breaking change: <code>v2</code> side by side, dispatched on the version inside each message. Cleaning-rule drops are not schema failures: they go to <code>rejected/</code>.</p></div></details>
   </section>
 
   <!-- ================= STORAGE ================= -->
@@ -900,18 +1108,30 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       </div>
       <div class="panel" id="file-view" style="display:grid;gap:10px;align-content:start"></div>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead><tr><th>Postgres table</th><th>Holds</th><th>Kept</th></tr></thead>
-        <tbody>
-          <tr><td><code>raw.api_calls</code></td><td>every HTTP call, body byte-exact</td><td>not pruned · pg_partman in prod</td></tr>
-          <tr><td><code>pipeline.export_batches</code></td><td>ledger of raw objects</td><td>not pruned</td></tr>
-          <tr><td><code>pipeline.dedup_claims</code></td><td>first claim per natural key</td><td>≥ 30 days</td></tr>
-          <tr><td><code>pipeline.consumer_batches</code></td><td>transformer batch manifest</td><td>≥ 30 days</td></tr>
-        </tbody>
-      </table>
-    </div>
-    <p class="note">Persistence: bind mounts <code>./data</code>, <code>./.s3meta</code>, <code>./logs</code> · named volumes <code>pgdata</code>, <code>redpanda</code> · reset them together with <code>make clean</code>.</p>
+    <figure>
+      <div class="dg" style="--minw: 960px; --minw-m: 1070px">
+        <svg id="pg-svg" viewBox="0 0 1160 364" role="img" aria-label="Postgres tables and who uses them. The fetcher inserts into raw.api_calls; the exporter reads it with the xid8 cursor and claims and marks batches in pipeline.export_batches; the publisher leases batches there. The transformer claims keys in pipeline.dedup_claims and plans and marks batches in pipeline.consumer_batches. etl init creates every table and runs the lake check against export_batches.">
+          <g><rect class="bx" x="20" y="20" width="160" height="46" rx="5"></rect><text class="t" x="100" y="48" text-anchor="middle">fetcher</text></g>
+          <g><rect class="bx" x="200" y="20" width="180" height="46" rx="5"></rect><text class="t" x="290" y="48" text-anchor="middle">exporter</text></g>
+          <g><rect class="bx" x="420" y="20" width="160" height="46" rx="5"></rect><text class="t" x="500" y="48" text-anchor="middle">publisher</text></g>
+          <g><rect class="bx" x="640" y="20" width="500" height="46" rx="5"></rect><text class="t" x="890" y="48" text-anchor="middle">transformer ×2</text></g>
+          <path class="ar" d="M100 66 V196" marker-end="url(#m-mu)"></path><text class="lbl" x="107" y="130">INSERT</text>
+          <path class="ar st" d="M230 200 V70" marker-end="url(#m-st)"></path><text class="lbl" x="237" y="110">SELECT</text><text class="lbl" x="237" y="125">xid8 cursor</text>
+          <path class="ar" d="M360 66 V196" marker-end="url(#m-mu)"></path><text class="lbl" x="367" y="150">claim range</text><text class="lbl" x="367" y="165">mark exported</text>
+          <path class="ar" d="M500 70 V196" marker-start="url(#m-mu)" marker-end="url(#m-mu)"></path><text class="lbl" x="507" y="110">lease (SKIP LOCKED)</text><text class="lbl" x="507" y="125">published_at</text>
+          <path class="ar" d="M725 70 V196" marker-start="url(#m-mu)" marker-end="url(#m-mu)"></path><text class="lbl" x="732" y="110">TX1: claim keys,</text><text class="lbl" x="732" y="125">read claims back</text>
+          <path class="ar" d="M1015 70 V196" marker-start="url(#m-mu)" marker-end="url(#m-mu)"></path><text class="lbl" x="1008" y="150" text-anchor="end">TX1 planned · TX2 written</text><text class="lbl" x="1008" y="165" text-anchor="end">read on assignment</text>
+          <g><rect class="bx pg" x="20" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="34" y="224">raw.api_calls</text><text class="si" x="34" y="248">every HTTP call, body byte-exact</text><text class="s" x="34" y="272">daily partitions · not pruned</text></g>
+          <g><rect class="bx pg" x="310" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="324" y="224">pipeline.export_batches</text><text class="si" x="324" y="248">raw object ledger, publish lease</text><text class="s" x="324" y="272">not pruned</text></g>
+          <g><rect class="bx pg" x="600" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="614" y="224">pipeline.dedup_claims</text><text class="si" x="614" y="248">first claim per natural key</text><text class="s" x="614" y="272">kept ≥ 30 days</text></g>
+          <g><rect class="bx pg" x="890" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="904" y="224">pipeline.consumer_batches</text><text class="si" x="904" y="248">transformer batch manifest</text><text class="s" x="904" y="272">kept ≥ 30 days</text></g>
+          <g><rect class="bx dash soft" x="20" y="310" width="1120" height="42" rx="5"></rect><text class="m" x="36" y="336">etl init</text><text class="s" x="104" y="336">creates every table (goose migrations, daily partitions) · lake check: an empty export_batches next to a full raw/ is refused, make clean resets both</text></g>
+        </svg>
+      </div>
+      <p class="scroll-hint">Scroll sideways for every table.</p>
+      <figcaption>Every row of state lives in Postgres, so it survives crashes, is shared by replicas and changes in one transaction with the batch plan.</figcaption>
+    </figure>
+    <details class="more"><summary>Persistence and reset</summary><div><p class="note">Bind mounts <code>./data</code>, <code>./.s3meta</code>, <code>./logs</code> · named volumes <code>pgdata</code>, <code>redpanda</code> · reset them together with <code>make clean</code>. In production <code>raw.api_calls</code> would get pg_partman retention.</p></div></details>
   </section>
 
   <!-- ================= OPERATIONS ================= -->
@@ -946,54 +1166,67 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       </div>
       <figcaption>Topic auto-creation is off; only <code>etl init</code> creates topics.</figcaption>
     </figure>
-    <div class="chips" aria-label="Local addresses">
-      <span class="chip"><b>Grafana</b><span>:3000</span></span>
-      <span class="chip"><b>Prometheus</b><span>:9090</span></span>
-      <span class="chip"><b>Redpanda Console</b><span>:8081</span></span>
-      <span class="chip"><b>S3 API</b><span>:7070</span></span>
-      <span class="chip"><b>Redpanda (Kafka API)</b><span>:19092</span></span>
-      <span class="chip"><b>Postgres</b><span>:5432</span></span>
-    </div>
-    <div class="metric-groups">
-      <div class="panel"><h3>fetcher</h3><div class="chips"><code>etl_api_requests_total</code><code>etl_api_request_duration_seconds</code><code>etl_api_rate_limited_total</code><code>etl_last_success_timestamp_seconds</code><code>etl_source_data_age_seconds</code></div></div>
-      <div class="panel"><h3>exporter · publisher</h3><div class="chips"><code>etl_export_lag_seconds</code><code>etl_export_batches_total</code><code>etl_s3_put_total</code><code>etl_published_records_total</code></div></div>
-      <div class="panel"><h3>transformer</h3><div class="chips"><code>etl_records_total</code><code>etl_dedup_dropped_total</code><code>etl_rejected_total</code><code>etl_dlq_total</code><code>etl_consumer_lag_records</code><code>etl_e2e_latency_seconds</code></div></div>
-      <div class="panel"><h3>Alerts</h3>
-        <ul class="alerts">
-          <li>no successful poll for 2 min</li>
-          <li><span>records in <code>dlq/</code></span></li>
-          <li>&gt; 5% fail S0 over 15 min</li>
-          <li>export lag &gt; 5 min or exporter gone</li>
-          <li>consumer lag growing 10 min</li>
-          <li>frequent 429s</li>
-          <li>a service down for 2 min</li>
-          <li>polls succeed, nothing processed for 15 min</li>
-          <li>object checksum mismatch: partition halted</li>
-        </ul>
+    <figure>
+      <div class="dg" style="--minw: 980px; --minw-m: 1070px">
+        <svg id="ops-svg" viewBox="0 0 1160 612" role="img" aria-label="Metrics and the nine alerts by stage. Across the whole pipeline: ETLServiceDown and ETLPipelineNotProgressing. Fetcher: ETLDataStale and ETLFrequentRateLimiting. Exporter, publisher and transformer: ETLDeadLetterRecords and ETLObjectChecksumMismatch. Exporter: ETLExportLagHigh. Transformer: ETLSourceSchemaDrift and ETLConsumerLagGrowing. Below each stage, the metrics it exports.">
+          <rect class="col" x="20" y="100" width="250" height="214" rx="5"></rect>
+          <rect class="col" x="310" y="100" width="250" height="214" rx="5"></rect>
+          <rect class="col" x="600" y="100" width="250" height="214" rx="5"></rect>
+          <rect class="col" x="890" y="100" width="250" height="214" rx="5"></rect>
+          <g><rect class="bx bad" x="20" y="10" width="1120" height="40" rx="5"></rect><text class="m c-d" x="32" y="26" style="font-weight:600">ETLServiceDown</text><text class="si" x="32" y="43">a service's scrape fails or it has no scrape target for 2 min · critical</text></g>
+          <g><rect class="bx bad" x="20" y="56" width="1120" height="40" rx="5"></rect><text class="m c-d" x="32" y="72" style="font-weight:600">ETLPipelineNotProgressing</text><text class="si" x="32" y="89">CoinGecko calls succeed, but no transformer counts a record in 15 min</text></g>
+          <g><rect class="bx bad" x="30" y="108" width="230" height="40" rx="5"></rect><text class="m c-d" x="42" y="124" style="font-weight:600">ETLDataStale</text><text class="si" x="42" y="141">no successful poll for 2 min · critical</text></g>
+          <g><rect class="bx bad" x="30" y="156" width="230" height="40" rx="5"></rect><text class="m c-d" x="42" y="172" style="font-weight:600">ETLFrequentRateLimiting</text><text class="si" x="42" y="189">3 or more HTTP 429 in 15 min</text></g>
+          <g><rect class="bx bad" x="320" y="108" width="810" height="40" rx="5"></rect><text class="m c-d" x="332" y="124" style="font-weight:600">ETLDeadLetterRecords</text><text class="si" x="332" y="141">any record lands in dlq/ (stage export, publish or transform)</text></g>
+          <g><rect class="bx bad" x="320" y="156" width="810" height="40" rx="5"></rect><text class="m c-d" x="332" y="172" style="font-weight:600">ETLObjectChecksumMismatch</text><text class="si" x="332" y="189">a write-once key holds other bytes; the transformer halts only that partition · critical</text></g>
+          <g><rect class="bx bad" x="320" y="204" width="230" height="40" rx="5"></rect><text class="m c-d" x="332" y="220" style="font-weight:600">ETLExportLagHigh</text><text class="si" x="332" y="237">lag over 5 min, or exporter absent</text></g>
+          <g><rect class="bx bad" x="900" y="204" width="230" height="40" rx="5"></rect><text class="m c-d" x="912" y="220" style="font-weight:600">ETLSourceSchemaDrift</text><text class="si" x="912" y="237">over 5% fail S0 in 15 min · critical</text></g>
+          <g><rect class="bx bad" x="900" y="252" width="230" height="40" rx="5"></rect><text class="m c-d" x="912" y="268" style="font-weight:600">ETLConsumerLagGrowing</text><text class="si" x="912" y="285">total lag rising for 10 min</text></g>
+          <g><rect class="bx" x="20" y="322" width="250" height="40" rx="5"></rect><text class="t" x="145" y="347" text-anchor="middle">fetcher</text></g>
+          <path class="ar" d="M270 342 H306" marker-end="url(#m-mu)"></path>
+          <g><rect class="bx" x="310" y="322" width="250" height="40" rx="5"></rect><text class="t" x="435" y="347" text-anchor="middle">exporter</text></g>
+          <path class="ar" d="M560 342 H596" marker-end="url(#m-mu)"></path>
+          <g><rect class="bx" x="600" y="322" width="250" height="40" rx="5"></rect><text class="t" x="725" y="347" text-anchor="middle">publisher</text></g>
+          <path class="ar" d="M850 342 H886" marker-end="url(#m-mu)"></path>
+          <g><rect class="bx" x="890" y="322" width="250" height="40" rx="5"></rect><text class="t" x="1015" y="347" text-anchor="middle">transformer ×2</text></g>
+          <path class="ar lead" d="M145 362 V382"></path>
+          <g><rect class="bx soft" x="20" y="382" width="250" height="156" rx="5"></rect><text class="m" x="30" y="402">etl_api_requests_total</text><text class="m" x="30" y="419">etl_api_request_duration_seconds</text><text class="m" x="30" y="436">etl_api_rate_limited_total</text><text class="m" x="30" y="453">etl_last_success_timestamp_seconds</text><text class="m" x="30" y="470">etl_source_data_age_seconds</text></g>
+          <path class="ar lead" d="M435 362 V382"></path>
+          <g><rect class="bx soft" x="310" y="382" width="250" height="156" rx="5"></rect><text class="m" x="320" y="402">etl_export_lag_seconds</text><text class="m" x="320" y="419">etl_export_batches_total</text><text class="m" x="320" y="436">etl_s3_put_total{result}</text><text class="m" x="320" y="453">etl_dlq_total</text></g>
+          <path class="ar lead" d="M725 362 V382"></path>
+          <g><rect class="bx soft" x="600" y="382" width="250" height="156" rx="5"></rect><text class="m" x="610" y="402">etl_published_records_total</text><text class="m" x="610" y="419">etl_s3_put_total{result}</text><text class="m" x="610" y="436">etl_dlq_total</text></g>
+          <path class="ar lead" d="M1015 362 V382"></path>
+          <g><rect class="bx soft" x="890" y="382" width="250" height="156" rx="5"></rect><text class="m" x="900" y="402">etl_records_total{outcome}</text><text class="m" x="900" y="419">etl_dedup_dropped_total{reason}</text><text class="m" x="900" y="436">etl_rejected_total{reason}</text><text class="m" x="900" y="453">etl_dlq_total</text><text class="m" x="900" y="470">etl_s3_put_total{result}</text><text class="m" x="900" y="487">etl_consumer_lag_records</text><text class="m" x="900" y="504">etl_batch_duration_seconds</text><text class="m" x="900" y="521">etl_e2e_latency_seconds</text></g>
+          <g><rect class="bx dash" x="20" y="550" width="1120" height="54" rx="5"></rect><text class="si" x="36" y="572"><tspan class="m">etl_schema_validations_total</tspan> and <tspan class="m">etl_schema_violations_total</tspan> in every service · <tspan class="m">/healthz /readyz /metrics</tspan> on :8080 → Prometheus → Grafana</text><text class="s" x="36" y="592">logs: slog JSON in UTC → logs/&lt;service&gt;/etl.log and stdout; each transformer replica writes its own file</text></g>
+        </svg>
       </div>
-    </div>
+      <p class="scroll-hint">Scroll sideways for every stage.</p>
+      <figcaption>Nine Prometheus rules sit on the stage they watch; red boxes are alerts, grey boxes the metrics each stage exports.</figcaption>
+    </figure>
+    <ul class="ports" aria-label="Local addresses">
+      <li><b>:3000</b><span>Grafana</span></li>
+      <li><b>:9090</b><span>Prometheus</span></li>
+      <li><b>:8081</b><span>Redpanda Console</span></li>
+      <li><b>:7070</b><span>S3 API (versitygw)</span></li>
+      <li><b>:19092</b><span>Redpanda Kafka API</span></li>
+      <li><b>:5432</b><span>Postgres</span></li>
+    </ul>
     <details class="more">
       <summary>What each metric means</summary>
-      <div class="grid-2">
-        <ul class="mlist">
-          <li><code>etl_schema_validations_total{stage,schema,result}</code> <span>pass or fail per stage; drives the source-schema alert</span></li>
-          <li><code>etl_schema_violations_total{stage,schema,keyword}</code> <span>which JSON Schema keyword failed</span></li>
-          <li><code>etl_api_requests_total{endpoint,status}</code> <span>calls by result; 429 and 5xx stand out</span></li>
-          <li><code>etl_last_success_timestamp_seconds{endpoint}</code> <span>drives the stale-data alert</span></li>
-          <li><code>etl_source_data_age_seconds{endpoint}</code> <span>how old CoinGecko's data was when fetched</span></li>
-          <li><code>etl_export_lag_seconds</code> <span>age of the oldest unexported row</span></li>
-        </ul>
-        <ul class="mlist">
-          <li><code>etl_s3_put_total{result}</code> <span>created, exists (412), mismatch, error</span></li>
-          <li><code>etl_records_total{dataset,outcome}</code> <span>written, duplicate, rejected, dlq</span></li>
-          <li><code>etl_dedup_dropped_total{reason}</code> <span>replay, duplicate_response, duplicate_record</span></li>
-          <li><code>etl_consumer_lag_records{partition}</code> <span>messages waiting per partition</span></li>
-          <li><code>etl_e2e_latency_seconds</code> <span>poll to processed</span></li>
-          <li><code>/healthz</code>, <code>/readyz</code>, <code>/metrics</code> <span>on :8080 in every long-running service</span></li>
-        </ul>
-      </div>
+      <div><dl class="mdef">
+        <dt>etl_schema_validations_total{stage,schema,result}</dt><dd>pass or fail per stage; drives the source-schema alert</dd>
+        <dt>etl_schema_violations_total{stage,schema,keyword}</dt><dd>which JSON Schema keyword failed</dd>
+        <dt>etl_api_requests_total{endpoint,status}</dt><dd>calls by result; 429 and 5xx stand out</dd>
+        <dt>etl_last_success_timestamp_seconds{endpoint}</dt><dd>drives the stale-data alert</dd>
+        <dt>etl_source_data_age_seconds{endpoint}</dt><dd>how old CoinGecko's data was when fetched</dd>
+        <dt>etl_export_lag_seconds</dt><dd>age of the oldest unexported row</dd>
+        <dt>etl_s3_put_total{result}</dt><dd>created, exists (412), mismatch, error</dd>
+        <dt>etl_records_total{dataset,outcome}</dt><dd>written, duplicate, rejected, dlq</dd>
+        <dt>etl_dedup_dropped_total{reason}</dt><dd>replay, duplicate_response, duplicate_record</dd>
+        <dt>etl_consumer_lag_records{partition}</dt><dd>messages waiting per partition</dd>
+        <dt>etl_e2e_latency_seconds</dt><dd>poll to processed</dd>
+      </dl></div>
     </details>
-    <p class="note">Logs: slog JSON in UTC → <code>logs/&lt;service&gt;/etl.log</code> and stdout; each transformer replica writes its own file.</p>
   </section>
 
   <!-- ================= DECISIONS ================= -->
@@ -1117,7 +1350,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       kicker: "Every long-running service", title: "Observability", role: "Health, metrics and logs.",
       sections: [
         ["Endpoints on :8080", "<ul><li><code>/healthz</code>: alive.</li><li><code>/readyz</code>: dependencies answer within 2 s, else 503.</li><li><code>/metrics</code>: <code>etl_*</code> plus <code>go_*</code> and <code>process_*</code>.</li></ul>"],
-        ["Stack", "<p>Prometheus v3.15.0 with six alert rules, Grafana 13.2.3 with a provisioned dashboard.</p>"]
+        ["Stack", "<p>Prometheus v3.15.0 with nine alert rules, Grafana 13.2.3 with a provisioned dashboard.</p>"]
       ]
     },
     "b-raw": {
@@ -1367,6 +1600,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     for (var t = Math.ceil(a / step) * step; t <= b; t += step) {
       var x = L + (t - a) / span * (R - L);
       out += "<line x1=\"" + x + "\" y1=\"" + (axisY - 4) + "\" x2=\"" + x + "\" y2=\"" + (axisY + 4) + "\" stroke=\"currentColor\"></line>";
+      if (sc.marks.some(function (m) { return (m.lvl || 1) > 0 && Math.abs(X(m.at) - x) < 30; })) continue;
       labels += "<text class=\"tl-tick\" x=\"" + x + "\" y=\"" + (axisY + 20) + "\" text-anchor=\"middle\">" + fmt(t) + "</text>";
     }
     sc.ranges.forEach(function (r) {
@@ -1452,11 +1686,11 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
   /* ------------------------------------------------------------------ deduplication simulator */
   var STORED = { pos: "p0 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" };
   var DEDUP = [
-    { label: "Redelivery", inc: { pos: "p0 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Write", c: "var(--processed)", why: "The claim is this very record: write again, same bytes." },
-    { label: "Publisher replay", inc: { pos: "p0 · 1310 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · replay", c: "var(--muted)", why: "Same event_id at a new offset: the batch was republished." },
-    { label: "CDN repeat", inc: { pos: "p0 · 1202 · #0", event: "01a12544-2c98-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · duplicate_response", c: "var(--muted)", why: "Same content and idempotency_key: poll B got poll A's cached bytes." },
-    { label: "Other response", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "c71e…" }, verdict: "Drop · duplicate_record", c: "var(--muted)", why: "Same content from a different response." },
-    { label: "Other content", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "5b90…" }, verdict: "Reject · snapshot_conflict", c: "var(--rejected)", why: "Content differs: the first version stays, this one is rejected." }
+    { label: "Redelivery", inc: { pos: "p0 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Write", br: "own", rs: "", c: "var(--processed)", why: "The claim is this very record: write again, same bytes." },
+    { label: "Publisher replay", inc: { pos: "p0 · 1310 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · replay", br: "same", rs: "replay", c: "var(--muted)", why: "Same event_id at a new offset: the batch was republished." },
+    { label: "CDN repeat", inc: { pos: "p0 · 1202 · #0", event: "01a12544-2c98-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · duplicate_response", br: "same", rs: "duplicate_response", c: "var(--muted)", why: "Same content and idempotency_key: poll B got poll A's cached bytes." },
+    { label: "Other response", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "c71e…" }, verdict: "Drop · duplicate_record", br: "same", rs: "duplicate_record", c: "var(--muted)", why: "Same content from a different response." },
+    { label: "Other content", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "5b90…" }, verdict: "Reject · snapshot_conflict", br: "diff", rs: "", c: "var(--rejected)", why: "Content differs: the first version stays, this one is rejected." }
   ];
   var dedupTabs = $("#dedup-tabs");
   function cell(a, b) {
@@ -1466,6 +1700,10 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
   function showDedup(i) {
     var s = DEDUP[i], inc = s.inc;
     $all("button", dedupTabs).forEach(function (b, j) { b.setAttribute("aria-pressed", j === i ? "true" : "false"); });
+    var tree = $("#dedup-svg");
+    $all(".br, .res", tree).forEach(function (e) { e.classList.toggle("on", e.getAttribute("data-br") === s.br); });
+    $all(".rs", tree).forEach(function (e) { e.classList.toggle("on", e.getAttribute("data-rs") === s.rs); });
+    var onBr = $(".br.on", tree); if (onBr) tree.insertBefore(onBr, $(".res", tree));
     $("#dedup-view").innerHTML = "<div class=\"sim fade-in\">" +
       "<div class=\"cmp\"><div class=\"side\"><div class=\"eyebrow\" style=\"margin-bottom:8px\">Stored claim</div><dl>" +
       "<dt>position</dt><dd>" + STORED.pos + "</dd><dt>event_id</dt><dd>" + STORED.event + "</dd><dt>idempotency</dt><dd>" + STORED.idem + "</dd><dt>content</dt><dd>" + STORED.hash + "</dd></dl></div>" +
@@ -1498,30 +1736,37 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ crash explorer */
   var LC = [
-    { x: 20, w: 150, t: "Input checks", s: "no database" },
-    { x: 210, w: 190, t: "TX1", s: "plan · transform · claims" },
-    { x: 440, w: 150, t: "PUT objects", s: "If-None-Match: *" },
-    { x: 630, w: 130, t: "TX2", s: "status = written" },
-    { x: 800, w: 160, t: "Commit offset", s: "L+1, synchronous" }
+    { x: 20, w: 170, t: "Input checks", s: ["strict JSON · S1", "sha256 · S0", "no database"], exit: "any check fails → dlq/" },
+    { x: 230, w: 300, t: "TX1 · one transaction", s: ["a  manifest row: planned", "b  transform", "c  S2 check", "d  claims → decide", "e  objects + checksums"], exit: "S2 fails → dlq/, no claim" },
+    { x: 570, w: 170, t: "PUT objects", s: ["If-None-Match: *", "200 → done", "412 → compare sha256"], exit: "other bytes → halt partition" },
+    { x: 780, w: 120, t: "TX2", s: ["status =", "written"] },
+    { x: 940, w: 140, t: "Commit offset", s: ["L+1,", "synchronous"] }
   ];
   var CRASH = [
-    { x: 190, label: "C1", title: "Before TX1 commits", left: "Nothing durable yet.", rec: "The next owner starts a fresh batch.", naive: null },
-    { x: 420, label: "C2", title: "After TX1, before any PUT", left: "Batch planned; claims point at its offsets.", rec: "Same range, same decisions, same bytes: PUT 200.", naive: "Every key is already claimed, so all records are dropped. The batch is lost." },
-    { x: 515, label: "C3", title: "After some PUTs", left: "Some objects written; batch still planned.", rec: "Missing objects 200; written ones 412 with an equal checksum.", naive: "Claims exist, so every record is dropped; unwritten objects never appear." },
-    { x: 780, label: "C4", title: "After TX2, before the commit", left: "Batch written; offset not committed.", rec: "The next owner skips to 1204 and commits.", naive: null },
-    { x: 605, label: "Z", title: "Zombie and new owner", left: "A zombie lost the partition and has not noticed.", rec: "Both write identical bytes; the second PUT gets 412; the zombie's commit is rejected.", naive: "If the zombie dies after TX1, the new owner drops the whole range." }
+    { x: 210, label: "C1", title: "Before TX1 commits", left: "Nothing durable yet.", rec: "The next owner starts a fresh batch.", naive: null },
+    { x: 550, label: "C2", title: "After TX1, before any PUT", left: "Batch planned; claims point at its offsets.", rec: "Same range, same decisions, same bytes: PUT 200.", naive: "Every key is already claimed, so all records are dropped. The batch is lost." },
+    { x: 655, label: "C3", title: "After some PUTs", left: "Some objects written; batch still planned.", rec: "Missing objects 200; written ones 412 with an equal checksum.", naive: "Claims exist, so every record is dropped; unwritten objects never appear." },
+    { x: 920, label: "C4", title: "After TX2, before the commit", left: "Batch written; offset not committed.", rec: "The next owner skips to 1204 and commits.", naive: null },
+    { x: 840, label: "Z", title: "Zombie and new owner", left: "A zombie lost the partition and has not noticed.", rec: "Both write identical bytes; the second PUT gets 412; the zombie's commit is rejected.", naive: "If the zombie dies after TX1, the new owner drops the whole range." }
   ];
   var naive = false, crashSel = 1;
   function drawLC() {
-    var svg = $("#lc-svg"), out = "<defs><marker id=\"lc-arr\" viewBox=\"0 0 10 10\" refX=\"9\" refY=\"5\" markerWidth=\"7\" markerHeight=\"7\" orient=\"auto\"><path d=\"M0,0 L10,5 L0,10 z\" fill=\"currentColor\"></path></marker></defs>";
+    var svg = $("#lc-svg"), out = "", TOP = 56, H = 130, MID = TOP + 65;
     LC.forEach(function (s, i) {
-      out += "<g class=\"lc-step\" aria-hidden=\"true\"><rect x=\"" + s.x + "\" y=\"50\" width=\"" + s.w + "\" height=\"60\" rx=\"5\"></rect><text x=\"" + (s.x + 12) + "\" y=\"76\">" + s.t + "</text><text class=\"s2\" x=\"" + (s.x + 12) + "\" y=\"96\">" + s.s + "</text></g>";
-      if (i < LC.length - 1) out += "<path class=\"lc-arrow\" aria-hidden=\"true\" d=\"M" + (s.x + s.w) + " 80 H" + (LC[i + 1].x - 4) + "\" marker-end=\"url(#lc-arr)\" style=\"color: var(--muted)\"></path>";
+      out += "<g class=\"lc-step\" aria-hidden=\"true\"><rect x=\"" + s.x + "\" y=\"" + TOP + "\" width=\"" + s.w + "\" height=\"" + H + "\" rx=\"5\"></rect><text x=\"" + (s.x + 12) + "\" y=\"" + (TOP + 24) + "\">" + s.t + "</text>";
+      s.s.forEach(function (line, j) { out += "<text class=\"s2\" x=\"" + (s.x + 12) + "\" y=\"" + (TOP + 46 + j * 17) + "\" xml:space=\"preserve\">" + esc(line) + "</text>"; });
+      out += "</g>";
+      if (i < LC.length - 1) out += "<path class=\"lc-arrow\" aria-hidden=\"true\" d=\"M" + (s.x + s.w) + " " + MID + " H" + (LC[i + 1].x - 4) + "\" marker-end=\"url(#m-mu)\"></path>";
+      if (s.exit) {
+        var cx = s.x + s.w / 2, ew = 190;
+        out += "<path class=\"lc-arrow\" aria-hidden=\"true\" d=\"M" + cx + " " + (TOP + H) + " V" + (TOP + H + 20) + "\" marker-end=\"url(#m-d)\" style=\"stroke: var(--dlq)\"></path>";
+        out += "<g class=\"lc-exit\" aria-hidden=\"true\"><rect x=\"" + (cx - ew / 2) + "\" y=\"" + (TOP + H + 24) + "\" width=\"" + ew + "\" height=\"30\" rx=\"4\"></rect><text x=\"" + cx + "\" y=\"" + (TOP + H + 43) + "\" text-anchor=\"middle\">" + esc(s.exit) + "</text></g>";
+      }
     });
     CRASH.forEach(function (c, i) {
-      var z = c.label === "Z", y = z ? 150 : 24;
+      var z = c.label === "Z", y = z ? TOP + H + 39 : 24;
       out += "<g class=\"crash\" data-i=\"" + i + "\" tabindex=\"0\" role=\"button\" aria-pressed=\"false\" aria-label=\"Crash point " + c.label + ": " + esc(c.title) + "\">" +
-        "<line x1=\"" + c.x + "\" y1=\"" + (z ? 112 : 37) + "\" x2=\"" + c.x + "\" y2=\"" + (z ? 137 : 48) + "\" style=\"stroke: var(--dlq)\" stroke-dasharray=\"2 2\"></line>" +
+        "<line x1=\"" + c.x + "\" y1=\"" + (z ? TOP + H + 2 : 37) + "\" x2=\"" + c.x + "\" y2=\"" + (z ? y - 13 : TOP - 2) + "\" style=\"stroke: var(--dlq)\" stroke-dasharray=\"2 2\"></line>" +
         "<circle class=\"hit\" cx=\"" + c.x + "\" cy=\"" + y + "\" r=\"20\"></circle>" +
         "<circle class=\"dot\" cx=\"" + c.x + "\" cy=\"" + y + "\" r=\"13\"></circle><text x=\"" + c.x + "\" y=\"" + (y + 4) + "\" text-anchor=\"middle\">" + c.label + "</text></g>";
     });
