@@ -31,7 +31,7 @@ type Config struct {
 	CoinGeckoBaseURL    string        // ETL_COINGECKO_BASE_URL, default "https://api.coingecko.com/api/v3"
 	CoinGeckoAPIKey     string        // COINGECKO_API_KEY, optional
 	MarketsInterval     time.Duration // ETL_MARKETS_INTERVAL, default 30s
-	DetailInterval      time.Duration // ETL_DETAIL_INTERVAL, default 60s
+	DetailInterval      time.Duration // ETL_DETAIL_INTERVAL, default 30s
 	DetailOffset        time.Duration // ETL_DETAIL_OFFSET, default 15s
 	Watchlist           []string      // ETL_WATCHLIST, default "bitcoin,ethereum,tether,usd-coin"
 	MarketsPerPage      int           // ETL_MARKETS_PER_PAGE, default 100
@@ -68,7 +68,7 @@ func Load(service string) (Config, error) {
 		CoinGeckoBaseURL:    strings.TrimRight(p.str("ETL_COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3"), "/"),
 		CoinGeckoAPIKey:     p.str("COINGECKO_API_KEY", ""),
 		MarketsInterval:     p.duration("ETL_MARKETS_INTERVAL", 30*time.Second, false),
-		DetailInterval:      p.duration("ETL_DETAIL_INTERVAL", 60*time.Second, false),
+		DetailInterval:      p.duration("ETL_DETAIL_INTERVAL", 30*time.Second, false),
 		DetailOffset:        p.duration("ETL_DETAIL_OFFSET", 15*time.Second, true),
 		Watchlist:           p.list("ETL_WATCHLIST", "bitcoin,ethereum,tether,usd-coin"),
 		MarketsPerPage:      p.int("ETL_MARKETS_PER_PAGE", 100),

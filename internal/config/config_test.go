@@ -48,7 +48,7 @@ func TestLoadDefaults(t *testing.T) {
 		CoinGeckoBaseURL:    "https://api.coingecko.com/api/v3",
 		CoinGeckoAPIKey:     "",
 		MarketsInterval:     30 * time.Second,
-		DetailInterval:      60 * time.Second,
+		DetailInterval:      30 * time.Second,
 		DetailOffset:        15 * time.Second,
 		Watchlist:           []string{"bitcoin", "ethereum", "tether", "usd-coin"},
 		MarketsPerPage:      100,

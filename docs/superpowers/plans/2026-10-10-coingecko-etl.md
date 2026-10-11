@@ -25,7 +25,7 @@
 - Never hold a Postgres transaction across S3 or broker I/O.
 - Logs: `log/slog` JSON, UTC, written to stdout and to one file per replica: `logs/<service>/etl.log`, transformer replicas `logs/<container id>/transformer/etl.log`.
 - Every long-running service serves `/healthz`, `/readyz`, `/metrics` on `:8080`.
-- CoinGecko request budget: ~3 calls/min, one request in flight, honor `Retry-After`, skip ticks instead of queueing.
+- CoinGecko request budget: ~4 calls/min (markets at :00/:30, one coin at :15/:45), one request in flight, honor `Retry-After`, skip ticks instead of queueing.
 - Commit after every task with a message ending in `Co-Authored-By: Claude Opus 5.5 (1M context) <noreply@anthropic.com>`.
 
 ## Review Focus
@@ -114,7 +114,7 @@ type Config struct {
     CoinGeckoBaseURL   string        // ETL_COINGECKO_BASE_URL, default "https://api.coingecko.com/api/v3"
     CoinGeckoAPIKey    string        // COINGECKO_API_KEY, optional
     MarketsInterval    time.Duration // ETL_MARKETS_INTERVAL, default 30s
-    DetailInterval     time.Duration // ETL_DETAIL_INTERVAL, default 60s
+    DetailInterval     time.Duration // ETL_DETAIL_INTERVAL, default 30s
     DetailOffset       time.Duration // ETL_DETAIL_OFFSET, default 15s
     Watchlist          []string      // ETL_WATCHLIST, default "bitcoin,ethereum,tether,usd-coin"
     MarketsPerPage     int           // ETL_MARKETS_PER_PAGE, default 100

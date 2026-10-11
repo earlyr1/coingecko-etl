@@ -38,7 +38,7 @@
 ## 2. Architecture
 
 ```
-CoinGecko ──(markets every 30 s, /coins/{id} every 60 s: one coin per call, in turn)──▶ fetcher
+CoinGecko ──(markets every 30 s, /coins/{id} every 30 s: one coin per call, in turn)──▶ fetcher
                                                                   │ INSERT, one row per HTTP call
                                                                   ▼
                                           Postgres raw.api_calls (pre-dedup, includes failed calls)
@@ -121,6 +121,7 @@ The design needs a replayable log, per-key ordering within partitions, and consu
 | Schema distribution | Schemas embedded via `go:embed`; updates ship as redeploys; no schema registry |
 | Topic name | `coingecko.raw` without a version suffix: the version travels in every message (`schema_version`, `schema` header); breaking changes are handled in the same topic by dispatching on version |
 | Dedup content hash | Business fields only; excludes schema version and technical columns |
+| Polling cadence | 4 calls/min, 15 s apart: markets at :00 and :30 (the assignment's "every 30 s"), one coin at :15 and :45 in turn, so each coin every 2 min; all four coins every minute (6 calls/min) and markets every 60 s (breaks "every 30 s") were rejected |
 
 ## 3. Source: CoinGecko
 
@@ -129,13 +130,13 @@ The design needs a replayable log, per-key ordering within partitions, and consu
 | Endpoint | Schedule | Purpose |
 |---|---|---|
 | `GET /api/v3/coins/markets?vs_currency=usd&order=market_cap_desc&per_page=100&page=1&price_change_percentage=1h,24h,7d&sparkline=false&precision=full` | Every 30 s | Flat 30-second time series |
-| `GET /api/v3/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | Every 60 s, one coin per call, in turn: `bitcoin → ethereum → tether → usd-coin → bitcoin …`, so each coin is refreshed every 4 min; offset 15 s from the markets call | Deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, platforms by chain |
+| `GET /api/v3/coins/{id}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false&sparkline=false` | Every 30 s, between the markets calls (at :15 and :45), one coin per call, in turn: `bitcoin → ethereum → tether → usd-coin → bitcoin …`, so each coin is refreshed every 2 min | Deep nesting: 23 maps × 63 currencies, 100 tickers with nested objects, platforms by chain |
 
 ### 3.2 Observed source behaviour (2026-10-10)
 
 - CoinGecko recomputes all coins in one pass every 60 s and stamps them with the same `last_updated`. The CDN caches with `s-maxage=60`, so polling every 30 s yields ~50% byte-identical responses.
-- Keyless limit is dynamic, 10–30 calls/min per IP; HTTP 429 with `Retry-After: 60` was observed on the 6th call within 27 s. Budget: ~3 calls/min, one request in flight, honor `Retry-After`, exponential backoff with jitter on 5xx/timeouts, skip ticks rather than queueing them.
-- Optional `COINGECKO_API_KEY` sends `x-cg-demo-api-key` (Demo plan: 100 calls/min, 10k calls/month ≈ 2.3 days at 3 calls/min).
+- Keyless limit is dynamic, 10–30 calls/min per IP; HTTP 429 with `Retry-After: 60` was observed on the 6th call within 27 s. Budget: 4 calls/min, at least 15 s apart (markets at :00 and :30, a coin at :15 and :45), one request in flight, honor `Retry-After`, exponential backoff with jitter on 5xx/timeouts, skip ticks rather than queueing them.
+- Optional `COINGECKO_API_KEY` sends `x-cg-demo-api-key` (Demo plan: 100 calls/min, 10k calls/month ≈ 1.7 days at 4 calls/min).
 - `community_data` and `developer_data` stopped being returned on 2026-08-28; the source schema must tolerate drift.
 - Values exceed 2^53 (`market_data.market_cap.vnd`); "absent" is encoded as `null`, `""`, `[]` or a missing key; bitcoin has `platforms: {"": ""}`.
 - README must include the "Data provided by CoinGecko" attribution.

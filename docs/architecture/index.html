@@ -548,7 +548,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           <g class="node" data-id="fetcher" tabindex="0" role="button" aria-label="fetcher: open details">
             <rect class="box" x="240" y="66" width="140" height="68" rx="5"></rect>
             <text class="title" x="310" y="96" text-anchor="middle">fetcher</text>
-            <text class="sub" x="310" y="116" text-anchor="middle">every 30 s / 60 s</text>
+            <text class="sub" x="310" y="116" text-anchor="middle">a call every 15 s</text>
           </g>
           <g class="node pg" data-id="apicalls" tabindex="0" role="button" aria-label="Postgres raw.api_calls: open details">
             <rect class="box" x="450" y="56" width="300" height="88" rx="5"></rect>
@@ -691,7 +691,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
             </defs>
             <g aria-hidden="true">
               <g class="src"><rect x="20" y="20" width="250" height="44" rx="5"></rect><text x="36" y="47">GET /coins/markets · every 30 s</text></g>
-              <g class="src"><rect x="330" y="20" width="310" height="44" rx="5"></rect><text x="346" y="47">GET /coins/{id} · every 60 s, in turn</text></g>
+              <g class="src"><rect x="330" y="20" width="310" height="44" rx="5"></rect><text x="346" y="47">GET /coins/{id} · every 30 s, in turn</text></g>
               <path class="rel" d="M145 64 V112" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
               <path class="rel" d="M485 64 V112" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
               <path class="rel" d="M485 186 V214 H130 V244" marker-end="url(#dm-arr)" style="color: var(--muted)"></path>
@@ -729,7 +729,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           </svg>
         </div>
         <p class="scroll-hint">Scroll sideways to see every dataset.</p>
-        <figcaption>Children join the parent on <code>(coin_id, snapshot_at)</code>. <code>/coins/{id}</code> fetches one coin per call, in turn: bitcoin → ethereum → tether → usd-coin, so each coin's detail rows refresh every 4 min.</figcaption>
+        <figcaption>Children join the parent on <code>(coin_id, snapshot_at)</code>. <code>/coins/{id}</code> fetches one coin per call, in turn: bitcoin → ethereum → tether → usd-coin, so each coin's detail rows refresh every 2 min.</figcaption>
       </figure>
       <div class="panel" id="ds-panel"></div>
     </div>
@@ -1039,16 +1039,16 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     coingecko: {
       kicker: "External source", title: "CoinGecko API", role: "Market data source, polled without a key by default.",
       sections: [
-        ["Endpoints", "<ul><li><code>/coins/markets</code> every 30 s: top 100 in USD, <code>precision=full</code>.</li><li><code>/coins/{id}</code> every 60 s, one coin per call, in turn: bitcoin → ethereum → tether → usd-coin, so each coin is refreshed every 4 min. Deep nesting: 23 maps × 63 currencies, 100 tickers, contracts per chain.</li></ul>"],
+        ["Endpoints", "<ul><li><code>/coins/markets</code> every 30 s: top 100 in USD, <code>precision=full</code>.</li><li><code>/coins/{id}</code> every 30 s, between the markets calls (at :15 and :45), one coin per call, in turn: bitcoin → ethereum → tether → usd-coin, so each coin is refreshed every 2 min. Deep nesting: 23 maps × 63 currencies, 100 tickers, contracts per chain.</li></ul>"],
         ["Observed", "<ul><li>All coins recomputed in one pass every 60 s; a skipped coin keeps its old stamp.</li><li>CDN caches markets for 60 s (<code>/coins/{id}</code> 30 s): about half of 30-second polls are byte-identical.</li><li>Keyless limit 10–30 calls/min; a 429 with <code>Retry-After: 60</code> came on the 6th call in 27 s.</li><li>Values above 2<sup>53</sup>; a missing value comes as <code>null</code>, <code>\"\"</code>, <code>[]</code> or no key.</li></ul>"],
-        ["Budget", "<p>About 3 calls/min, one in flight. Optional <code>COINGECKO_API_KEY</code> (Demo: 100/min, 10,000/month).</p>"]
+        ["Budget", "<p>4 calls a minute, 15 s apart: markets at :00 and :30, a coin at :15 and :45; one in flight. Optional <code>COINGECKO_API_KEY</code> (Demo: 100/min, 10,000/month).</p>"]
       ],
       chips: ["Data provided by CoinGecko"]
     },
     fetcher: {
       kicker: "etl fetcher · 1 replica", title: "fetcher", role: "Transport only: poll, wrap in an event, insert one row per call.",
       sections: [
-        ["Schedule and limits", "<ul><li>Markets every 30 s; coin detail every 60 s at a 15 s offset, one coin per call in turn (each coin every 4 min).</li><li>One request in flight, ≥ 15 s between starts. 429 → cooldown of <code>Retry-After</code>, capped at 15 min; 5xx and timeouts → backoff 2 s × 2<sup>n−1</sup>, ≤ 60 s, with jitter. Ticks are skipped, never queued.</li></ul>"],
+        ["Schedule and limits", "<ul><li>Markets at :00 and :30; one coin at :15 and :45, in turn, so each coin every 2 min: 4 calls a minute.</li><li>One request in flight, ≥ 15 s between starts. 429 → cooldown of <code>Retry-After</code>, capped at 15 min; 5xx and timeouts → backoff 2 s × 2<sup>n−1</sup>, ≤ 60 s, with jitter. Ticks are skipped, never queued.</li></ul>"],
         ["Event (S1)", "<ul><li><code>event_id</code> UUIDv7, <code>fetched_at</code> UTC ms, <code>outcome</code> ok / http_error / network_error.</li><li><code>payload</code> verbatim, <code>payload_sha256</code>, <code>idempotency_key = sha256(source | endpoint | params | payload_sha256)</code>.</li><li>A 200 that is not strict JSON, or larger than 900 KiB (Redpanda's message limit is ~1 MiB), counts as <code>http_error</code>.</li><li>A body containing line breaks is stored compacted, so one call stays one JSONL line; others are stored byte for byte.</li></ul>"],
         ["No business logic", "<p>Only the S1 envelope is checked before the INSERT; a failure is our bug: not inserted, ERROR, metric. Payload checks live in the transformer.</p>"]
       ],
@@ -1595,6 +1595,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     { area: "Operations", topic: "DLQ", d: "a bucket, not a topic", why: "Two writers run before the broker; write-once naming keeps retries from duplicating entries.", alt: "A dlq topic: easy replay, but outside the batch manifest." },
     { area: "Operations", topic: "Logs", d: "one log file per replica", why: "No two containers append to the same file; each transformer replica gets its own.", alt: "One shared logs/etl.log: interleaved lines possible." },
     { area: "Data", topic: "Cleaning", d: "reject empty, flag questionable", why: "Nothing disappears silently; readers decide about stale rows.", alt: "Dropping questionable rows: stale coins vanish from the series." },
+    { area: "Data", topic: "Polling cadence", d: "4 calls a minute, 15 s apart", why: "Markets at :00 and :30 meets the assignment's 'every 30 s'; a coin at :15 and :45 refreshes each of the four coins every 2 min, far below the keyless limit (10 calls/min at worst).", alt: "All four coins every minute: 6 calls/min, too close to the limit. Markets every 60 s: breaks 'every 30 s'. One coin a minute: each coin only every 4 min." },
     { area: "Data", topic: "Numbers", d: "money as decimal strings", why: "Values pass 2^53 (bitcoin's VND market cap), where float64 stops holding every integer.", alt: "Plain JSON numbers: precision depends on the reader." }
   ];
   var AREAS = ["All", "Storage", "Data", "Delivery", "Platform", "Operations"];
