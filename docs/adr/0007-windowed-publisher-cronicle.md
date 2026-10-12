@@ -36,6 +36,7 @@ raw/source=coingecko/ingest_date=<YYYY-MM-DD>/window=<HHMM>/_SUCCESS
 
 - A window is ready when its `_SUCCESS` exists. A reader reads exactly the parts it lists and checks their sha256 and line counts (`rows`).
 - An empty window still gets `_SUCCESS` with `"rows":0,"parts":[]`, so a missing `_SUCCESS` always means the exporter is behind or down.
+- `_SUCCESS` plays the part of the marker a Spark job leaves in a finished partition, the key an Airflow `S3KeySensor` waits for. No Spark job writes this zone, so the exporter writes it. A daily batch could read a date range after a grace period. With 5-minute windows over a live table, commit lag is comparable to the window, so the exporter claims rows ([ADR 0005](0005-exporter-skip-locked-claim.md)) instead of trusting a time range.
 - A row that commits after its window closed goes into the next window. After downtime the missed windows are closed in order.
 - On an empty ledger the exporter starts at the window of the oldest unexported row. On a fresh stack that is the current window, so it closes the window before the current one at once (usually empty), and the first publish run finds a `_SUCCESS`. If the lake already holds the `_SUCCESS` of the first window, written by an earlier stack with the same `ETL_WINDOW`, the exporter starts at the next window and never overwrites it; a manifest of another window there (a lake of another size) stops the exporter.
 
