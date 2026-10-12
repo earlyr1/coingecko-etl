@@ -16,6 +16,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"encoding/json/jsontext"
 	"errors"
@@ -44,7 +45,6 @@ import (
 type Message struct {
 	Partition int32
 	Offset    int64
-	Key       []byte
 	Value     []byte
 	Headers   map[string]string
 }
@@ -123,8 +123,8 @@ const (
 	putBackoff  = 250 * time.Millisecond // doubles after every failed attempt
 )
 
-// rejectedRow is one line of a rejected/ object (schema pipeline/rejected_record.v1,
-// Task 3): the reject envelope, the lineage columns and the row itself.
+// rejectedRow is one line of a rejected/ object (schema pipeline/rejected_record.v1):
+// the reject envelope, the lineage columns and the row itself.
 type rejectedRow struct {
 	SchemaVersion int             `json:"schema_version"`
 	Dataset       string          `json:"dataset"`
@@ -140,7 +140,7 @@ type rejectedRow struct {
 }
 
 // dlqRow is one line of a dlq/ object written by the transformer (schema
-// pipeline/dlq_record.v1, Task 3; the exporter and publisher write the same shape).
+// pipeline/dlq_record.v1; the exporter and publisher write the same shape).
 type dlqRow struct {
 	SchemaVersion  int                    `json:"schema_version"`
 	Stage          string                 `json:"stage"`
@@ -203,7 +203,9 @@ type line struct {
 	data    []byte
 }
 
-type groupKey struct{ bucket, prefix string }
+// groupKey names one object of a batch: its bucket and, for processed and
+// rejected, its dataset (empty for dlq).
+type groupKey struct{ bucket, dataset string }
 
 // ProcessBatch runs the batch algorithm of spec §7.4:
 // input checks, TX1 (plan + transform + dedup + validate + build objects),
@@ -460,16 +462,15 @@ func planBatch(ctx context.Context, d Deps, b Batch) (*plan, error) {
 			continue
 		}
 		c.counts.Written[r.Dataset]++
-		c.add(groupKey{s3.BucketProcessed, fmt.Sprintf("dataset=%s/v=1/event_date=%s", r.Dataset, r.EventDate)}, cand.msg.Offset, r.Ordinal, cand.row)
+		c.add(groupKey{s3.BucketProcessed, r.Dataset}, cand.msg.Offset, r.Ordinal, cand.row)
 	}
 	if len(c.dlq) > 0 {
-		k := groupKey{s3.BucketDLQ, fmt.Sprintf("stage=%s/date=%s", dlqPathStage, xtime.FormatDate(rng.plannedAt))}
-		c.groups[k] = c.dlq
+		c.groups[groupKey{s3.BucketDLQ, ""}] = c.dlq
 	}
 	p.counts = c.counts
 
 	// 2e. Build deterministic objects and store keys + checksums on the manifest.
-	p.objects = buildObjects(c.groups, b.Topic, b.Partition, rng.first)
+	p.objects = buildObjects(c.groups, rng.plannedAt, b.TopicID, b.Partition, rng.first)
 	keys := make([]string, len(p.objects))
 	shas := make([][]byte, len(p.objects))
 	for i, o := range p.objects {
@@ -599,7 +600,7 @@ func (c *collector) toRejected(r transform.Record, lin transform.Lineage, row []
 	}
 	c.counts.Rejected[r.Dataset]++
 	c.counts.RejectReasons[r.Reason]++
-	c.add(groupKey{s3.BucketRejected, fmt.Sprintf("dataset=%s/event_date=%s", r.Dataset, r.EventDate)}, lin.Offset, r.Ordinal, data)
+	c.add(groupKey{s3.BucketRejected, r.Dataset}, lin.Offset, r.Ordinal, data)
 }
 
 // unwritable handles a rejected or dlq record that fails its own schema (S3):
@@ -693,8 +694,9 @@ func upTo(msgs []Message, last int64) []Message {
 
 // buildObjects serializes each group: rows ordered by offset then ordinal,
 // one JSON document per line, "\n" after every line. Objects are ordered by
-// bucket then key so the manifest arrays are deterministic.
-func buildObjects(groups map[groupKey][]line, topic string, partition int32, first int64) []object {
+// bucket then key so the manifest arrays are deterministic. Every object of a
+// batch is named by the batch's planned_at and position (objectKey).
+func buildObjects(groups map[groupKey][]line, plannedAt time.Time, topicID uuid.UUID, partition int32, first int64) []object {
 	out := make([]object, 0, len(groups))
 	for k, lines := range groups {
 		sort.SliceStable(lines, func(i, j int) bool {
@@ -709,7 +711,7 @@ func buildObjects(groups map[groupKey][]line, topic string, partition int32, fir
 			buf.WriteByte('\n')
 		}
 		body := buf.Bytes()
-		out = append(out, object{Bucket: k.bucket, Key: ObjectKey(k.bucket, k.prefix, topic, partition, first),
+		out = append(out, object{Bucket: k.bucket, Key: objectKey(k.bucket, k.dataset, plannedAt, topicID, partition, first),
 			Body: body, SHA256: sha256.Sum256(body)})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -721,20 +723,40 @@ func buildObjects(groups map[groupKey][]line, topic string, partition int32, fir
 	return out
 }
 
-// ObjectKey returns the key (relative to the bucket named by zone) of the
-// object a batch writes: <prefix>/<topic>+<partition>+<%020d first offset>.jsonl,
-// the Confluent S3 sink convention. prefix is the Hive-style directory part:
+// partTimeLayout renders a batch's planned_at in its object names.
+const partTimeLayout = "20060102T150405Z"
+
+// batchID8 is the first 8 hex chars of sha256("<topic_id>|<partition>|<first_offset>"):
+// the batch's position, short. A re-created topic has another topic_id.
+func batchID8(topicID uuid.UUID, partition int32, firstOffset int64) string {
+	sum := sha256.Sum256(fmt.Appendf(nil, "%s|%d|%d", topicID, partition, firstOffset))
+	return hex.EncodeToString(sum[:4])
+}
+
+// objectKey returns the key, relative to bucket zone, of the object a batch
+// writes:
 //
-//	processed: dataset=<dataset>/v=1/event_date=<YYYY-MM-DD>
-//	rejected:  dataset=<dataset>/event_date=<YYYY-MM-DD>
-//	dlq:       stage=<stage>/date=<YYYY-MM-DD>
+//	processed: dataset=<dataset>/v=1/processed_date=<YYYY-MM-DD>/hour=<HH>/part-<T>-<id8>.jsonl
+//	rejected:  dataset=<dataset>/processed_date=<YYYY-MM-DD>/hour=<HH>/part-<T>-<id8>.jsonl
+//	dlq:       stage=transform/processed_date=<YYYY-MM-DD>/hour=<HH>/part-<T>-<id8>.jsonl
 //
-// zone is the bucket (s3.BucketProcessed, s3.BucketRejected or s3.BucketDLQ);
-// it is not part of the key and is accepted so call sites name both halves of
-// the object address together. An empty zone or prefix panics: it is a bug.
-func ObjectKey(zone, prefix, topic string, partition int32, firstOffset int64) string {
-	if zone == "" || prefix == "" {
-		panic("transformer.ObjectKey: empty zone or prefix")
+// The date, hour and T come from the manifest planned_at in UTC (T truncated
+// to the second), id8 from batchID8. Names carry only processing time and the
+// batch id8, so a re-plan of the same batch yields the same key and the lake
+// does not depend on the lifetime of Postgres or the broker. Panics on a bug:
+// an unknown zone, an empty dataset for processed or rejected, a non-empty
+// dataset for dlq.
+func objectKey(zone, dataset string, plannedAt time.Time, topicID uuid.UUID, partition int32, firstOffset int64) string {
+	at := plannedAt.UTC()
+	tail := fmt.Sprintf("processed_date=%s/hour=%s/part-%s-%s.jsonl",
+		at.Format("2006-01-02"), at.Format("15"), at.Format(partTimeLayout), batchID8(topicID, partition, firstOffset))
+	switch {
+	case zone == s3.BucketProcessed && dataset != "":
+		return fmt.Sprintf("dataset=%s/v=%d/%s", dataset, processedSchemaVersion, tail)
+	case zone == s3.BucketRejected && dataset != "":
+		return fmt.Sprintf("dataset=%s/%s", dataset, tail)
+	case zone == s3.BucketDLQ && dataset == "":
+		return fmt.Sprintf("stage=%s/%s", dlqPathStage, tail)
 	}
-	return fmt.Sprintf("%s/%s+%d+%020d.jsonl", strings.Trim(prefix, "/"), topic, partition, firstOffset)
+	panic(fmt.Sprintf("transformer.objectKey: bad zone %q / dataset %q", zone, dataset))
 }

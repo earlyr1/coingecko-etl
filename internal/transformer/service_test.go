@@ -43,12 +43,13 @@ func TestRunEndToEnd(t *testing.T) {
 
 	evs := fixtureEvents(t)
 	var recs []*kgo.Record
-	// Message keys pick partitions. Production keys are "coins_markets" and the
-	// coin id; here some copies get other keys on purpose so that several
-	// partitions (and so both replicas) have work, and the CDN copy of the
-	// bitcoin response lands on another partition than the original: it must
-	// still be dropped, because dedup claims are global.
-	keys := []string{"coins_markets", "coins_markets", "bitcoin", "ethereum", "tether", "coins_markets"}
+	// Message keys pick partitions. Production keys are the event's
+	// idempotency_key, so byte-identical copies share a partition. Here keys
+	// are chosen by hand so several partitions (and both replicas) have work,
+	// and the CDN copy of the bitcoin response lands on another partition than
+	// the original: it must still be dropped, because dedup claims are global.
+	// franz-go's murmur2 over 6 partitions sends k1 to 5, k2 to 3, k3 and k4 to 4.
+	keys := []string{"k1", "k1", "k2", "k3", "k4", "k1"}
 	for i, ev := range append(evs, evs[0]) { // the last one is a publisher replay of markets t0
 		v, err := event.Marshal(ev)
 		if err != nil {
@@ -162,7 +163,7 @@ func TestRunEndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rec := &kgo.Record{Topic: topic, Key: []byte("coins_markets"), Value: v, Headers: []kgo.RecordHeader{
+	rec := &kgo.Record{Topic: topic, Key: []byte(*extra.IdempotencyKey), Value: v, Headers: []kgo.RecordHeader{
 		{Key: queue.HeaderEventID, Value: []byte(extra.EventID)},
 		{Key: queue.HeaderRawObject, Value: []byte("source=coingecko/ingest_date=2026-10-10/window=1000/part-00002.jsonl")},
 	}}
@@ -266,7 +267,7 @@ func newTopic(t *testing.T, cl *kgo.Client, topic string, evs []event.RawEvent) 
 		for k, v := range m.Headers {
 			hs = append(hs, kgo.RecordHeader{Key: k, Value: []byte(v)})
 		}
-		recs = append(recs, &kgo.Record{Topic: topic, Key: m.Key, Value: m.Value, Headers: hs})
+		recs = append(recs, &kgo.Record{Topic: topic, Value: m.Value, Headers: hs})
 	}
 	if err := cl.ProduceSync(ctx, recs...).FirstErr(); err != nil {
 		t.Fatal(err)
@@ -480,14 +481,13 @@ func TestRunHaltsPartitionOnChecksumMismatch(t *testing.T) {
 	if _, err := adm.CreateTopic(ctx, 2, 1, nil, topic); err != nil {
 		t.Fatal(err)
 	}
-	produce := func(p int32, ev event.RawEvent) {
+	produce := func(m Message) {
 		t.Helper()
-		m := message(t, p, 0, ev)
 		var hs []kgo.RecordHeader
 		for k, v := range m.Headers {
 			hs = append(hs, kgo.RecordHeader{Key: k, Value: []byte(v)})
 		}
-		if err := cl.ProduceSync(ctx, &kgo.Record{Topic: topic, Partition: p, Key: m.Key, Value: m.Value, Headers: hs}).FirstErr(); err != nil {
+		if err := cl.ProduceSync(ctx, &kgo.Record{Topic: topic, Partition: m.Partition, Value: m.Value, Headers: hs}).FirstErr(); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -507,11 +507,33 @@ func TestRunHaltsPartitionOnChecksumMismatch(t *testing.T) {
 		return func() bool { v, ok := lagSeries(t, e.reg, p); return ok && v == want }
 	}
 
+	// Partition 0 gets markets t0. Its batch is planned here, before Run
+	// starts, so the processed object's key (which carries the manifest
+	// planned_at) is known; that object is then pre-filled with other bytes.
+	// Run adopts the planned range and its PUT of that object mismatches.
 	evs := fixtureEvents(t)
-	produce(0, evs[0]) // markets t0: its first object is the market_snapshot one
-	produce(1, evs[2]) // bitcoin detail t0
-	key := ObjectKey(s3.BucketProcessed, "dataset=market_snapshot/v=1/event_date=2026-10-10", topic, 0, 0)
-	if _, err := e.deps.S3.PutIfAbsent(ctx, s3.BucketProcessed, key, []byte("{}\n")); err != nil {
+	m := message(t, 0, 0, evs[0])
+	produce(m)
+	produce(message(t, 1, 0, evs[2])) // bitcoin detail t0
+	id, err := queue.TopicID(ctx, cl, topic, uuid.MustParse(testEpoch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := planBatch(ctx, e.deps, Batch{TopicID: id, Topic: topic, Partition: 0, Messages: []Message{m}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var o *object
+	for i := range p.objects {
+		if p.objects[i].Bucket == s3.BucketProcessed {
+			o = &p.objects[i]
+			break
+		}
+	}
+	if o == nil {
+		t.Fatal("the planned batch has no processed object")
+	}
+	if _, err := e.deps.S3.PutIfAbsent(ctx, o.Bucket, o.Key, []byte("{}\n")); err != nil {
 		t.Fatal(err)
 	}
 
@@ -544,9 +566,9 @@ func TestRunHaltsPartitionOnChecksumMismatch(t *testing.T) {
 
 	// The halted partition is not fetched again: more records only raise its
 	// lag. The other partition keeps going.
-	produce(0, evs[1])
-	produce(0, evs[4])
-	produce(1, evs[3])
+	produce(message(t, 0, 1, evs[1]))
+	produce(message(t, 0, 2, evs[4]))
+	produce(message(t, 1, 1, evs[3]))
 	if !waitFor(60*time.Second, func() bool { return committed(1) == 2 }) {
 		t.Fatalf("partition 1 committed %d, want 2", committed(1))
 	}

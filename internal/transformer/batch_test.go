@@ -563,12 +563,121 @@ func TestProcessBatch(t *testing.T) {
 		if claims == 0 {
 			t.Fatal("no claims stored for 2026-08-01")
 		}
+		// Object names carry processing time only: the snapshot's 2026-08-01
+		// date is a column of the row, never a directory.
+		var plannedAt time.Time
+		if err := d.Pool.QueryRow(ctx, `SELECT planned_at FROM pipeline.consumer_batches WHERE topic_id=$1`, b.TopicID).Scan(&plannedAt); err != nil {
+			t.Fatal(err)
+		}
+		prefix := s3.BucketProcessed + "/dataset=market_snapshot/v=1/processed_date=" + xtime.FormatDate(plannedAt) + "/hour=" + plannedAt.UTC().Format("15") + "/"
 		found := false
-		for k := range e.objects(t, b.TopicID, 0, 100) {
-			found = found || (strings.HasPrefix(k, s3.BucketProcessed+"/") && strings.Contains(k, "/event_date=2026-08-01/"))
+		for k, body := range e.objects(t, b.TopicID, 0, 100) {
+			if strings.Contains(k, "event_date=") {
+				t.Errorf("object key %s contains event_date=", k)
+			}
+			found = found || (strings.HasPrefix(k, prefix) && bytes.Contains(body, []byte(`"snapshot_at":"2026-08-01T`)))
 		}
 		if !found {
-			t.Fatal("no processed object under event_date=2026-08-01")
+			t.Fatalf("no processed object under %s holding the 2026-08-01 snapshot", prefix)
+		}
+	})
+
+	// Object names come from the manifest planned_at (UTC, truncated to the
+	// second), never from the clock: a batch planned earlier (here by hand)
+	// keeps that time on every re-plan. TestMain runs the package at +05:30,
+	// so pgx returns planned_at as 16:29:59.999 local; the keys must still
+	// read processed_date=2026-10-10/hour=10.
+	t.Run("object keys come from the manifest planned_at, not the clock", func(t *testing.T) {
+		if _, off := time.Now().Zone(); off != 5*3600+30*60 {
+			t.Fatalf("local zone offset = %d s, want 19800 (+05:30, set by TestMain)", off)
+		}
+		e.reset(t)
+		b := batchOf(t, "test.plannedat", fixtureEvents(t))
+		plannedAt := time.Date(2026, 10, 10, 10, 59, 59, 999_000_000, time.UTC)
+		if _, err := d.Pool.Exec(ctx, `INSERT INTO pipeline.consumer_batches (topic_id, kafka_partition, first_offset, last_offset, planned_at)
+			VALUES ($1, 0, 100, 104, '2026-10-10T10:59:59.999Z')`, b.TopicID); err != nil {
+			t.Fatal(err)
+		}
+		p1, err := planBatch(ctx, d, b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p2, err := planBatch(ctx, d, b)
+		if err != nil {
+			t.Fatalf("re-plan: %v", err)
+		}
+		if len(p1.objects) == 0 || len(p1.objects) != len(p2.objects) {
+			t.Fatalf("plans built %d and %d objects", len(p1.objects), len(p2.objects))
+		}
+		for i := range p1.objects {
+			if p1.objects[i].Key != p2.objects[i].Key || !bytes.Equal(p1.objects[i].Body, p2.objects[i].Body) {
+				t.Fatalf("re-plan object %d differs: %s vs %s", i, p1.objects[i].Key, p2.objects[i].Key)
+			}
+		}
+		if res, err := ProcessBatch(ctx, d, b); err != nil || !res.Written {
+			t.Fatalf("ProcessBatch = %+v, %v", res, err)
+		}
+		objs := e.objects(t, b.TopicID, 0, 100)
+		if len(objs) != len(p1.objects) {
+			t.Fatalf("written %d objects, planned %d", len(objs), len(p1.objects))
+		}
+		tail := "/processed_date=2026-10-10/hour=10/part-20261010T105959Z-" + batchID8(b.TopicID, 0, 100) + ".jsonl"
+		processed := map[string]int{}
+		for k := range objs {
+			bucket, key, _ := strings.Cut(k, "/")
+			ds := ""
+			if bucket != s3.BucketDLQ {
+				ds = strings.TrimPrefix(strings.SplitN(key, "/", 2)[0], "dataset=")
+			}
+			if want := objectKey(bucket, ds, plannedAt, b.TopicID, 0, 100); key != want {
+				t.Errorf("%s: key %s, want %s", bucket, key, want)
+			}
+			if !strings.HasSuffix(key, tail) {
+				t.Errorf("%s does not end with %s", k, tail)
+			}
+			if bucket == s3.BucketProcessed {
+				processed[ds]++
+			}
+		}
+		if len(processed) == 0 {
+			t.Fatal("no processed object written")
+		}
+		for ds, n := range processed {
+			if n != 1 {
+				t.Errorf("dataset %s has %d processed objects, want 1", ds, n)
+			}
+		}
+	})
+
+	// A re-created topic (or a fresh Postgres next to a kept lake) starts its
+	// offsets again, but its topic id differs, so the batch id8 and every
+	// object name differ: the new objects never meet the old ones.
+	t.Run("a re-created topic writes new keys over a kept lake", func(t *testing.T) {
+		e.reset(t)
+		first := batchOf(t, "test.recreated", fixtureEvents(t))
+		mismatches := func() float64 { return promtest.ToFloat64(d.Metrics.S3Puts.WithLabelValues("mismatch")) }
+		before := mismatches()
+		if _, err := ProcessBatch(ctx, d, first); err != nil {
+			t.Fatalf("first topic: %v", err)
+		}
+		old := e.objects(t, first.TopicID, 0, 100)
+		e.reset(t) // fresh Postgres state; the lake is kept
+		again := first
+		again.TopicID = uuid.New()
+		if _, err := ProcessBatch(ctx, d, again); err != nil {
+			t.Fatalf("re-created topic: %v", err)
+		}
+		fresh := e.objects(t, again.TopicID, 0, 100)
+		if len(fresh) == 0 {
+			t.Fatal("the re-created topic wrote no object")
+		}
+		for k := range fresh {
+			if _, ok := old[k]; ok {
+				t.Errorf("both topics wrote %s", k)
+			}
+		}
+		if n := mismatches() - before; n != 0 {
+			t.Errorf("s3_put_total{mismatch} grew by %v, want 0", n)
 		}
 	})
 }

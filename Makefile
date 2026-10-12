@@ -50,9 +50,8 @@ down:
 	$(COMPOSE) down
 
 # Wipes everything: the containers, the named volumes (Postgres, Redpanda,
-# Prometheus, Grafana), the lake and the logs. The lake (./data, ./.s3meta)
-# and the Postgres/Redpanda volumes are reset together because object keys
-# are unique only within one Postgres/Redpanda lifetime.
+# Prometheus, Grafana), the lake and the logs. Object names carry only time
+# (windows, planned_at), so the lake may also be kept when the stack is re-created.
 clean:
 	$(COMPOSE) down -v && rm -rf data logs .s3meta
 

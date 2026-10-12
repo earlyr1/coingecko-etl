@@ -297,7 +297,7 @@ func toMessage(rec *kgo.Record) Message {
 	for _, kv := range rec.Headers {
 		h[kv.Key] = string(kv.Value)
 	}
-	return Message{Partition: rec.Partition, Offset: rec.Offset, Key: rec.Key, Value: rec.Value, Headers: h}
+	return Message{Partition: rec.Partition, Offset: rec.Offset, Value: rec.Value, Headers: h}
 }
 
 // seek moves the fetch position of one partition. Only called between

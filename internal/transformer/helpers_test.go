@@ -69,8 +69,7 @@ func message(t *testing.T, partition int32, offset int64, ev event.RawEvent) Mes
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := "test-key" // routing is not under test here
-	return Message{Partition: partition, Offset: offset, Key: []byte(key), Value: v, Headers: map[string]string{
+	return Message{Partition: partition, Offset: offset, Value: v, Headers: map[string]string{
 		queue.HeaderEventID:   ev.EventID,
 		queue.HeaderRawObject: "source=coingecko/ingest_date=2026-10-10/window=1000/part-00001.jsonl",
 	}}
