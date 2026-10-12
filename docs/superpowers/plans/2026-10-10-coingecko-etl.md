@@ -1,5 +1,7 @@
 # CoinGecko ETL Implementation Plan
 
+> Historical build log of the first version. The current design is the [spec](../specs/2026-10-10-coingecko-etl-design.md) and ADRs [0005](../../adr/0005-exporter-skip-locked-claim.md), [0007](../../adr/0007-windowed-publisher-cronicle.md) and [0008](../../adr/0008-processing-time-object-names.md); the refactor is [2026-10-12-pipeline-refactor.md](2026-10-12-pipeline-refactor.md).
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Build a Go ETL pipeline that polls CoinGecko, stores raw API calls in Postgres, exports them as raw JSONL to an S3-compatible lake, streams them through Redpanda, and writes cleaned, deduplicated, normalized JSONL to the processed zone with exactly-once content.

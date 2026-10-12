@@ -14,10 +14,14 @@ Options considered:
 
 ## Decision
 
-Dead-letter records go to `s3://dlq` (`./data/dlq`), one shape for every stage (`pipeline/dlq_record.v1.json`: stage, error class, violations, origin, original bytes, occurred at). Transformer dlq objects are part of the batch manifest and named like processed objects, after topic, partition and the first offset of the batch (`stage=transform/date=…/coingecko.raw+<partition>+<offset>.jsonl`); the exporter and publisher name theirs `export+batch+<batch id>` and `publish+batch+<batch id>`.
+Dead-letter records go to `s3://dlq` (`./data/dlq`), one shape for every stage (`pipeline/dlq_record.v1.json`: stage, error class, violations, origin, original bytes, occurred at). Keys are deterministic, so a retry writes the same key:
+
+- transformer: `dlq/stage=transform/processed_date=<d>/hour=<HH>/part-<planned_at>-<id8>.jsonl`, named like the batch's processed objects ([ADR 0008](0008-processing-time-object-names.md)) and listed in the batch manifest;
+- exporter: `dlq/stage=export/ingest_date=<d>/window=<HHMM>/part-<NNNNN>.jsonl`, with the index of the raw part whose rows failed;
+- publisher: `dlq/stage=publish/ingest_date=<d>/window=<HHMM>/part-00000.jsonl`, one object per window with deterministic content.
 
 ## Consequences
 
 - A retried stage writes the same key and gets 412 with an equal checksum, so retries never duplicate entries.
-- `ETLDeadLetterRecords` fires on any new dlq record.
-- Recovery is a replay: after a fix, the raw objects are republished and reprocessed; a row that went to `dlq/` never claimed its dedup key, so the republished copy is written.
+- `ETLDeadLetterRecords` fires on any new dlq record; for the publish job it reads the DLQ line count the last successful run pushed to the Pushgateway.
+- Recovery of publish and transform failures is a replay: after a fix, the window is rerun (Cronicle or `etl publish --now`) and reprocessed, within the claims retention ([ADR 0002](0002-single-dedup-in-transformer.md)); a record that went to `dlq/` never claimed its dedup key, so the republished copy is written. A row the exporter sent to `dlq/` is in no raw part (it stays in `raw.api_calls`, and its bytes are in the DLQ record), so replaying it is a manual step.

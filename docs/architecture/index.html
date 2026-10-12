@@ -223,6 +223,8 @@ svg text { font-family: var(--font-body); fill: var(--ink); }
 .legend { display: flex; flex-wrap: wrap; gap: 8px 14px; font-size: var(--fs-sm); color: var(--muted); align-items: center; }
 .legend .swatch { display: inline-block; width: 22px; height: 0; border-top: 2px solid var(--muted); vertical-align: middle; margin-right: 6px; }
 .legend .swatch.dash { border-top: 2px dashed var(--state); }
+.legend .swatch.dot { border-top: 2px dotted var(--muted); }
+.pipe .edge.sched { stroke-dasharray: 2 4; }
 .comp { display: flex; flex-wrap: wrap; gap: 6px; }
 .comp button {
   cursor: pointer; font-size: var(--fs-sm); padding: 4px 10px 4px 12px; border-radius: 4px;
@@ -449,9 +451,9 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
   <header class="top">
     <div class="eyebrow">Trust Wallet take-home</div>
     <h1>CoinGecko ETL</h1>
-    <p class="lede">Polls CoinGecko every 30 s, keeps every call in Postgres, streams it through an S3 lake and Redpanda, and writes each cleaned record to processed exactly once.</p>
+    <p class="lede">Polls CoinGecko every 30 s, keeps every call in Postgres, exports it in 5-minute windows to an S3 lake, publishes each window to Redpanda on a schedule, and writes each cleaned record to processed exactly once.</p>
     <div class="facts" role="group" aria-label="Key facts">
-      <div class="fact"><b>1 binary</b>5 Go services</div>
+      <div class="fact"><b>1 binary</b>3 services, 3 jobs</div>
       <div class="fact"><b>4 zones</b>plain files</div>
       <div class="fact"><b>1 dedup step</b>in the transformer</div>
       <div class="fact"><b>~1.2 GB</b>RAM, 12 containers</div>
@@ -496,6 +498,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       <div class="legend" aria-hidden="true">
         <span><span class="swatch"></span>data</span>
         <span><span class="swatch dash"></span>state in Postgres</span>
+        <span><span class="swatch dot"></span>scheduled job</span>
         <span class="pill processed">processed</span>
         <span class="pill rejected">rejected</span>
         <span class="pill dlq">dlq</span>
@@ -505,7 +508,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     </div>
     <figure>
       <div class="diagram-wrap">
-        <svg id="pipe" class="pipe" viewBox="0 0 1200 676" role="group" aria-label="Pipeline diagram. CoinGecko is polled by the fetcher, which inserts every call into Postgres raw.api_calls. The exporter writes raw JSONL objects to the raw bucket. The publisher reads them and produces to the Redpanda topic coingecko.raw. Two transformer replicas consume, deduplicate with claims in Postgres, and write to the processed, rejected and dlq buckets.">
+        <svg id="pipe" class="pipe" viewBox="0 0 1200 676" role="group" aria-label="Pipeline diagram. CoinGecko is polled by the fetcher, which inserts every call into Postgres raw.api_calls. The exporter claims rows with FOR UPDATE SKIP LOCKED and closes 5-minute windows in the raw bucket: JSONL parts, then a _SUCCESS manifest. Cronicle runs the publish job one minute after every window end; it reads the parts listed in _SUCCESS and produces them to the Redpanda topic coingecko.raw, keyed by idempotency_key. Cronicle also runs the daily maintenance jobs on the Postgres pipeline tables. Two transformer replicas consume, deduplicate with claims in Postgres, and write to the processed, rejected and dlq buckets. The jobs push their results to a Pushgateway.">
           <defs>
             <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
               <path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path>
@@ -523,14 +526,14 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
               <path d="M0,0 L10,5 L0,10 z" style="fill: var(--dlq)"></path>
             </marker>
             <path id="flow-ingest" d="M180 100 H446"></path>
-            <path id="flow-export" d="M750 100 H1040 V496"></path>
-            <path id="flow-stream" d="M900 498 V332 H394"></path>
+            <path id="flow-export" d="M750 100 H1155 V496"></path>
+            <path id="flow-stream" d="M920 498 V332 H394"></path>
             <path id="flow-processed" d="M300 380 V426 H180 V496"></path>
             <path id="flow-rejected" d="M320 380 V436 H410 V496"></path>
             <path id="flow-dlq" d="M340 380 V446 H600 V496"></path>
           </defs>
 
-          <rect class="lake-band" x="30" y="456" width="1140" height="162" rx="6"></rect>
+          <rect class="lake-band" x="30" y="456" width="1150" height="162" rx="6"></rect>
           <text class="lake-title" x="46" y="609" aria-hidden="true">versitygw · S3 API over ./data · plain files on disk</text>
 
           <g aria-hidden="true">
@@ -539,14 +542,15 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
             <path class="edge" d="M380 100 H446" marker-end="url(#arr)" data-a="fetcher" data-b="apicalls"></path>
             <text class="elabel" x="413" y="88" text-anchor="middle">INSERT</text>
             <path class="edge" d="M750 100 H826" marker-end="url(#arr)" data-a="apicalls" data-b="exporter"></path>
-            <text class="elabel" x="788" y="88" text-anchor="middle">xid8 cursor</text>
-            <path class="edge" d="M970 100 H1040 V496" marker-end="url(#arr)" data-a="exporter" data-b="b-raw"></path>
-            <text class="elabel" x="1050" y="286">PUT</text>
-            <text class="elabel" x="1050" y="301">If-None-Match: *</text>
-            <path class="edge" d="M900 498 V368" marker-end="url(#arr)" data-a="b-raw" data-b="publisher"></path>
-            <text class="elabel" x="908" y="440">GET object</text>
-            <path class="edge" d="M830 332 H754" marker-end="url(#arr)" data-a="publisher" data-b="redpanda"></path>
-            <text class="elabel" x="792" y="320" text-anchor="middle">produce</text>
+            <text class="elabel" x="788" y="88" text-anchor="middle">SKIP LOCKED</text>
+            <path class="edge" d="M970 100 H1155 V496" marker-end="url(#arr)" data-a="exporter" data-b="b-raw"></path>
+            <text class="elabel" x="1147" y="392" text-anchor="end">parts, then _SUCCESS</text>
+            <text class="elabel" x="1147" y="407" text-anchor="end">PUT If-None-Match: *</text>
+            <path class="edge" d="M920 498 V376" marker-end="url(#arr)" data-a="b-raw" data-b="publisher"></path>
+            <text class="elabel" x="928" y="440">_SUCCESS, then parts</text>
+            <path class="edge" d="M850 332 H704" marker-end="url(#arr)" data-a="publisher" data-b="redpanda"></path>
+            <text class="elabel" x="775" y="320" text-anchor="middle">produce</text>
+            <text class="elabel" x="775" y="350" text-anchor="middle">key = idempotency_key</text>
             <path class="edge" d="M450 332 H394" marker-end="url(#arr)" data-a="redpanda" data-b="transformer"></path>
             <text class="elabel" x="422" y="320" text-anchor="middle">consume</text>
             <path class="edge to-processed" d="M300 380 V426 H180 V496" marker-end="url(#arr-p)" data-a="transformer" data-b="b-processed"></path>
@@ -555,8 +559,9 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
             <text class="elabel" x="440" y="430">PUT write-once</text>
             <path class="edge state" d="M900 134 V192" marker-end="url(#arr-state)" data-a="exporter" data-b="state"></path>
             <text class="elabel" x="910" y="168">claim · mark</text>
-            <path class="edge state" d="M900 296 V240" marker-end="url(#arr-state)" data-a="publisher" data-b="state"></path>
-            <text class="elabel" x="910" y="272">lease</text>
+            <path class="edge state" d="M990 216 H974" marker-end="url(#arr-state)" data-a="cronicle" data-b="state"></path>
+            <path class="edge sched" d="M1030 262 V330 H994" marker-end="url(#arr)" data-a="cronicle" data-b="publisher"></path>
+            <text class="elabel" x="1038" y="304">runs</text>
             <path class="edge state" d="M315 296 V240" marker-end="url(#arr-state)" data-a="transformer" data-b="state"></path>
             <text class="elabel" x="325" y="272">TX1 · TX2</text>
           </g>
@@ -600,12 +605,18 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           <g class="node" data-id="exporter" tabindex="0" role="button" aria-label="exporter: open details">
             <rect class="box" x="830" y="66" width="140" height="68" rx="5"></rect>
             <text class="title" x="900" y="96" text-anchor="middle">exporter</text>
-            <text class="sub" x="900" y="116" text-anchor="middle">batch every 15 s</text>
+            <text class="sub" x="900" y="116" text-anchor="middle">5-min windows</text>
+          </g>
+          <g class="node" data-id="cronicle" tabindex="0" role="button" aria-label="Cronicle scheduler: open details">
+            <rect class="box" x="990" y="186" width="150" height="76" rx="5"></rect>
+            <text class="title" x="1065" y="212" text-anchor="middle">Cronicle</text>
+            <text class="sub" x="1065" y="232" text-anchor="middle">publish every 5 min</text>
+            <text class="sub" x="1065" y="248" text-anchor="middle">maintenance daily</text>
           </g>
           <g class="node pg" data-id="state" tabindex="0" role="button" aria-label="Postgres pipeline state tables: open details">
             <rect class="box" x="240" y="196" width="730" height="40" rx="5"></rect>
             <text class="title" x="258" y="221">Postgres · pipeline.*</text>
-            <text class="sub" x="430" y="221">export_batches · dedup_claims · consumer_batches</text>
+            <text class="sub" x="430" y="221">export_windows · export_batches · dedup_claims · consumer_batches</text>
           </g>
           <g class="node ext" data-id="init" tabindex="0" role="button" aria-label="etl init: open details">
             <rect class="box" x="30" y="296" width="150" height="84" rx="5"></rect>
@@ -617,25 +628,26 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
             <rect class="box" x="246" y="302" width="150" height="84" rx="5" opacity="0.6"></rect>
             <rect class="box" x="240" y="296" width="150" height="84" rx="5"></rect>
             <text class="title" x="315" y="326" text-anchor="middle">transformer ×2</text>
-            <text class="sub" x="315" y="346" text-anchor="middle">validate · clean</text>
-            <text class="sub" x="315" y="362" text-anchor="middle">dedup · normalize</text>
+            <text class="sub" x="315" y="346" text-anchor="middle">check · transform</text>
+            <text class="sub" x="315" y="362" text-anchor="middle">validate · dedup</text>
           </g>
           <g class="node" data-id="redpanda" tabindex="0" role="button" aria-label="Redpanda topic coingecko.raw: open details">
-            <rect class="box" x="450" y="290" width="300" height="96" rx="5"></rect>
+            <rect class="box" x="450" y="290" width="250" height="96" rx="5"></rect>
             <text class="title" x="466" y="310">Redpanda · coingecko.raw</text>
             <g aria-hidden="true">
-              <line class="part" x1="494" y1="324" x2="736" y2="324"></line><text class="plabel" x="470" y="327">p0</text>
-              <line class="part" x1="494" y1="334" x2="736" y2="334"></line><text class="plabel" x="470" y="337">p1</text>
-              <line class="part" x1="494" y1="344" x2="736" y2="344"></line><text class="plabel" x="470" y="347">p2</text>
-              <line class="part" x1="494" y1="354" x2="736" y2="354"></line><text class="plabel" x="470" y="357">p3</text>
-              <line class="part" x1="494" y1="364" x2="736" y2="364"></line><text class="plabel" x="470" y="367">p4</text>
-              <line class="part" x1="494" y1="374" x2="736" y2="374"></line><text class="plabel" x="470" y="377">p5</text>
+              <line class="part" x1="494" y1="324" x2="686" y2="324"></line><text class="plabel" x="470" y="327">p0</text>
+              <line class="part" x1="494" y1="334" x2="686" y2="334"></line><text class="plabel" x="470" y="337">p1</text>
+              <line class="part" x1="494" y1="344" x2="686" y2="344"></line><text class="plabel" x="470" y="347">p2</text>
+              <line class="part" x1="494" y1="354" x2="686" y2="354"></line><text class="plabel" x="470" y="357">p3</text>
+              <line class="part" x1="494" y1="364" x2="686" y2="364"></line><text class="plabel" x="470" y="367">p4</text>
+              <line class="part" x1="494" y1="374" x2="686" y2="374"></line><text class="plabel" x="470" y="377">p5</text>
             </g>
           </g>
-          <g class="node" data-id="publisher" tabindex="0" role="button" aria-label="publisher: open details">
-            <rect class="box" x="830" y="296" width="140" height="68" rx="5"></rect>
-            <text class="title" x="900" y="326" text-anchor="middle">publisher</text>
-            <text class="sub" x="900" y="346" text-anchor="middle">1 line → 1 message</text>
+          <g class="node" data-id="publisher" tabindex="0" role="button" aria-label="publisher, the etl publish job: open details">
+            <rect class="box" x="850" y="296" width="140" height="76" rx="5"></rect>
+            <text class="title" x="920" y="322" text-anchor="middle">publisher</text>
+            <text class="sub" x="920" y="342" text-anchor="middle">etl publish · job</text>
+            <text class="sub" x="920" y="358" text-anchor="middle">window → messages</text>
           </g>
           <g class="node" data-id="b-processed" tabindex="0" role="button" aria-label="processed bucket: open details">
             <rect class="box" x="60" y="500" width="240" height="88" rx="5"></rect>
@@ -659,20 +671,24 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
             <text class="sub" x="536" y="568">bad records · alert</text>
           </g>
           <g class="node" data-id="b-raw" tabindex="0" role="button" aria-label="raw bucket: open details">
-            <rect class="box" x="830" y="500" width="310" height="88" rx="5"></rect>
-            <rect class="stripe" x="830" y="500" width="310" height="5" rx="2" style="fill: var(--raw)"></rect>
+            <rect class="box" x="830" y="500" width="340" height="88" rx="5"></rect>
+            <rect class="stripe" x="830" y="500" width="340" height="5" rx="2" style="fill: var(--raw)"></rect>
             <text class="title" x="846" y="530">s3://raw</text>
             <text class="sub" x="846" y="550">./data/raw</text>
-            <text class="sub" x="846" y="568">1 JSONL object per export batch</text>
+            <text class="sub" x="846" y="568">5-min windows · _SUCCESS last</text>
           </g>
           <g class="node obs" data-id="obs" tabindex="0" role="button" aria-label="Observability: open details">
-            <rect class="box" x="30" y="632" width="1140" height="34" rx="5"></rect>
-            <text class="sub" x="46" y="654">every long-running etl service · /healthz /readyz /metrics on :8080 → Prometheus → Grafana · Redpanda Console for the topic · slog JSON to logs/</text>
+            <rect class="box" x="30" y="632" width="830" height="34" rx="5"></rect>
+            <text class="sub" x="46" y="654">long-running services · /healthz /readyz /metrics on :8080 → Prometheus → Grafana · slog JSON to logs/</text>
+          </g>
+          <g class="node obs" data-id="pushgateway" tabindex="0" role="button" aria-label="Pushgateway: open details">
+            <rect class="box" x="870" y="632" width="310" height="34" rx="5"></rect>
+            <text class="sub" x="886" y="654">jobs → Pushgateway → Prometheus</text>
           </g>
         </svg>
       </div>
       <p class="scroll-hint">Scroll sideways to see every component.</p>
-      <figcaption>About half of the markets responses are CDN repeats: they land in raw and are dropped in the transformer.</figcaption>
+      <figcaption>Half or more of the markets responses are CDN repeats (two in three on the demo stack): they land in raw and are dropped in the transformer.</figcaption>
     </figure>
     <div class="comp" id="comp" role="group" aria-label="Component details" tabindex="-1"></div>
   </section>
@@ -683,7 +699,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       <div class="eyebrow">Recorded on 2026-10-10</div>
       <h2 id="h-walk">One snapshot, end to end</h2>
       <p class="lead">Poll A, poll B (a cached copy of A) and poll C (the next snapshot) through every stage.</p>
-      <details class="more"><summary>About this data</summary><div><p class="note">Prices, headers and hashes come from recorded responses for the top 10 coins (<code>per_page=10</code>; the pipeline asks for 100). Ids and offsets are illustrative. For brevity all calls travel in one batch.</p></div></details>
+      <details class="more"><summary>About this data</summary><div><p class="note">Prices, headers and hashes come from recorded responses for the top 10 coins (<code>per_page=10</code>; the pipeline asks for 100). Ids, offsets and partitions are illustrative.</p></div></details>
     </div>
     <div class="btn-row walk-ctrl" id="walk-ctrl">
       <button class="btn" id="walk-prev" type="button">← Previous</button>
@@ -711,7 +727,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     </div>
     <figure class="panel">
       <div class="dg flat" style="--minw: 760px; --minw-m: 920px">
-        <svg id="clock-svg" viewBox="0 40 1000 200" role="img" aria-label="Four clocks. source_updated_at, the coin's own last_updated, comes first and is kept per row. snapshot_at, the newest last_updated in the response, is the event time, the key and the event_date. fetched_at, our poll time, comes last and lives only in the raw event. When snapshot_at is more than 10 minutes after source_updated_at the row is flagged is_stale. Ticker clocks last_traded_at and last_fetch_at are kept but no logic depends on their order.">
+        <svg id="clock-svg" viewBox="0 40 1000 200" role="img" aria-label="Four clocks. source_updated_at, the coin's own last_updated, comes first and is kept per row. snapshot_at, the newest last_updated in the response, is the event time, part of the key and the event_date column. fetched_at, our poll time, comes last, stays in the raw event and picks the raw window. When snapshot_at is more than 10 minutes after source_updated_at the row is flagged is_stale. Ticker clocks last_traded_at and last_fetch_at are kept but no logic depends on their order.">
           <line class="ar" x1="40" y1="120" x2="958" y2="120" marker-end="url(#m-mu)"></line>
           <text class="lbl" x="958" y="142" text-anchor="end">time</text>
           <g>
@@ -724,13 +740,13 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
             <circle cx="540" cy="120" r="7" class="c-acc"></circle>
             <text class="tm c-acc" x="540" y="68" text-anchor="middle">snapshot_at</text>
             <text class="s" x="540" y="88" text-anchor="middle">newest last_updated in the response</text>
-            <text class="si" x="540" y="152" text-anchor="middle">event time · key · event_date</text>
+            <text class="si" x="540" y="152" text-anchor="middle">event time · key · event_date column</text>
           </g>
           <g>
             <circle cx="820" cy="120" r="7" class="c-p"></circle>
             <text class="tm" x="820" y="68" text-anchor="middle">fetched_at</text>
             <text class="s" x="820" y="88" text-anchor="middle">our poll time</text>
-            <text class="s" x="820" y="152" text-anchor="middle">raw event only</text>
+            <text class="s" x="820" y="152" text-anchor="middle">raw event · picks the window</text>
           </g>
           <path class="ar" d="M170 176 V186 H540 V176" style="stroke: var(--raw)"></path>
           <text class="lbl" x="355" y="206" text-anchor="middle">gap &gt; 10 min → is_stale</text>
@@ -741,7 +757,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           </g>
         </svg>
       </div>
-      <figcaption>Only <code>snapshot_at</code> is event time; <code>source_updated_at</code> just sets <code>is_stale</code>, and <code>fetched_at</code> never leaves the raw event.</figcaption>
+      <figcaption>Only <code>snapshot_at</code> is event time; <code>source_updated_at</code> just sets <code>is_stale</code>, and <code>fetched_at</code> stays in the raw event, where it picks the export window.</figcaption>
     </figure>
   </section>
 
@@ -907,21 +923,21 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     </div>
     <figure>
       <div class="dg" style="--minw: 940px; --minw-m: 1030px">
-        <svg id="hops-svg" viewBox="0 0 1120 256" role="img" aria-label="Four hops, each at least once. fetcher to raw.api_calls: primary key and ON CONFLICT DO NOTHING, a retry adds no row. raw.api_calls to s3://raw by the exporter: xid8 cursor, ledger and If-None-Match, a retry rewrites the same object and gets 412. s3://raw to coingecko.raw by the publisher: lease and idempotent producer, copies are dropped downstream. coingecko.raw to s3://processed by the transformer: manifest, claims and write-once PUT, a retry produces the same bytes and gets 412.">
+        <svg id="hops-svg" viewBox="0 0 1120 256" role="img" aria-label="Four hops, each at least once. fetcher to raw.api_calls: primary key and ON CONFLICT DO NOTHING, a retry adds no row. raw.api_calls to s3://raw by the exporter: rows claimed with SKIP LOCKED and recorded in the ledger, window parts and then _SUCCESS, If-None-Match; a retry rewrites the same object and gets 412. s3://raw to coingecko.raw by the publish job: the window from JOB_NOW, the parts listed in _SUCCESS, idempotent producer; copies are dropped downstream. coingecko.raw to s3://processed by the transformer: manifest, claims and write-once PUT, a retry produces the same bytes and gets 412.">
           <g><rect class="bx" x="10" y="20" width="140" height="52" rx="5"></rect><text class="t" x="24" y="42">fetcher</text><text class="s" x="24" y="61">polls CoinGecko</text></g>
           <g><rect class="bx pg" x="250" y="20" width="140" height="52" rx="5"></rect><text class="tm c-st" x="264" y="42">raw.api_calls</text><text class="s" x="264" y="61">Postgres</text></g>
-          <g><rect class="bx" x="490" y="20" width="140" height="52" rx="5"></rect><rect class="stripe" x="490" y="20" width="140" height="5" rx="2" style="fill: var(--raw)"></rect><text class="tm" x="504" y="44">s3://raw</text><text class="s" x="504" y="62">JSONL objects</text></g>
+          <g><rect class="bx" x="490" y="20" width="140" height="52" rx="5"></rect><rect class="stripe" x="490" y="20" width="140" height="5" rx="2" style="fill: var(--raw)"></rect><text class="tm" x="504" y="44">s3://raw</text><text class="s" x="504" y="62">parts + _SUCCESS</text></g>
           <g><rect class="bx" x="730" y="20" width="140" height="52" rx="5"></rect><text class="tm" x="744" y="42">coingecko.raw</text><text class="s" x="744" y="61">Redpanda topic</text></g>
           <g><rect class="bx good" x="970" y="20" width="140" height="52" rx="5"></rect><rect class="stripe" x="970" y="20" width="140" height="5" rx="2" style="fill: var(--processed)"></rect><text class="tm" x="984" y="44">s3://processed</text><text class="s" x="984" y="62">+ rejected, dlq</text></g>
           <path class="ar" d="M150 50 H246" marker-end="url(#m-mu)"></path><text class="lbl" x="198" y="40" text-anchor="middle">INSERT</text>
           <path class="ar" d="M390 50 H486" marker-end="url(#m-mu)"></path><text class="lbl" x="438" y="40" text-anchor="middle">exporter</text>
-          <path class="ar" d="M630 50 H726" marker-end="url(#m-mu)"></path><text class="lbl" x="678" y="40" text-anchor="middle">publisher</text>
+          <path class="ar" d="M630 50 H726" marker-end="url(#m-mu)"></path><text class="lbl" x="678" y="40" text-anchor="middle">publish job</text>
           <path class="ar" d="M870 50 H966" marker-end="url(#m-mu)"></path><text class="lbl" x="918" y="40" text-anchor="middle">transformer</text>
           <path class="ar lead" d="M198 54 V100"></path><path class="ar lead" d="M438 54 V100"></path><path class="ar lead" d="M678 54 V100"></path><path class="ar lead" d="M918 54 V100"></path>
-          <g><rect class="bx soft" x="88" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="102" y="121">HOP 1</text><text class="si" x="102" y="142">primary key</text><text class="m" x="102" y="160">ON CONFLICT DO NOTHING</text><text class="si c-p" x="102" y="192">retry → no duplicate row</text></g>
-          <g><rect class="bx soft" x="328" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="342" y="121">HOP 2</text><text class="si" x="342" y="142">xid8 cursor · ledger</text><text class="m" x="342" y="160">If-None-Match: *</text><text class="si c-p" x="342" y="192">retry → same object, 412</text></g>
-          <g><rect class="bx soft" x="568" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="582" y="121">HOP 3</text><text class="si" x="582" y="142">lease (SKIP LOCKED)</text><text class="si" x="582" y="160">idempotent producer, acks=all</text><text class="si c-p" x="582" y="192">retry → copies dropped later</text></g>
-          <g><rect class="bx soft" x="808" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="822" y="121">HOP 4</text><text class="si" x="822" y="142">manifest · dedup claims</text><text class="si" x="822" y="160">write-once PUT</text><text class="si c-p" x="822" y="192">retry → same bytes, 412</text></g>
+          <g><rect class="bx soft" x="88" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="102" y="121">HOP 1</text><text class="si" x="102" y="142">primary key</text><text class="m" x="102" y="160">ON CONFLICT DO NOTHING</text><text class="si c-p" x="102" y="197">retry → no duplicate row</text></g>
+          <g><rect class="bx soft" x="328" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="342" y="121">HOP 2</text><text class="si" x="342" y="142">claim (SKIP LOCKED) · ledger</text><text class="si" x="342" y="159">window parts, _SUCCESS last</text><text class="m" x="342" y="176">If-None-Match: *</text><text class="si c-p" x="342" y="197">retry → same object, 412</text></g>
+          <g><rect class="bx soft" x="568" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="582" y="121">HOP 3</text><text class="si" x="582" y="142">window from JOB_NOW · _SUCCESS</text><text class="si" x="582" y="159">idempotent producer, acks=all</text><text class="si c-p" x="582" y="197">retry → copies dropped later</text></g>
+          <g><rect class="bx soft" x="808" y="100" width="220" height="108" rx="5"></rect><text class="mm" x="822" y="121">HOP 4</text><text class="si" x="822" y="142">manifest · dedup claims</text><text class="si" x="822" y="160">write-once PUT</text><text class="si c-p" x="822" y="197">retry → same bytes, 412</text></g>
           <text class="s" x="560" y="238" text-anchor="middle">every hop may repeat; deterministic keys and write-once objects make the repeat harmless</text>
         </svg>
       </div>
@@ -979,10 +995,10 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     <div class="panel sim">
         <div class="section-head">
           <h3>Partitions</h3>
-          <p class="note">Same key, same partition: repeats are judged in offset order.</p>
+          <p class="note">Messages are keyed by the event's <code>idempotency_key</code>. Assignment shown is one possibility.</p>
         </div>
         <div class="parts" id="parts"></div>
-        <p class="note">5 keys land on 4 partitions, so at most 4 consumers are busy. Assignment shown is one possibility.</p>
+        <p class="note">Each response has its own key, so all 6 partitions carry data; copies of one response share a key and a partition and are judged in offset order.</p>
       </div>
     <div class="panel sim lifecycle">
       <div class="section-head">
@@ -995,7 +1011,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       </div>
       <figure>
         <div class="dg flat hscroll" id="lc-wrap" style="--minw: 900px; --minw-m: 1010px">
-          <svg viewBox="0 0 1100 244" role="group" aria-label="Transformer batch sequence: input checks, then TX1 (manifest row planned, transform, S2 check, dedup claims, objects and checksums), then PUT objects with If-None-Match, then TX2 marks the batch written, then the offset L+1 is committed. Failed checks go to dlq; an object with other bytes halts the partition. Five crash points: C1, C2, C3, C4 and Z." id="lc-svg"></svg>
+          <svg viewBox="0 0 1100 262" role="group" aria-label="Transformer batch sequence: TX1 records the manifest row as planned, runs the input checks without database queries, transforms, checks S2, claims keys and decides, and stores object keys and checksums; then PUT objects with If-None-Match, then TX2 marks the batch written, then the offset L+1 is committed. A failed check goes to dlq without a claim; an object with other bytes halts the partition. Five crash points: C1, C2, C3, C4 and Z." id="lc-svg"></svg>
         </div>
         <p class="scroll-hint">Scroll sideways for C4 and Z.</p>
         <figcaption>One in-flight batch per partition: TX1 decides everything before any network write, so a retry replays the same decisions.</figcaption>
@@ -1013,7 +1029,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     </div>
     <figure>
       <div class="dg" style="--minw: 960px; --minw-m: 1080px">
-        <svg id="schema-svg" viewBox="0 0 1170 362" role="img" aria-label="Schema checkpoints. The fetcher checks the S1 envelope before the INSERT; a failure is our bug, logged and counted, not sent to dlq. The exporter and publisher check S1 per line, the transformer checks strict JSON, S1, the payload checksum and S0 on input and S2 on output; every one of those failures goes to s3://dlq. Records written to rejected and dlq are checked against S3; a failure is logged with the original bytes in base64.">
+        <svg id="schema-svg" viewBox="0 0 1170 362" role="img" aria-label="Schema checkpoints. The fetcher checks the S1 envelope before the INSERT; a failure is our bug, logged and counted, not sent to dlq. The exporter and the publish job check S1 per line, the transformer checks strict JSON, S1, the payload checksum and S0 on input and S2 on output; every one of those failures goes to s3://dlq. Records written to rejected and dlq are checked against S3; a failure is logged with the original bytes in base64.">
           <g><rect class="bx soft" x="10" y="10" width="280" height="68" rx="5"></rect><text class="tm c-acc" x="24" y="32">S0 · source response</text><text class="mm" x="24" y="50">source/coingecko/*.v1.json</text><text class="si" x="24" y="68">permissive: tolerates upstream drift</text></g>
           <g><rect class="bx soft" x="300" y="10" width="280" height="68" rx="5"></rect><text class="tm c-acc" x="314" y="32">S1 · raw event</text><text class="mm" x="314" y="50">pipeline/raw_event.v1.json</text><text class="si" x="314" y="68">strict: identical bytes at every hop</text></g>
           <g><rect class="bx soft" x="590" y="10" width="280" height="68" rx="5"></rect><text class="tm c-acc" x="604" y="32">S2 · processed row</text><text class="mm" x="604" y="50">processed/&lt;dataset&gt;.v1.json</text><text class="si" x="604" y="68">strict: the gate to processed/</text></g>
@@ -1024,7 +1040,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           <g><rect class="bx" x="210" y="170" width="140" height="52" rx="5"></rect><text class="t" x="222" y="192">exporter</text><text class="s" x="222" y="211">per JSONL line</text></g>
           <g><rect class="bx acc" x="210" y="114" width="140" height="32" rx="16"></rect><text class="m c-acc" x="280" y="134" text-anchor="middle">S1</text></g>
           <path class="ar" d="M280 146 V168" style="stroke: var(--accent)"></path>
-          <g><rect class="bx" x="410" y="170" width="140" height="52" rx="5"></rect><text class="t" x="422" y="192">publisher</text><text class="s" x="422" y="211">per line</text></g>
+          <g><rect class="bx" x="410" y="170" width="140" height="52" rx="5"></rect><text class="t" x="422" y="192">publish job</text><text class="s" x="422" y="211">per line</text></g>
           <g><rect class="bx acc" x="410" y="114" width="140" height="32" rx="16"></rect><text class="m c-acc" x="480" y="134" text-anchor="middle">S1</text></g>
           <path class="ar" d="M480 146 V168" style="stroke: var(--accent)"></path>
           <g><rect class="bx" x="610" y="170" width="140" height="52" rx="5"></rect><text class="t" x="622" y="192">transformer in</text><text class="s" x="622" y="211">per message</text></g>
@@ -1069,15 +1085,20 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           <details open><summary><span class="dot" style="--c: var(--raw)"></span>raw/</summary>
             <details open><summary>source=coingecko/</summary>
               <details open><summary>ingest_date=2026-10-10/</summary>
-                <div class="file"><button type="button" data-file="raw" aria-pressed="false">batch=<wbr>00000000000000000042.jsonl</button></div>
+                <details open><summary>window=1000/</summary>
+                  <div class="file"><button type="button" data-file="raw" aria-pressed="false">part-00000.jsonl</button></div>
+                  <div class="file"><button type="button" data-file="success" aria-pressed="false">_SUCCESS</button></div>
+                </details>
               </details>
             </details>
           </details>
           <details open><summary><span class="dot" style="--c: var(--processed)"></span>processed/</summary>
             <details open><summary>dataset=market_snapshot/</summary>
               <details open><summary>v=1/</summary>
-                <details open><summary>event_date=2026-10-10/</summary>
-                  <div class="file"><button type="button" data-file="processed" aria-pressed="false">coingecko.raw+0+<wbr>00000000000000001200.jsonl</button></div>
+                <details open><summary>processed_date=2026-10-10/</summary>
+                  <details open><summary>hour=10/</summary>
+                    <div class="file"><button type="button" data-file="processed" aria-pressed="false">part-20261010T100612Z-<wbr>5e1f0a93.jsonl</button></div>
+                  </details>
                 </details>
               </details>
             </details>
@@ -1087,125 +1108,135 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
           </details>
           <details open><summary><span class="dot" style="--c: var(--rejected)"></span>rejected/</summary>
             <details open><summary>dataset=coin_contract/</summary>
-              <details open><summary>event_date=2026-10-10/</summary>
-                <div class="file"><button type="button" data-file="rejected" aria-pressed="false">coingecko.raw+0+<wbr>00000000000000001200.jsonl</button></div>
+              <details open><summary>processed_date=2026-10-10/</summary>
+                <details open><summary>hour=10/</summary>
+                  <div class="file"><button type="button" data-file="rejected" aria-pressed="false">part-20261010T100614Z-<wbr>2c4b81d7.jsonl</button></div>
+                </details>
               </details>
             </details>
           </details>
           <details open><summary><span class="dot" style="--c: var(--dlq)"></span>dlq/</summary>
             <details open><summary>stage=transform/</summary>
-              <details open><summary>date=2026-10-10/</summary>
-                <div class="file"><button type="button" data-file="dlq" aria-pressed="false">coingecko.raw+0+<wbr>00000000000000001200.jsonl</button></div>
+              <details open><summary>processed_date=2026-10-10/</summary>
+                <details open><summary>hour=10/</summary>
+                  <div class="file"><button type="button" data-file="dlq" aria-pressed="false">part-20261010T100615Z-<wbr>8d02e6b4.jsonl</button></div>
+                </details>
               </details>
             </details>
             <details><summary>stage=export/, stage=publish/</summary>
-              <div class="file muted">date=…/export+batch+&lt;id&gt;.jsonl, date=…/publish+batch+&lt;id&gt;.jsonl</div>
+              <div class="file muted">ingest_date=…/window=HHMM/part-NNNNN.jsonl</div>
             </details>
           </details>
         </details>
         <details><summary>.s3meta/ <span class="muted">· sidecar metadata</span></summary></details>
-        <details><summary>logs/ <span class="muted">· one etl.log per replica</span></summary></details>
+        <details><summary>logs/ <span class="muted">· one etl.log per service or replica; jobs append to publisher/ and maintenance/</span></summary></details>
       </div>
       <div class="panel" id="file-view" style="display:grid;gap:10px;align-content:start"></div>
     </div>
     <figure>
       <div class="dg" style="--minw: 960px; --minw-m: 1070px">
-        <svg id="pg-svg" viewBox="0 0 1160 364" role="img" aria-label="Postgres tables and who uses them. The fetcher inserts into raw.api_calls; the exporter reads it with the xid8 cursor and claims and marks batches in pipeline.export_batches; the publisher leases batches there. The transformer claims keys in pipeline.dedup_claims and plans and marks batches in pipeline.consumer_batches. etl init creates every table and runs the lake check against export_batches.">
+        <svg id="pg-svg" viewBox="0 0 1160 390" role="img" aria-label="Postgres tables and who uses them. The fetcher inserts into raw.api_calls. The exporter claims rows with FOR UPDATE SKIP LOCKED, setting export_batch_id, and records windows and parts in pipeline.export_windows and pipeline.export_batches: it claims a part, marks it exported, seals the window and closes it after _SUCCESS. The transformer claims keys in pipeline.dedup_claims and plans and marks batches in pipeline.consumer_batches. etl init creates every table; the daily etl maintenance jobs drop expired claim partitions and written manifests and run VACUUM (ANALYZE). The publish job uses no table.">
           <g><rect class="bx" x="20" y="20" width="160" height="46" rx="5"></rect><text class="t" x="100" y="48" text-anchor="middle">fetcher</text></g>
-          <g><rect class="bx" x="200" y="20" width="180" height="46" rx="5"></rect><text class="t" x="290" y="48" text-anchor="middle">exporter</text></g>
-          <g><rect class="bx" x="420" y="20" width="160" height="46" rx="5"></rect><text class="t" x="500" y="48" text-anchor="middle">publisher</text></g>
+          <g><rect class="bx" x="200" y="20" width="360" height="46" rx="5"></rect><text class="t" x="380" y="48" text-anchor="middle">exporter</text></g>
           <g><rect class="bx" x="640" y="20" width="500" height="46" rx="5"></rect><text class="t" x="890" y="48" text-anchor="middle">transformer ×2</text></g>
-          <path class="ar" d="M100 66 V196" marker-end="url(#m-mu)"></path><text class="lbl" x="107" y="130">INSERT</text>
-          <path class="ar st" d="M230 200 V70" marker-end="url(#m-st)"></path><text class="lbl" x="237" y="110">SELECT</text><text class="lbl" x="237" y="125">xid8 cursor</text>
-          <path class="ar" d="M360 66 V196" marker-end="url(#m-mu)"></path><text class="lbl" x="367" y="150">claim range</text><text class="lbl" x="367" y="165">mark exported</text>
-          <path class="ar" d="M500 70 V196" marker-start="url(#m-mu)" marker-end="url(#m-mu)"></path><text class="lbl" x="507" y="110">lease (SKIP LOCKED)</text><text class="lbl" x="507" y="125">published_at</text>
+          <path class="ar" d="M100 66 V196" marker-end="url(#m-mu)"></path><text class="lbl" x="107" y="150">INSERT</text>
+          <path class="ar" d="M240 66 V196" marker-end="url(#m-mu)"></path><text class="lbl" x="247" y="110">UPDATE … SKIP LOCKED</text><text class="lbl" x="247" y="125">export_batch_id</text>
+          <path class="ar" d="M440 66 V196" marker-end="url(#m-mu)"></path><text class="lbl" x="447" y="150">claim part · window</text><text class="lbl" x="447" y="165">mark exported, seal, _SUCCESS</text>
           <path class="ar" d="M725 70 V196" marker-start="url(#m-mu)" marker-end="url(#m-mu)"></path><text class="lbl" x="732" y="110">TX1: claim keys,</text><text class="lbl" x="732" y="125">read claims back</text>
           <path class="ar" d="M1015 70 V196" marker-start="url(#m-mu)" marker-end="url(#m-mu)"></path><text class="lbl" x="1008" y="150" text-anchor="end">TX1 planned · TX2 written</text><text class="lbl" x="1008" y="165" text-anchor="end">read on assignment</text>
-          <g><rect class="bx pg" x="20" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="34" y="224">raw.api_calls</text><text class="si" x="34" y="248">every HTTP call, body byte-exact</text><text class="s" x="34" y="272">daily partitions · not pruned</text></g>
-          <g><rect class="bx pg" x="310" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="324" y="224">pipeline.export_batches</text><text class="si" x="324" y="248">raw object ledger, publish lease</text><text class="s" x="324" y="272">not pruned</text></g>
-          <g><rect class="bx pg" x="600" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="614" y="224">pipeline.dedup_claims</text><text class="si" x="614" y="248">first claim per natural key</text><text class="s" x="614" y="272">kept ≥ 30 days</text></g>
-          <g><rect class="bx pg" x="890" y="200" width="250" height="92" rx="5"></rect><text class="tm c-st" x="904" y="224">pipeline.consumer_batches</text><text class="si" x="904" y="248">transformer batch manifest</text><text class="s" x="904" y="272">kept ≥ 30 days</text></g>
-          <g><rect class="bx dash soft" x="20" y="310" width="1120" height="42" rx="5"></rect><text class="m" x="36" y="336">etl init</text><text class="s" x="104" y="336">creates every table (goose migrations, daily partitions) · lake check: an empty export_batches next to a full raw/ is refused, make clean resets both</text></g>
+          <g><rect class="bx pg" x="20" y="200" width="250" height="104" rx="5"></rect><text class="tm c-st" x="34" y="224">raw.api_calls</text><text class="si" x="34" y="246">every HTTP call, body as received</text><text class="s" x="34" y="268">daily partitions · not pruned</text><text class="s" x="34" y="286">export_batch_id set once</text></g>
+          <g><rect class="bx pg" x="310" y="200" width="250" height="104" rx="5"></rect><text class="tm c-st" x="324" y="224">pipeline.export_windows</text><text class="tm c-st" x="324" y="242">pipeline.export_batches</text><text class="si" x="324" y="266">export ledger: windows, parts,</text><text class="si" x="324" y="284">keys, sha256 · not pruned</text></g>
+          <g><rect class="bx pg" x="600" y="200" width="250" height="104" rx="5"></rect><text class="tm c-st" x="614" y="224">pipeline.dedup_claims</text><text class="si" x="614" y="246">first claim per natural key</text><text class="s" x="614" y="268">daily partitions, kept 8 days</text><text class="s" x="614" y="286">(ETL_CLAIMS_RETENTION_DAYS)</text></g>
+          <g><rect class="bx pg" x="890" y="200" width="250" height="104" rx="5"></rect><text class="tm c-st" x="904" y="224">pipeline.consumer_batches</text><text class="si" x="904" y="246">transformer batch manifest</text><text class="s" x="904" y="268">written rows kept 8 days,</text><text class="s" x="904" y="286">planned rows kept</text></g>
+          <g><rect class="bx dash soft" x="20" y="322" width="1120" height="60" rx="5"></rect><text class="m" x="36" y="346">etl init</text><text class="s" x="166" y="346">creates every table and daily partition (goose migrations)</text><text class="m" x="36" y="368">etl maintenance</text><text class="s" x="166" y="368">Cronicle, daily: drops claim partitions and written manifests older than 8 days, then VACUUM (ANALYZE)</text></g>
         </svg>
       </div>
       <p class="scroll-hint">Scroll sideways for every table.</p>
-      <figcaption>Every row of state lives in Postgres, so it survives crashes, is shared by replicas and changes in one transaction with the batch plan.</figcaption>
+      <figcaption>Every row of state lives in Postgres, so it survives crashes, is shared by replicas and changes in one transaction with the batch plan. The publish job reads only S3.</figcaption>
     </figure>
-    <details class="more"><summary>Persistence and reset</summary><div><p class="note">Bind mounts <code>./data</code>, <code>./.s3meta</code>, <code>./logs</code> · named volumes <code>pgdata</code>, <code>redpanda</code> · reset them together with <code>make clean</code>. In production <code>raw.api_calls</code> would get pg_partman retention.</p></div></details>
+    <details class="more"><summary>Persistence and reset</summary><div><p class="note">Bind mounts <code>./data</code>, <code>./.s3meta</code>, <code>./logs</code> · named volumes <code>pgdata</code>, <code>redpanda</code>, <code>cronicle</code>, <code>pushgateway</code>, <code>prometheus</code>, <code>grafana</code>. <code>make clean</code> wipes everything; object names carry no database or broker counters, so the lake may be kept when the stack is recreated (windows the old stack had not published are then published by hand). In production <code>raw.api_calls</code> would get pg_partman retention.</p></div></details>
   </section>
 
   <!-- ================= OPERATIONS ================= -->
   <section class="block" id="operations" aria-labelledby="h-ops">
     <div class="section-head">
       <h2 id="h-ops">Operations</h2>
-      <p class="lead"><code>make up</code> starts everything in order; <code>make demo</code> prints what landed.</p>
+      <p class="lead"><code>make up</code> starts everything in order; <code>make demo</code> runs 1-minute windows and prints what landed.</p>
     </div>
     <figure class="panel boot">
       <div class="hscroll" tabindex="0" role="region" aria-label="Startup order diagram">
-        <svg viewBox="0 0 900 214" role="img" aria-label="Startup order: postgres, redpanda and versitygw become healthy, etl init runs to completion, then fetcher, exporter, publisher and two transformers start.">
+        <svg viewBox="0 0 910 256" role="img" aria-label="Startup order: postgres, redpanda, versitygw and the pushgateway become healthy, etl init runs to completion, then the fetcher, the exporter and two transformers start. Cronicle starts once init has completed and the exporter and the pushgateway are healthy, and runs etl publish and etl maintenance.">
           <defs><marker id="boot-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="currentColor"></path></marker></defs>
           <text class="col-title" x="20" y="24">1 · service_healthy</text>
           <text class="col-title" x="330" y="24">2 · completed_successfully</text>
           <text class="col-title" x="620" y="24">3 · long-running</text>
           <g class="b"><rect x="20" y="36" width="230" height="48" rx="5"></rect><text x="34" y="56">postgres:18.6</text><text x="34" y="74" style="fill: var(--muted)">pg_isready</text></g>
-          <g class="b"><rect x="20" y="96" width="230" height="48" rx="5"></rect><text x="34" y="116">redpanda v26.2.4</text><text x="34" y="134" style="fill: var(--muted)">rpk cluster health</text></g>
-          <g class="b"><rect x="20" y="156" width="230" height="48" rx="5"></rect><text x="34" y="176">versitygw v1.8.0</text><text x="34" y="194" style="fill: var(--muted)">/health</text></g>
-          <g class="b init"><rect x="330" y="80" width="210" height="80" rx="5"></rect><text x="346" y="108">etl init</text><text x="346" y="128" style="fill: var(--muted)">migrate · partitions</text><text x="346" y="146" style="fill: var(--muted)">topic · buckets</text></g>
-          <path class="arr" d="M250 60 H290 V110 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
-          <path class="arr" d="M250 120 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
-          <path class="arr" d="M250 180 H290 V130 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <g class="b"><rect x="20" y="92" width="230" height="48" rx="5"></rect><text x="34" y="112">redpanda v26.2.4</text><text x="34" y="130" style="fill: var(--muted)">rpk cluster health</text></g>
+          <g class="b"><rect x="20" y="148" width="230" height="48" rx="5"></rect><text x="34" y="168">versitygw v1.8.0</text><text x="34" y="186" style="fill: var(--muted)">/health</text></g>
+          <g class="b"><rect x="20" y="204" width="230" height="48" rx="5"></rect><text x="34" y="224">pushgateway v1.11.4</text><text x="34" y="242" style="fill: var(--muted)">/-/ready</text></g>
+          <g class="b init"><rect x="330" y="76" width="210" height="80" rx="5"></rect><text x="346" y="104">etl init</text><text x="346" y="124" style="fill: var(--muted)">migrate · partitions</text><text x="346" y="142" style="fill: var(--muted)">topic · buckets</text></g>
+          <path class="arr" d="M250 60 H290 V106 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M250 116 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M250 172 H290 V126 H326" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
           <g class="b go"><rect x="620" y="30" width="250" height="34" rx="5"></rect><text x="634" y="52">etl fetcher</text></g>
           <g class="b go"><rect x="620" y="74" width="250" height="34" rx="5"></rect><text x="634" y="96">etl exporter</text></g>
-          <g class="b go"><rect x="620" y="118" width="250" height="34" rx="5"></rect><text x="634" y="140">etl publisher</text></g>
-          <g class="b go"><rect x="620" y="162" width="250" height="34" rx="5"></rect><text x="634" y="184">etl transformer ×2</text></g>
-          <path class="arr" d="M540 120 H580 V47 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <g class="b go"><rect x="620" y="118" width="250" height="34" rx="5"></rect><text x="634" y="140">etl transformer ×2</text></g>
+          <g class="b go"><rect x="620" y="170" width="250" height="78" rx="5"></rect><text x="634" y="192">Cronicle v0.9.135</text><text x="634" y="210" style="fill: var(--muted)">on node:24.21.0</text><text x="634" y="230">→ etl publish, maintenance</text></g>
+          <path class="arr" d="M540 116 H580 V47 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
           <path class="arr" d="M580 91 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M580 116 V190 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
           <path class="arr" d="M580 135 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
-          <path class="arr" d="M580 120 V179 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M250 228 H616" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
+          <path class="arr" d="M870 91 H896 V209 H874" marker-end="url(#boot-arr)" style="color: var(--muted)"></path>
         </svg>
       </div>
-      <figcaption>Topic auto-creation is off; only <code>etl init</code> creates topics.</figcaption>
+      <figcaption>Topic auto-creation is off; only <code>etl init</code> creates topics. Cronicle waits for a healthy exporter, so its first <code>etl publish</code> finds a closed window.</figcaption>
     </figure>
     <figure>
       <div class="dg" style="--minw: 980px; --minw-m: 1070px">
-        <svg id="ops-svg" viewBox="0 0 1160 612" role="img" aria-label="Metrics and the nine alerts by stage. Across the whole pipeline: ETLServiceDown and ETLPipelineNotProgressing. Fetcher: ETLDataStale and ETLFrequentRateLimiting. Exporter, publisher and transformer: ETLDeadLetterRecords and ETLObjectChecksumMismatch. Exporter: ETLExportLagHigh. Transformer: ETLSourceSchemaDrift and ETLConsumerLagGrowing. Below each stage, the metrics it exports.">
-          <rect class="col" x="20" y="100" width="250" height="214" rx="5"></rect>
-          <rect class="col" x="310" y="100" width="250" height="214" rx="5"></rect>
-          <rect class="col" x="600" y="100" width="250" height="214" rx="5"></rect>
-          <rect class="col" x="890" y="100" width="250" height="214" rx="5"></rect>
-          <g><rect class="bx bad" x="20" y="10" width="1120" height="40" rx="5"></rect><text class="m c-d" x="32" y="26" style="font-weight:600">ETLServiceDown</text><text class="si" x="32" y="43">a service's scrape fails or it has no scrape target for 2 min · critical</text></g>
+        <svg id="ops-svg" viewBox="0 0 1160 694" role="img" aria-label="Metrics and the twelve alerts by stage. Across the whole pipeline: ETLServiceDown for the long-running services and ETLPipelineNotProgressing. Fetcher: ETLDataStale and ETLFrequentRateLimiting. Exporter, publish job and transformer: ETLDeadLetterRecords and ETLObjectChecksumMismatch. Exporter: ETLExportLagHigh. Publish job and maintenance: ETLPublisherStale, ETLMaintenanceStale and ETLMaintenanceNeverSucceeded. Transformer: ETLSourceSchemaDrift and ETLConsumerLagGrowing. Below each stage, the metrics it exports; the Cronicle jobs push theirs to the Pushgateway.">
+          <rect class="col" x="20" y="100" width="250" height="262" rx="5"></rect>
+          <rect class="col" x="310" y="100" width="250" height="262" rx="5"></rect>
+          <rect class="col" x="600" y="100" width="250" height="262" rx="5"></rect>
+          <rect class="col" x="890" y="100" width="250" height="262" rx="5"></rect>
+          <g><rect class="bx bad" x="20" y="10" width="1120" height="40" rx="5"></rect><text class="m c-d" x="32" y="26" style="font-weight:600">ETLServiceDown</text><text class="si" x="32" y="43">a long-running service's scrape fails or it has no scrape target for 2 min · critical</text></g>
           <g><rect class="bx bad" x="20" y="56" width="1120" height="40" rx="5"></rect><text class="m c-d" x="32" y="72" style="font-weight:600">ETLPipelineNotProgressing</text><text class="si" x="32" y="89">CoinGecko calls succeed, but no transformer counts a record in 15 min</text></g>
           <g><rect class="bx bad" x="30" y="108" width="230" height="40" rx="5"></rect><text class="m c-d" x="42" y="124" style="font-weight:600">ETLDataStale</text><text class="si" x="42" y="141">no successful poll for 2 min · critical</text></g>
           <g><rect class="bx bad" x="30" y="156" width="230" height="40" rx="5"></rect><text class="m c-d" x="42" y="172" style="font-weight:600">ETLFrequentRateLimiting</text><text class="si" x="42" y="189">3 or more HTTP 429 in 15 min</text></g>
           <g><rect class="bx bad" x="320" y="108" width="810" height="40" rx="5"></rect><text class="m c-d" x="332" y="124" style="font-weight:600">ETLDeadLetterRecords</text><text class="si" x="332" y="141">any record lands in dlq/ (stage export, publish or transform)</text></g>
           <g><rect class="bx bad" x="320" y="156" width="810" height="40" rx="5"></rect><text class="m c-d" x="332" y="172" style="font-weight:600">ETLObjectChecksumMismatch</text><text class="si" x="332" y="189">a write-once key holds other bytes; the transformer halts only that partition · critical</text></g>
-          <g><rect class="bx bad" x="320" y="204" width="230" height="40" rx="5"></rect><text class="m c-d" x="332" y="220" style="font-weight:600">ETLExportLagHigh</text><text class="si" x="332" y="237">lag over 5 min, or exporter absent</text></g>
+          <g><rect class="bx bad" x="320" y="204" width="230" height="40" rx="5"></rect><text class="m c-d" x="332" y="220" style="font-weight:600">ETLExportLagHigh</text><text class="si" x="332" y="237">window 5 min overdue, or no exporter</text></g>
+          <g><rect class="bx bad" x="610" y="204" width="230" height="40" rx="5"></rect><text class="m c-d" x="622" y="220" style="font-weight:600">ETLPublisherStale</text><text class="si" x="622" y="237">no publish success in 15 min · critical</text></g>
+          <g><rect class="bx bad" x="610" y="252" width="230" height="40" rx="5"></rect><text class="m c-d" x="622" y="268" style="font-weight:600">ETLMaintenanceStale</text><text class="si" x="622" y="285">retention or vacuum: no success in 26 h</text></g>
+          <g><rect class="bx bad" x="610" y="300" width="230" height="40" rx="5"></rect><text class="m c-d" x="622" y="316" style="font-weight:600">ETLMaintenanceNeverSucceeded</text><text class="si" x="622" y="333">no success series for 26 h</text></g>
           <g><rect class="bx bad" x="900" y="204" width="230" height="40" rx="5"></rect><text class="m c-d" x="912" y="220" style="font-weight:600">ETLSourceSchemaDrift</text><text class="si" x="912" y="237">over 5% fail S0 in 15 min · critical</text></g>
           <g><rect class="bx bad" x="900" y="252" width="230" height="40" rx="5"></rect><text class="m c-d" x="912" y="268" style="font-weight:600">ETLConsumerLagGrowing</text><text class="si" x="912" y="285">total lag rising for 10 min</text></g>
-          <g><rect class="bx" x="20" y="322" width="250" height="40" rx="5"></rect><text class="t" x="145" y="347" text-anchor="middle">fetcher</text></g>
-          <path class="ar" d="M270 342 H306" marker-end="url(#m-mu)"></path>
-          <g><rect class="bx" x="310" y="322" width="250" height="40" rx="5"></rect><text class="t" x="435" y="347" text-anchor="middle">exporter</text></g>
-          <path class="ar" d="M560 342 H596" marker-end="url(#m-mu)"></path>
-          <g><rect class="bx" x="600" y="322" width="250" height="40" rx="5"></rect><text class="t" x="725" y="347" text-anchor="middle">publisher</text></g>
-          <path class="ar" d="M850 342 H886" marker-end="url(#m-mu)"></path>
-          <g><rect class="bx" x="890" y="322" width="250" height="40" rx="5"></rect><text class="t" x="1015" y="347" text-anchor="middle">transformer ×2</text></g>
-          <path class="ar lead" d="M145 362 V382"></path>
-          <g><rect class="bx soft" x="20" y="382" width="250" height="156" rx="5"></rect><text class="m" x="30" y="402">etl_api_requests_total</text><text class="m" x="30" y="419">etl_api_request_duration_seconds</text><text class="m" x="30" y="436">etl_api_rate_limited_total</text><text class="m" x="30" y="453">etl_last_success_timestamp_seconds</text><text class="m" x="30" y="470">etl_source_data_age_seconds</text></g>
-          <path class="ar lead" d="M435 362 V382"></path>
-          <g><rect class="bx soft" x="310" y="382" width="250" height="156" rx="5"></rect><text class="m" x="320" y="402">etl_export_lag_seconds</text><text class="m" x="320" y="419">etl_export_batches_total</text><text class="m" x="320" y="436">etl_s3_put_total{result}</text><text class="m" x="320" y="453">etl_dlq_total</text></g>
-          <path class="ar lead" d="M725 362 V382"></path>
-          <g><rect class="bx soft" x="600" y="382" width="250" height="156" rx="5"></rect><text class="m" x="610" y="402">etl_published_records_total</text><text class="m" x="610" y="419">etl_s3_put_total{result}</text><text class="m" x="610" y="436">etl_dlq_total</text></g>
-          <path class="ar lead" d="M1015 362 V382"></path>
-          <g><rect class="bx soft" x="890" y="382" width="250" height="156" rx="5"></rect><text class="m" x="900" y="402">etl_records_total{outcome}</text><text class="m" x="900" y="419">etl_dedup_dropped_total{reason}</text><text class="m" x="900" y="436">etl_rejected_total{reason}</text><text class="m" x="900" y="453">etl_dlq_total</text><text class="m" x="900" y="470">etl_s3_put_total{result}</text><text class="m" x="900" y="487">etl_consumer_lag_records</text><text class="m" x="900" y="504">etl_batch_duration_seconds</text><text class="m" x="900" y="521">etl_e2e_latency_seconds</text></g>
-          <g><rect class="bx dash" x="20" y="550" width="1120" height="54" rx="5"></rect><text class="si" x="36" y="572"><tspan class="m">etl_schema_validations_total</tspan> and <tspan class="m">etl_schema_violations_total</tspan> in every service · <tspan class="m">/healthz /readyz /metrics</tspan> on :8080 → Prometheus → Grafana</text><text class="s" x="36" y="592">logs: slog JSON in UTC → logs/&lt;service&gt;/etl.log and stdout; each transformer replica writes its own file</text></g>
+          <g><rect class="bx" x="20" y="370" width="250" height="40" rx="5"></rect><text class="t" x="145" y="395" text-anchor="middle">fetcher</text></g>
+          <path class="ar" d="M270 390 H306" marker-end="url(#m-mu)"></path>
+          <g><rect class="bx" x="310" y="370" width="250" height="40" rx="5"></rect><text class="t" x="435" y="395" text-anchor="middle">exporter</text></g>
+          <path class="ar" d="M560 390 H596" marker-end="url(#m-mu)"></path>
+          <g><rect class="bx" x="600" y="370" width="250" height="40" rx="5"></rect><text class="t" x="725" y="395" text-anchor="middle">publish job · maintenance</text></g>
+          <path class="ar" d="M850 390 H886" marker-end="url(#m-mu)"></path>
+          <g><rect class="bx" x="890" y="370" width="250" height="40" rx="5"></rect><text class="t" x="1015" y="395" text-anchor="middle">transformer ×2</text></g>
+          <path class="ar lead" d="M145 410 V430"></path>
+          <g><rect class="bx soft" x="20" y="430" width="250" height="188" rx="5"></rect><text class="m" x="30" y="450">etl_api_requests_total</text><text class="m" x="30" y="467">etl_api_request_duration_seconds</text><text class="m" x="30" y="484">etl_api_rate_limited_total</text><text class="m" x="30" y="501">etl_last_success_timestamp_seconds</text><text class="m" x="30" y="518">etl_source_data_age_seconds</text></g>
+          <path class="ar lead" d="M435 410 V430"></path>
+          <g><rect class="bx soft" x="310" y="430" width="250" height="188" rx="5"></rect><text class="m" x="320" y="450">etl_export_lag_seconds</text><text class="m" x="320" y="467">etl_export_batches_total</text><text class="m" x="320" y="484">etl_s3_put_total{result}</text><text class="m" x="320" y="501">etl_dlq_total</text></g>
+          <path class="ar lead" d="M725 410 V430"></path>
+          <g><rect class="bx soft" x="600" y="430" width="250" height="188" rx="5"></rect><text class="s" x="610" y="450">pushed to the Pushgateway, by job:</text><text class="m" x="610" y="467">etl_job_last_success_</text><text class="m" x="626" y="484">timestamp_seconds</text><text class="m" x="610" y="501">etl_job_last_run_timestamp_seconds</text><text class="m" x="610" y="518">etl_job_duration_seconds</text><text class="m" x="610" y="535">etl_job_success</text><text class="m" x="610" y="552">etl_publish_records</text><text class="m" x="610" y="569">etl_publish_dlq_lines</text><text class="m" x="610" y="586">etl_retention_partitions_dropped</text><text class="m" x="610" y="603">etl_retention_batches_deleted</text></g>
+          <path class="ar lead" d="M1015 410 V430"></path>
+          <g><rect class="bx soft" x="890" y="430" width="250" height="188" rx="5"></rect><text class="m" x="900" y="450">etl_records_total{outcome}</text><text class="m" x="900" y="467">etl_dedup_dropped_total{reason}</text><text class="m" x="900" y="484">etl_rejected_total{reason}</text><text class="m" x="900" y="501">etl_dlq_total</text><text class="m" x="900" y="518">etl_s3_put_total{result}</text><text class="m" x="900" y="535">etl_consumer_lag_records</text><text class="m" x="900" y="552">etl_batch_duration_seconds</text><text class="m" x="900" y="569">etl_e2e_latency_seconds</text></g>
+          <g><rect class="bx dash" x="20" y="630" width="1120" height="54" rx="5"></rect><text class="si" x="36" y="652"><tspan class="m">etl_schema_validations_total</tspan> and <tspan class="m">etl_schema_violations_total</tspan> in every long-running service · <tspan class="m">/healthz /readyz /metrics</tspan> on :8080 → Prometheus → Grafana · Pushgateway scraped too</text><text class="s" x="36" y="672">logs: slog JSON in UTC → logs/&lt;service&gt;/etl.log and stdout; each transformer replica writes its own file; jobs append to logs/publisher/ and logs/maintenance/</text></g>
         </svg>
       </div>
       <p class="scroll-hint">Scroll sideways for every stage.</p>
-      <figcaption>Nine Prometheus rules sit on the stage they watch; red boxes are alerts, grey boxes the metrics each stage exports.</figcaption>
+      <figcaption>Twelve Prometheus rules sit on the stage they watch; red boxes are alerts, grey boxes the metrics each stage exports or pushes. The publish and pipeline thresholds assume <code>ETL_WINDOW</code> of 5 min or less.</figcaption>
     </figure>
     <ul class="ports" aria-label="Local addresses">
       <li><b>:3000</b><span>Grafana</span></li>
+      <li><b>:3012</b><span>Cronicle UI</span></li>
       <li><b>:9090</b><span>Prometheus</span></li>
+      <li><b>:9091</b><span>Pushgateway</span></li>
       <li><b>:8081</b><span>Redpanda Console</span></li>
       <li><b>:7070</b><span>S3 API (versitygw)</span></li>
       <li><b>:19092</b><span>Redpanda Kafka API</span></li>
@@ -1219,12 +1250,14 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
         <dt>etl_api_requests_total{endpoint,status}</dt><dd>calls by result; 429 and 5xx stand out</dd>
         <dt>etl_last_success_timestamp_seconds{endpoint}</dt><dd>drives the stale-data alert</dd>
         <dt>etl_source_data_age_seconds{endpoint}</dt><dd>how old CoinGecko's data was when fetched</dd>
-        <dt>etl_export_lag_seconds</dt><dd>age of the oldest unexported row</dd>
+        <dt>etl_export_lag_seconds</dt><dd>seconds past the end of the oldest window not yet closed (0 on schedule)</dd>
         <dt>etl_s3_put_total{result}</dt><dd>created, exists (412), mismatch, error</dd>
         <dt>etl_records_total{dataset,outcome}</dt><dd>written, duplicate, rejected, dlq</dd>
-        <dt>etl_dedup_dropped_total{reason}</dt><dd>replay, duplicate_response, duplicate_record</dd>
+        <dt>etl_dedup_dropped_total{reason}</dt><dd>replay (same event), duplicate_response (same response), duplicate_record (same content, another response)</dd>
         <dt>etl_consumer_lag_records{partition}</dt><dd>messages waiting per partition</dd>
         <dt>etl_e2e_latency_seconds</dt><dd>poll to processed</dd>
+        <dt>etl_job_last_success_timestamp_seconds{job}</dt><dd>pushed by each Cronicle job on success; drives ETLPublisherStale and the maintenance alerts</dd>
+        <dt>etl_publish_records</dt><dd>records the last successful publish run sent; <code>etl_publish_dlq_lines</code> the lines it sent to dlq</dd>
       </dl></div>
     </details>
   </section>
@@ -1242,7 +1275,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 
 <footer class="wrap">
   <div>Data provided by CoinGecko.</div>
-  <div>Source of truth: the spec and plan in <code>docs/superpowers/</code>. Updated with every architecture change.</div>
+  <div>Design details: the spec in <code>docs/superpowers/specs/</code> and the ADRs in <code>docs/adr/</code>. Updated with every architecture change.</div>
 </footer>
 
 <div class="scrim" id="scrim" hidden></div>
@@ -1273,7 +1306,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       kicker: "External source", title: "CoinGecko API", role: "Market data source, polled without a key by default.",
       sections: [
         ["Endpoints", "<ul><li><code>/coins/markets</code> every 30 s: top 100 in USD, <code>precision=full</code>.</li><li><code>/coins/{id}</code> every 30 s, between the markets calls (at :15 and :45), one coin per call, in turn: bitcoin → ethereum → tether → usd-coin, so each coin is refreshed every 2 min. Deep nesting: 23 maps × 63 currencies, 100 tickers, contracts per chain.</li></ul>"],
-        ["Observed", "<ul><li>All coins recomputed in one pass every 60 s; the CDN caches for up to 60 s, so about half of 30-second polls are byte-identical.</li><li>Keyless limit 10–30 calls/min. Values above 2<sup>53</sup>.</li></ul>"],
+        ["Observed", "<ul><li>All coins recomputed in one pass every 60 s; the CDN caches for up to 60 s, so half or more of 30-second polls are byte-identical.</li><li>Keyless limit 10–30 calls/min. Values above 2<sup>53</sup>.</li></ul>"],
         ["Budget", "<p>4 calls a minute, 15 s apart: markets at :00 and :30, a coin at :15 and :45; one in flight. Optional <code>COINGECKO_API_KEY</code> (Demo: 100/min, 10,000/month).</p>"]
       ],
       chips: ["Data provided by CoinGecko"]
@@ -1288,40 +1321,42 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       chips: ["etl_api_requests_total", "etl_api_rate_limited_total", "etl_last_success_timestamp_seconds"]
     },
     apicalls: {
-      kicker: "Postgres 18.6 · schema raw", title: "raw.api_calls", role: "Every HTTP call, before any deduplication, failures included.",
+      kicker: "Postgres · schema raw", title: "raw.api_calls", role: "Every HTTP call, before any deduplication, failures included.",
       sections: [
-        ["Shape", "<ul><li>Daily partitions on <code>fetched_at</code>; primary key <code>(event_id, fetched_at)</code>.</li><li><code>payload</code> is <code>json</code>, not <code>jsonb</code>: exact bytes, so the sha256 checks out downstream.</li><li><code>idempotency_key</code>: plain, non-unique column.</li><li><code>ingest_txid xid8</code>: id of the inserting transaction, used by the exporter.</li></ul>"]
+        ["Shape", "<ul><li>Daily partitions on <code>fetched_at</code>; primary key <code>(event_id, fetched_at)</code>.</li><li><code>payload</code> is <code>json</code>, not <code>jsonb</code>: exact bytes, so the sha256 checks out downstream.</li><li><code>idempotency_key</code>: plain, non-unique column.</li><li><code>export_batch_id</code>: set once when the exporter claims the row, the only UPDATE this table gets.</li></ul>"]
       ],
       chips: ["CHECK ((outcome = 'ok') = (payload IS NOT NULL))"]
     },
     exporter: {
-      kicker: "etl exporter · 1 active instance", title: "exporter", role: "Turns new rows into one write-once raw JSONL object per batch.",
+      kicker: "etl exporter · 1 active instance", title: "exporter", role: "Closes each 5-minute window: claims its rows, writes parts, then <code>_SUCCESS</code>.",
       sections: [
-        ["Cursor", "<p>Walks <code>(ingest_txid, seq)</code> only below the oldest open transaction (<code>pg_snapshot_xmin</code>). Can stall, never skips. One active instance (<code>pg_try_advisory_lock</code>).</p>"],
-        ["Why this cursor", "<p>The assignment puts raw data in Postgres first: every call, failures included, is queryable before dedup. But a transactional table is not a change log, so reading new rows safely needs CDC or a commit-order cursor. This one is a pragmatic workaround, not an elegant design: it relies on Postgres internals and can stall behind a long transaction. In production: raw events straight to a log or object storage, or Debezium CDC.</p>"],
-        ["Steps", "<ol><li>Claim the range in <code>export_batches</code>.</li><li>Serialize deterministic JSONL, validate S1.</li><li>PUT with <code>If-None-Match: *</code>; on 412 compare sha256.</li><li>Mark exported.</li></ol>"],
+        ["Claim", "<p>One short transaction locks the window row, picks up to 500 rows <code>WHERE outcome = 'ok' AND export_batch_id IS NULL AND fetched_at &lt; window_end ORDER BY seq FOR UPDATE SKIP LOCKED</code>, inserts the ledger row and stamps the rows with its batch id. No S3 call inside. One active instance (<code>pg_try_advisory_lock</code>).</p>"],
+        ["Windows", "<ul><li><code>ETL_WINDOW</code> (5 min) windows aligned to the UTC hour; the value divides 60 min.</li><li>A window takes the unexported rows with <code>fetched_at</code> before its end; a row committed after it closed goes to the next window.</li><li>After downtime, missed windows are closed in order.</li><li>On a fresh stack the window before the current one is closed at once (usually empty), so the first publish run finds a <code>_SUCCESS</code>; one an earlier stack left in the lake is never overwritten.</li></ul>"],
+        ["Why a claim", "<p>The assignment puts raw data in Postgres first, and a transactional table is not a change log, so the exporter uses it as a work queue. Rows are bound to a part before the PUT, so a retry rebuilds the same bytes and a late commit is never skipped. Cost: one UPDATE per row, a dead version for vacuum. In production: raw events straight to a log or object storage, or Debezium CDC.</p>"],
+        ["Steps", "<ol><li>Claim rows into a part.</li><li>Serialize deterministic JSONL, validate S1 (failures → dlq).</li><li>PUT the part with <code>If-None-Match: *</code>; on 412 compare sha256.</li><li>Mark exported.</li><li>No rows left: seal the manifest.</li><li>PUT <code>_SUCCESS</code> last; the window is closed.</li></ol>"],
         ["Timeouts", "<p>Every S3 call times out, so a hung gateway cannot stall a stage.</p>"]
       ],
       chips: ["etl_export_lag_seconds", "etl_export_batches_total", "etl_s3_put_total"]
     },
     state: {
-      kicker: "Postgres 18.6 · schema pipeline", title: "pipeline.*", role: "State that survives crashes, is shared by replicas and changes atomically.",
+      kicker: "Postgres · schema pipeline", title: "pipeline.*", role: "State that survives crashes, is shared by replicas and changes atomically.",
       sections: [
-        ["Tables", "<ul><li><code>export_batches</code>: raw object ledger, publish lease.</li><li><code>dedup_claims</code>: first position, event_id, idempotency key, content hash per natural key.</li><li><code>consumer_batches</code>: transformer batch manifest; EXCLUDE forbids overlapping offset ranges.</li></ul>"],
-        ["Why Postgres", "<p>Offsets cannot answer \"was key X seen\", S3 guards single objects only, memory is lost on rebalance (reproduced).</p>"]
+        ["Tables", "<ul><li><code>export_windows</code> / <code>export_batches</code>: export ledger: windows, parts, keys, sha256.</li><li><code>dedup_claims</code>: first position, event_id, idempotency key, content hash per natural key.</li><li><code>consumer_batches</code>: transformer batch manifest; EXCLUDE forbids overlapping offset ranges.</li></ul>"],
+        ["Why Postgres", "<p>Offsets cannot answer \"was key X seen\", S3 guards single objects only, memory is lost on rebalance.</p>"],
+        ["Upkeep", "<p><code>etl maintenance</code>, daily from Cronicle: retention drops claim partitions and written manifests older than <code>ETL_CLAIMS_RETENTION_DAYS</code> (8, never less than the 7-day topic retention + 1), never planned ones; vacuum runs <code>VACUUM (ANALYZE)</code> on raw.api_calls, export_batches and consumer_batches.</p>"]
       ],
-      chips: ["kept ≥ 30 days"]
+      chips: ["claims kept 8 days"]
     },
     publisher: {
-      kicker: "etl publisher · 1 replica", title: "publisher", role: "One raw line becomes one message, unchanged.",
+      kicker: "etl publish · Cronicle job every 5 min", title: "publisher", role: "Publishes one closed window; one raw line becomes one message.",
       sections: [
-        ["Flow", "<ul><li>Lease a batch (<code>FOR UPDATE SKIP LOCKED</code>, 2 min).</li><li>GET the object, validate S1 per line (failures → dlq).</li><li>Key: <code>coins_markets</code> or the coin id. Headers: event_id, idempotency_key, schema, raw_object, line_no.</li><li>Idempotent producer, <code>acks=all</code>; <code>published_at</code> after the flush.</li></ul>"],
-        ["Crash", "<p>Lease expires, the batch is republished with the same event_ids; the transformer drops the copies.</p>"]
+        ["Flow", "<ul><li>Window end = floor(now − 1 min, <code>ETL_WINDOW</code>), now = Cronicle's <code>JOB_NOW</code>, the scheduled time.</li><li><code>_SUCCESS</code> required: missing → exit 1; Cronicle retries 3 times, 60 s apart.</li><li>Reads exactly the parts <code>_SUCCESS</code> lists and checks their sha256 and line counts before producing.</li><li>S1 per line; failures → one dlq object per window.</li><li>Key: <code>idempotency_key</code>. Headers: event_id, idempotency_key, schema, raw_object, line_no.</li><li>Idempotent producer, <code>acks=all</code>; no Postgres.</li><li>Pushes its result to the Pushgateway; exit 0 success, 1 failure, 2 usage.</li></ul>"],
+        ["Rerun", "<p>Same event_ids; the transformer drops the copies as <code>replay</code>.</p>"]
       ],
-      chips: ["etl_published_records_total"]
+      chips: ["etl_job_last_success_timestamp_seconds", "etl_publish_records"]
     },
     redpanda: {
-      kicker: "Redpanda v26.2.4 · Kafka protocol", title: "Redpanda", role: "Replayable log with per-key ordering and consumer groups.",
+      kicker: "Kafka protocol", title: "Redpanda", role: "Replayable log with consumer groups; copies of one response share a key and a partition.",
       sections: [
         ["Topic", "<p><code>coingecko.raw</code>: 6 partitions, retention (TTL) 7 days; s3://raw and raw.api_calls keep the history. Only <code>etl init</code> creates topics.</p>"],
         ["Why Redpanda", "<p>Kafka protocol in one C++ binary, no JVM. The same franz-go code runs on Apache Kafka, MSK or Confluent Cloud.</p>"]
@@ -1329,39 +1364,40 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       chips: ["6 partitions", "retention (TTL) 7 days"]
     },
     transformer: {
-      kicker: "etl transformer · 2 replicas", title: "transformer", role: "Checks, cleans, deduplicates and normalizes.",
+      kicker: "etl transformer · 2 replicas", title: "transformer", role: "Validates input, transforms and cleans, validates output, deduplicates.",
       sections: [
-        ["Batch", "<ol><li>Input checks: strict JSON, S1, checksum, S0.</li><li>TX1: plan the range, transform, validate S2 (failures → dlq, no claim), claim keys, decide.</li><li>PUT objects with <code>If-None-Match: *</code>.</li><li>TX2: mark written.</li><li>Commit offset <code>L+1</code>.</li></ol>"],
+        ["Batch", "<ol><li>TX1: plan the range (<code>planned_at</code>), input checks (strict JSON, S1, checksum, S0), transform, validate S2 (failures → dlq, no claim), claim keys, decide.</li><li>PUT objects with <code>If-None-Match: *</code>.</li><li>TX2: mark written.</li><li>Commit offset <code>L+1</code>.</li></ol>"],
         ["Recovery", "<p>On assignment: a written batch is skipped, a planned one is reprocessed exactly.</p>"],
         ["Alert and stop", "<p>An object with different bytes halts only that partition and fires <code>ETLObjectChecksumMismatch</code>; the others keep flowing.</p>"],
-        ["Deterministic", "<p>No clock, no random order: <code>_processed_at</code> comes from the manifest, so retries produce identical files.</p>"]
+        ["Deterministic", "<p>No clock, no random order: the manifest's <code>planned_at</code> is <code>_processed_at</code> and names the objects, so retries produce identical files under the same keys.</p>"]
       ],
       chips: ["etl_records_total", "etl_dedup_dropped_total", "etl_consumer_lag_records"]
     },
     init: {
       kicker: "etl init · one-shot", title: "etl init", role: "Brings Postgres, the topic and the buckets to the expected state, then exits.",
       sections: [
-        ["Order", "<ol><li>goose migrations and daily partitions.</li><li>Topic via kadm; a mismatched config fails init.</li><li>The four buckets.</li><li>Lake check: refuses a <code>./data</code> from another Postgres lifetime; <code>make clean</code> resets both.</li></ol><p>Idempotent; starts after its dependencies are healthy.</p>"]
+        ["Order", "<ol><li>goose migrations and daily partitions.</li><li>Topic via kadm; a mismatched config fails init.</li><li>The four buckets.</li></ol><p>Idempotent; starts after its dependencies are healthy.</p>"]
       ]
     },
     obs: {
       kicker: "Every long-running service", title: "Observability", role: "Health, metrics and logs.",
       sections: [
         ["Endpoints on :8080", "<ul><li><code>/healthz</code>: alive.</li><li><code>/readyz</code>: dependencies answer within 2 s, else 503.</li><li><code>/metrics</code>: <code>etl_*</code> plus <code>go_*</code> and <code>process_*</code>.</li></ul>"],
-        ["Stack", "<p>Prometheus v3.15.0 with nine alert rules, Grafana 13.2.3 with a provisioned dashboard.</p>"]
+        ["Stack", "<p>Prometheus with twelve alert rules (it scrapes the Pushgateway too), Grafana with a provisioned dashboard, Redpanda Console for the topic.</p>"]
       ]
     },
     "b-raw": {
-      kicker: "Bucket · ./data/raw", title: "s3://raw", role: "One write-once JSONL object per export batch.",
+      kicker: "Bucket · ./data/raw", title: "s3://raw", role: "Write-once JSONL parts per window, then a <code>_SUCCESS</code> manifest.",
       sections: [
-        ["Key", "<p><code>source=coingecko/ingest_date=…/batch=&lt;20-digit id&gt;.jsonl</code></p>"],
-        ["If-None-Match: *", "<p>Create only if the key is unused; otherwise 412 and nothing is overwritten.</p>"]
+        ["Key", "<p><code>source=coingecko/ingest_date=&lt;d&gt;/window=&lt;HHMM&gt;/part-&lt;NNNNN&gt;.jsonl</code>; date and HHMM are the UTC window start.</p>"],
+        ["_SUCCESS", "<p>Written last, compact JSON: window_start, window_end, rows, parts (key, sha256, rows). An empty window gets <code>\"rows\":0,\"parts\":[]</code>. A window is ready when its <code>_SUCCESS</code> exists; readers take exactly the parts it lists.</p>"],
+        ["If-None-Match: *", "<p>Create only if the key is unused; otherwise 412 and nothing is overwritten, so an earlier stack's <code>_SUCCESS</code> is never replaced.</p>"]
       ]
     },
     "b-processed": {
       kicker: "Bucket · ./data/processed", title: "s3://processed", role: "Clean rows with flags, once per natural key.",
       sections: [
-        ["Key", "<p><code>dataset=…/v=1/event_date=…/coingecko.raw+&lt;partition&gt;+&lt;first offset&gt;.jsonl</code>: a retried batch lands on the same object.</p>"]
+        ["Key", "<p><code>dataset=…/v=1/processed_date=…/hour=…/part-&lt;planned_at&gt;-&lt;id8&gt;.jsonl</code>: date, hour and time from the batch's planned_at; id8 hashes topic id, partition and first offset. A retried batch lands on the same object; event_date is a column.</p>"]
       ]
     },
     "b-rejected": {
@@ -1373,11 +1409,29 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     "b-dlq": {
       kicker: "Bucket · ./data/dlq", title: "s3://dlq", role: "Records that broke a stage. An alert fires.",
       sections: [
-        ["Record", "<p>One shape for every stage: stage, error_class, violations, origin, original bytes, occurred_at.</p>"]
+        ["Record", "<p>One shape for every stage: stage, error_class, violations, origin, original bytes, occurred_at.</p>"],
+        ["Keys", "<ul><li><code>stage=export/</code>, <code>stage=publish/</code>: <code>ingest_date=…/window=HHMM/part-NNNNN.jsonl</code>; publish writes one object per window.</li><li><code>stage=transform/</code>: <code>processed_date=…/hour=…/part-&lt;planned_at&gt;-&lt;id8&gt;.jsonl</code>.</li></ul>"]
+      ]
+    },
+    cronicle: {
+      kicker: "Scheduler · local stand-in for Airflow", title: "Cronicle", role: "Runs the batch jobs with retries, catch-up and run history. UI on :3012, login admin.",
+      sections: [
+        ["Events", "<ul><li><code>etl-publish</code>: <code>etl publish --now \"$JOB_NOW\"</code> every <code>ETL_WINDOW</code> at +1 min (minutes 1, 6, …, 56 for 5 min), on the UTC grid; Catch-Up (Run All), one at a time, 3 retries 60 s apart, timeout 5 min.</li><li><code>etl-retention</code> 11:00 and <code>etl-vacuum</code> 11:30 daily in <code>ETL_SCHEDULE_TZ</code> (UTC by default), one maintenance job at a time: daytime, so a failure is seen at work.</li><li>Provisioned as code at every start, idempotently.</li></ul>"],
+        ["Rerun", "<ul><li>One window: Run Again on the job page (same <code>JOB_NOW</code>), or the <code>run_event</code> API with <code>now</code> = window end + 60 s.</li><li>A range: the event's Time Machine (Set Event Clock) with Catch-Up on.</li><li>By hand: <code>docker compose exec cronicle etl publish --now …</code>, outside the one-at-a-time limit.</li><li>Safe within <code>ETL_CLAIMS_RETENTION_DAYS</code>: copies are dropped as replay; older reruns write duplicates.</li><li>A window still red after its retries is not re-run automatically.</li></ul>"],
+        ["Why Cronicle", "<p>One Node process with a UI, catch-up, retries, timeouts, run history and an API to provision events as code; cron has none of these, and Airflow is heavy for a laptop. Upstream is in maintenance mode (its author's successor is xyOps); our image builds the pinned release. Production: Amazon MWAA.</p>"]
+      ],
+      chips: ["etl_job_success", "etl_job_duration_seconds"]
+    },
+    pushgateway: {
+      kicker: "Prometheus Pushgateway · :9091", title: "Pushgateway", role: "Keeps the last result of each batch job for Prometheus to scrape.",
+      sections: [
+        ["Metrics", "<ul><li><code>etl_job_last_success_timestamp_seconds</code>, <code>etl_job_last_run_timestamp_seconds</code>, <code>etl_job_duration_seconds</code>, <code>etl_job_success</code>, grouped by <code>job</code>: etl_publisher, etl_retention, etl_vacuum.</li><li><code>etl_publish_records</code> and <code>etl_publish_dlq_lines</code> (last successful publish), <code>etl_retention_partitions_dropped</code>, <code>etl_retention_batches_deleted</code>.</li></ul>"],
+        ["Push semantics", "<p>POST (add): a failed run updates its run time and sets success to 0 but keeps the last success time. Persisted to a volume, scraped with <code>honor_labels</code>. A failed push is logged and does not change the job's exit code.</p>"],
+        ["Alerts", "<ul><li><code>ETLPublisherStale</code>: no successful publish in 15 min (critical).</li><li><code>ETLMaintenanceStale</code>: retention or vacuum without success for 26 h.</li><li><code>ETLMaintenanceNeverSucceeded</code>: no success series for 26 h.</li><li><code>ETLDeadLetterRecords</code> also fires on a publish run's dlq lines.</li></ul>"]
       ]
     }
   };
-  var COMP_ORDER = ["coingecko", "fetcher", "apicalls", "exporter", "state", "b-raw", "publisher", "redpanda", "transformer", "b-processed", "b-rejected", "b-dlq", "init", "obs"];
+  var COMP_ORDER = ["coingecko", "fetcher", "apicalls", "exporter", "state", "b-raw", "cronicle", "publisher", "redpanda", "transformer", "b-processed", "b-rejected", "b-dlq", "init", "obs", "pushgateway"];
 
   /* ------------------------------------------------------------------ drawer */
   var drawer = $("#drawer"), scrim = $("#scrim"), lastFocus = null, closeTimer = null;
@@ -1468,7 +1522,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
   });
 
   /* ------------------------------------------------------------------ walkthrough */
-  var HOPS = ["CoinGecko", "fetcher", "raw.api_calls", "exporter", "s3://raw", "publisher", "coingecko.raw", "transformer", "pipeline.*", "s3://processed"];
+  var HOPS = ["CoinGecko", "fetcher", "raw.api_calls", "exporter", "s3://raw", "etl publish", "coingecko.raw", "transformer", "pipeline.*", "s3://processed"];
   var STEPS = [
     {
       t: "Poll", on: [0, 1],
@@ -1477,38 +1531,38 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     },
     {
       t: "Store", on: [1, 2],
-      p: "One row per call, body byte-exact. Poll B (CDN <code>HIT</code>) adds a second row with the same <code>idempotency_key</code>.",
+      p: "One row per call, body as received. Poll B (CDN <code>HIT</code>) adds a second row with the same <code>idempotency_key</code>.",
       a: "seq  event_id         endpoint       cf     payload_sha256\n1077 01a12543-a844-…  coins_markets  MISS   <span class=\"k\">1350ae15…</span>   <span class=\"c\">poll A</span>\n1078 01a12543-bd0b-…  coin_detail    EXP    …          <span class=\"c\">/coins/bitcoin</span>\n1079 01a12544-2c98-…  coins_markets  HIT    <span class=\"k\">1350ae15…</span>   <span class=\"c\">poll B, same bytes</span>\n1080 01a12544-bba1-…  coins_markets  EXP    <span class=\"s\">02bb4dce…</span>   <span class=\"c\">poll C</span>"
     },
     {
       t: "Export", on: [2, 3, 4],
-      p: "Rows below the oldest open transaction become batch 42: one write-once JSONL object.",
-      a: "<span class=\"k\">PUT</span> raw/source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl\nIf-None-Match: *   →   <span class=\"s\">200 OK</span>\n\n{\"schema_version\":1,\"event_id\":\"01a12543-a844-…\",\"endpoint\":\"coins_markets\",\n \"outcome\":\"ok\",\"payload_sha256\":\"1350ae15…\",\"payload\":[...]}"
+      p: "When window 10:00–10:05 closes, the exporter claims its 4 rows (<code>SKIP LOCKED</code>), writes <code>part-00000</code>, then <code>_SUCCESS</code>.",
+      a: "<span class=\"k\">PUT</span> raw/source=coingecko/ingest_date=2026-10-10/window=1000/part-00000.jsonl\nIf-None-Match: *   →   <span class=\"s\">200 OK</span>\n{\"schema_version\":1,\"event_id\":\"01a12543-a844-…\",\"endpoint\":\"coins_markets\",\n \"outcome\":\"ok\",\"payload_sha256\":\"1350ae15…\",\"payload\":[...]}   <span class=\"c\">+ 3 more lines</span>\n\n<span class=\"k\">PUT</span> raw/source=coingecko/ingest_date=2026-10-10/window=1000/_SUCCESS   →   <span class=\"s\">200 OK</span>\n{\"window_start\":\"2026-10-10T10:00:00.000Z\",\"window_end\":\"2026-10-10T10:05:00.000Z\",\n \"rows\":4,\"parts\":[{\"key\":\"source=coingecko/ingest_date=2026-10-10/window=1000/part-00000.jsonl\",\n                   \"sha256\":\"7c0e91d4…\",\"rows\":4}]}"
     },
     {
       t: "Publish", on: [4, 5, 6],
-      p: "Each line becomes one message. <code>coins_markets</code> and <code>bitcoin</code> both hash to partition 0.",
-      a: "topic coingecko.raw · partition 0\n<span class=\"k\">1200</span> poll A · <span class=\"k\">1201</span> /coins/bitcoin · <span class=\"k\">1202</span> poll B · <span class=\"k\">1203</span> poll C\nheaders: event_id, idempotency_key, schema, raw_object, line_no"
+      p: "At 10:06 Cronicle runs <code>etl publish</code> for 10:00–10:05. A and B share an <code>idempotency_key</code>, so they land on one partition; C and the bitcoin call go elsewhere.",
+      a: "<span class=\"k\">etl publish</span> --now 2026-10-10T10:06:00Z   <span class=\"c\">window 10:00–10:05</span>\nGET _SUCCESS → 1 part · GET part-00000, sha256 <span class=\"s\">ok</span>\n\ntopic coingecko.raw   <span class=\"c\">key = idempotency_key</span>\np3  <span class=\"k\">1200</span> poll A · <span class=\"k\">1201</span> poll B   <span class=\"c\">key 9f3c…</span>\np5  <span class=\"k\">830</span>  poll C              <span class=\"c\">key 41d7…</span>\np0  <span class=\"k\">514</span>  /coins/bitcoin      <span class=\"c\">key c2a8…</span>\nheaders: event_id, idempotency_key, schema, raw_object, line_no"
     },
     {
       t: "Plan", on: [6, 7, 8],
-      p: "Input checks pass; TX1 records offsets 1200–1203 as planned.",
-      a: "strict JSON <span class=\"s\">ok</span> · S1 <span class=\"s\">ok</span> · checksum <span class=\"s\">ok</span> · S0 <span class=\"s\">ok</span>\n\nINSERT INTO pipeline.consumer_batches\n  (topic_id, kafka_partition, first_offset, last_offset, status)\nVALUES (…, 0, 1200, 1203, 'planned');"
+      p: "The p3 batch: TX1 records offsets 1200–1201 as planned at 10:06:12, then the input checks pass.",
+      a: "INSERT INTO pipeline.consumer_batches\n  (topic_id, kafka_partition, first_offset, last_offset)\nVALUES (…, 3, 1200, 1201);   <span class=\"c\">status 'planned', planned_at 10:06:12.000Z</span>\n\nstrict JSON <span class=\"s\">ok</span> · S1 <span class=\"s\">ok</span> · checksum <span class=\"s\">ok</span> · S0 <span class=\"s\">ok</span>   <span class=\"c\">no database query</span>"
     },
     {
       t: "Transform", on: [7],
-      p: "<code>snapshot_at</code> = newest <code>last_updated</code>. figure-heloc is two hours behind, so both its rows are flagged stale.",
-      a: "bitcoin       10:01:51.000Z  price \"82800\"  is_stale false\nfigure-heloc  10:01:51.000Z  price \"1.001\"  <span class=\"w\">is_stale true</span>  <span class=\"c\">(2 h 6 min behind)</span>\n<span class=\"c\">-- message C</span>\nbitcoin       10:02:51.000Z  price \"82795\"\nfigure-heloc  10:02:51.000Z  <span class=\"w\">is_stale true</span>"
+      p: "<code>snapshot_at</code> = newest <code>last_updated</code>. figure-heloc is two hours behind, so its row is flagged stale. B, a byte copy of A, yields the same rows.",
+      a: "bitcoin       10:01:51.000Z  price \"82800\"  is_stale false\nfigure-heloc  10:01:51.000Z  price \"1.001\"  <span class=\"w\">is_stale true</span>  <span class=\"c\">(2 h 6 min behind)</span>\n<span class=\"c\">-- message B (offset 1201): the same rows</span>"
     },
     {
       t: "Deduplicate", on: [7, 8],
-      p: "B's records match A's claims with the same content: dropped. C is a new snapshot: written.",
-      a: "<span class=\"c\">key                          offset  decision</span>\nbitcoin|…T10:01:51.000Z       1200    <span class=\"s\">write</span>\nbitcoin|…T10:01:51.000Z       1202    <span class=\"w\">drop · duplicate_response</span>\nbitcoin|…T10:02:51.000Z       1203    <span class=\"s\">write</span>\nfigure-heloc|…T10:02:51.000Z  1203    <span class=\"s\">write</span> (stale)"
+      p: "B's records match A's claims with the same content: dropped. C, the next snapshot, is written by the batch of partition 5.",
+      a: "<span class=\"c\">key                          position  decision</span>\nbitcoin|…T10:01:51.000Z       p3 1200   <span class=\"s\">write</span>\nbitcoin|…T10:01:51.000Z       p3 1201   <span class=\"w\">drop · duplicate_response</span>\nbitcoin|…T10:02:51.000Z       p5 830    <span class=\"s\">write</span>\nfigure-heloc|…T10:02:51.000Z  p5 830    <span class=\"s\">write</span> (stale)"
     },
     {
       t: "Write", on: [7, 8, 9],
-      p: "Write-once PUT, TX2 marks the batch written, offset 1204 is committed.",
-      a: "<span class=\"k\">PUT</span> processed/dataset=market_snapshot/v=1/event_date=2026-10-10/\n    coingecko.raw+0+00000000000000001200.jsonl   →   <span class=\"s\">200 OK</span>\n\n{\"coin_id\":\"bitcoin\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\"symbol\":\"BTC\",\n \"price\":\"82800\",\"market_cap\":\"1663680829681\",...,\"is_stale\":false,\n \"_event_id\":\"01a12543-a844-…\",\"_kafka_offset\":1200,...}"
+      p: "Write-once PUT named by <code>planned_at</code>, TX2 marks the batch written, offset 1202 is committed.",
+      a: "<span class=\"k\">PUT</span> processed/dataset=market_snapshot/v=1/processed_date=2026-10-10/hour=10/\n    part-20261010T100612Z-5e1f0a93.jsonl   →   <span class=\"s\">200 OK</span>\n\n{\"coin_id\":\"bitcoin\",\"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\"symbol\":\"BTC\",\n \"price\":\"82800\",\"market_cap\":\"1663680829681\",...,\"is_stale\":false,\n \"_event_id\":\"01a12543-a844-…\",\"_kafka_partition\":3,\"_kafka_offset\":1200,\n \"_processed_at\":\"2026-10-10T10:06:12.000Z\",...}"
     }
   ];
   var stepIdx = 0, playTimer = null;
@@ -1583,6 +1637,18 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
       ],
       ranges: [{ from: "09:40:53", to: "10:00:51", label: "trades 09:40:53 to 10:00:51", c: "var(--muted)", lx: "09:59:31", anchor: "start" }],
       take: "Clocks disagree (89 of 100 tickers traded after CoinGecko's fetch), so no logic depends on their order."
+    },
+    {
+      label: "Window to processed", from: "09:59:30", to: "10:07:00",
+      marks: [
+        { at: "10:02:33", label: "poll A", val: "fetched_at", c: "var(--processed)", lvl: 1 },
+        { at: "10:05:00", label: "window closes", val: "exporter claims its rows", c: "var(--raw)", lvl: -1, anchor: "end" },
+        { at: "10:05:02", label: "_SUCCESS written", val: "window ready", c: "var(--raw)", lvl: -2, anchor: "start" },
+        { at: "10:06:00", label: "Cronicle runs etl publish", val: "JOB_NOW = window end + 1 min", c: "var(--state)", lvl: 1, anchor: "end" },
+        { at: "10:06:12", label: "batch planned", val: "planned_at names the file", c: "var(--accent)", lvl: 2, anchor: "end" }
+      ],
+      ranges: [{ from: "10:00:00", to: "10:05:00", label: "window 10:00–10:05", c: "var(--raw)", lx: "10:00:05", anchor: "start" }],
+      take: "fetched_at picks the raw window, planned_at names the processed file; snapshot_at stays the event time."
     }
   ];
   function secs(hms) { var p = hms.split(":").map(Number); return p[0] * 3600 + p[1] * 60 + (p[2] || 0); }
@@ -1593,7 +1659,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
     function X(t) { var v = Math.min(Math.max(secs(t), a), b); return L + (v - a) / span * (R - L); }
     var out = "<svg viewBox=\"0 0 " + W + " " + H + "\" focusable=\"false\">", labels = "";
     out += "<line class=\"tl-axis\" x1=\"" + L + "\" y1=\"" + axisY + "\" x2=\"" + R + "\" y2=\"" + axisY + "\"></line>";
-    var step = span > 3600 ? 1800 : span > 900 ? 300 : 30;
+    var step = span > 3600 ? 1800 : span > 900 ? 300 : span > 300 ? 60 : 30;
     for (var t = Math.ceil(a / step) * step; t <= b; t += step) {
       var x = L + (t - a) / span * (R - L);
       out += "<line x1=\"" + x + "\" y1=\"" + (axisY - 4) + "\" x2=\"" + x + "\" y2=\"" + (axisY + 4) + "\" stroke=\"currentColor\"></line>";
@@ -1681,13 +1747,13 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
   showDS("market_snapshot");
 
   /* ------------------------------------------------------------------ deduplication simulator */
-  var STORED = { pos: "p0 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" };
+  var STORED = { pos: "p3 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" };
   var DEDUP = [
-    { label: "Redelivery", inc: { pos: "p0 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Write", br: "own", rs: "", c: "var(--processed)", why: "The claim is this very record: write again, same bytes." },
-    { label: "Publisher replay", inc: { pos: "p0 · 1310 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · replay", br: "same", rs: "replay", c: "var(--muted)", why: "Same event_id at a new offset: the batch was republished." },
-    { label: "CDN repeat", inc: { pos: "p0 · 1202 · #0", event: "01a12544-2c98-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · duplicate_response", br: "same", rs: "duplicate_response", c: "var(--muted)", why: "Same content and idempotency_key: poll B got poll A's cached bytes." },
-    { label: "Other response", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "c71e…" }, verdict: "Drop · duplicate_record", br: "same", rs: "duplicate_record", c: "var(--muted)", why: "Same content from a different response." },
-    { label: "Other content", inc: { pos: "p0 · 1388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "5b90…" }, verdict: "Reject · snapshot_conflict", br: "diff", rs: "", c: "var(--rejected)", why: "Content differs: the first version stays, this one is rejected." }
+    { label: "Redelivery", inc: { pos: "p3 · 1200 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Write", br: "own", rs: "", c: "var(--processed)", why: "The claim is this very record: write again, same bytes." },
+    { label: "Window rerun", inc: { pos: "p3 · 1310 · #0", event: "01a12543-a844-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · replay", br: "same", rs: "replay", c: "var(--muted)", why: "Same event_id at a new offset: the window was published again." },
+    { label: "CDN repeat", inc: { pos: "p3 · 1201 · #0", event: "01a12544-2c98-…", idem: "9f3c… (poll A)", hash: "c71e…" }, verdict: "Drop · duplicate_response", br: "same", rs: "duplicate_response", c: "var(--muted)", why: "Same content and idempotency_key: poll B got poll A's cached bytes." },
+    { label: "Other response", inc: { pos: "p2 · 388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "c71e…" }, verdict: "Drop · duplicate_record", br: "same", rs: "duplicate_record", c: "var(--muted)", why: "Same content from a different response." },
+    { label: "Other content", inc: { pos: "p2 · 388 · #0", event: "01a1254c-71d0-…", idem: "e04d… (other)", hash: "5b90…" }, verdict: "Reject · snapshot_conflict", br: "diff", rs: "", c: "var(--rejected)", why: "Content differs: the first version stays, this one is rejected." }
   ];
   var dedupTabs = $("#dedup-tabs");
   function cell(a, b) {
@@ -1719,12 +1785,12 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ partitions */
   var PARTS = [
-    { p: 0, keys: ["coins_markets", "bitcoin"], owner: "transformer-1" },
-    { p: 1, keys: ["tether"], owner: "transformer-1" },
-    { p: 2, keys: ["ethereum"], owner: "transformer-1" },
-    { p: 3, keys: [], owner: "transformer-2" },
-    { p: 4, keys: ["usd-coin"], owner: "transformer-2" },
-    { p: 5, keys: [], owner: "transformer-2" }
+    { p: 0, keys: ["c2a8… /coins/bitcoin"], owner: "transformer-1" },
+    { p: 1, keys: ["7b10… markets", "d915… /coins/ethereum"], owner: "transformer-1" },
+    { p: 2, keys: ["e04d… markets"], owner: "transformer-1" },
+    { p: 3, keys: ["9f3c… A + B (CDN copy)"], owner: "transformer-2" },
+    { p: 4, keys: ["5a7c… /coins/tether"], owner: "transformer-2" },
+    { p: 5, keys: ["41d7… C", "0b6e… /coins/usd-coin"], owner: "transformer-2" }
   ];
   $("#parts").innerHTML = PARTS.map(function (r) {
     var bar = r.keys.length ? "<div class=\"bar\">" + r.keys.map(function (k) { return "<span>" + k + "</span>"; }).join("") + "</div>" : "<div class=\"bar empty\">empty</div>";
@@ -1733,29 +1799,28 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ crash explorer */
   var LC = [
-    { x: 20, w: 170, t: "Input checks", s: ["strict JSON · S1", "sha256 · S0", "no database"], exit: "any check fails → dlq/" },
-    { x: 230, w: 300, t: "TX1 · one transaction", s: ["a  manifest row: planned", "b  transform", "c  S2 check", "d  claims → decide", "e  objects + checksums"], exit: "S2 fails → dlq/, no claim" },
-    { x: 570, w: 170, t: "PUT objects", s: ["If-None-Match: *", "200 → done", "412 → compare sha256"], exit: "other bytes → halt partition" },
-    { x: 780, w: 120, t: "TX2", s: ["status =", "written"] },
-    { x: 940, w: 140, t: "Commit offset", s: ["L+1,", "synchronous"] }
+    { x: 20, w: 350, t: "TX1 · one transaction", s: ["a  manifest row: planned (planned_at)", "b  input checks → dlq (no database)", "c  transform", "d  S2 check", "e  claims → decide", "f  objects + checksums"], exit: "failed check → dlq/, no claim", ew: 230 },
+    { x: 420, w: 190, t: "PUT objects", s: ["If-None-Match: *", "200 → done", "412 → compare sha256"], exit: "other bytes → halt partition" },
+    { x: 660, w: 140, t: "TX2", s: ["status =", "written"] },
+    { x: 850, w: 160, t: "Commit offset", s: ["L+1,", "synchronous"] }
   ];
   var CRASH = [
-    { x: 210, label: "C1", title: "Before TX1 commits", left: "Nothing durable yet.", rec: "The next owner starts a fresh batch.", naive: null },
-    { x: 550, label: "C2", title: "After TX1, before any PUT", left: "Batch planned; claims point at its offsets.", rec: "Same range, same decisions, same bytes: PUT 200.", naive: "Every key is already claimed, so all records are dropped. The batch is lost." },
-    { x: 655, label: "C3", title: "After some PUTs", left: "Some objects written; batch still planned.", rec: "Missing objects 200; written ones 412 with an equal checksum.", naive: "Claims exist, so every record is dropped; unwritten objects never appear." },
-    { x: 920, label: "C4", title: "After TX2, before the commit", left: "Batch written; offset not committed.", rec: "The next owner skips to 1204 and commits.", naive: null },
-    { x: 840, label: "Z", title: "Zombie and new owner", left: "A zombie lost the partition and has not noticed.", rec: "Both write identical bytes; the second PUT gets 412; the zombie's commit is rejected.", naive: "If the zombie dies after TX1, the new owner drops the whole range." }
+    { x: 330, label: "C1", title: "Before TX1 commits", left: "Nothing durable yet.", rec: "The next owner starts a fresh batch.", naive: null },
+    { x: 395, label: "C2", title: "After TX1, before any PUT", left: "Batch planned; claims point at its offsets.", rec: "Same range, same decisions, same bytes: PUT 200.", naive: "Every key is already claimed, so all records are dropped. The batch is lost." },
+    { x: 515, label: "C3", title: "After some PUTs", left: "Some objects written; batch still planned.", rec: "Missing objects 200; written ones 412 with an equal checksum.", naive: "Claims exist, so every record is dropped; unwritten objects never appear." },
+    { x: 825, label: "C4", title: "After TX2, before the commit", left: "Batch written; offset not committed.", rec: "The next owner skips to 1204 and commits.", naive: null },
+    { x: 730, label: "Z", title: "Zombie and new owner", left: "A zombie lost the partition and has not noticed.", rec: "Both write identical bytes; the second PUT gets 412; the zombie's commit is rejected.", naive: "If the zombie dies after TX1, the new owner drops the whole range." }
   ];
   var naive = false, crashSel = 1;
   function drawLC() {
-    var svg = $("#lc-svg"), out = "", TOP = 56, H = 130, MID = TOP + 65;
+    var svg = $("#lc-svg"), out = "", TOP = 56, H = 148, MID = TOP + 74;
     LC.forEach(function (s, i) {
       out += "<g class=\"lc-step\" aria-hidden=\"true\"><rect x=\"" + s.x + "\" y=\"" + TOP + "\" width=\"" + s.w + "\" height=\"" + H + "\" rx=\"5\"></rect><text x=\"" + (s.x + 12) + "\" y=\"" + (TOP + 24) + "\">" + s.t + "</text>";
       s.s.forEach(function (line, j) { out += "<text class=\"s2\" x=\"" + (s.x + 12) + "\" y=\"" + (TOP + 46 + j * 17) + "\" xml:space=\"preserve\">" + esc(line) + "</text>"; });
       out += "</g>";
       if (i < LC.length - 1) out += "<path class=\"lc-arrow\" aria-hidden=\"true\" d=\"M" + (s.x + s.w) + " " + MID + " H" + (LC[i + 1].x - 4) + "\" marker-end=\"url(#m-mu)\"></path>";
       if (s.exit) {
-        var cx = s.x + s.w / 2, ew = 190;
+        var cx = s.x + s.w / 2, ew = s.ew || 190;
         out += "<path class=\"lc-arrow\" aria-hidden=\"true\" d=\"M" + cx + " " + (TOP + H) + " V" + (TOP + H + 20) + "\" marker-end=\"url(#m-d)\" style=\"stroke: var(--dlq)\"></path>";
         out += "<g class=\"lc-exit\" aria-hidden=\"true\"><rect x=\"" + (cx - ew / 2) + "\" y=\"" + (TOP + H + 24) + "\" width=\"" + ew + "\" height=\"30\" rx=\"4\"></rect><text x=\"" + cx + "\" y=\"" + (TOP + H + 43) + "\" text-anchor=\"middle\">" + esc(s.exit) + "</text></g>";
       }
@@ -1807,10 +1872,11 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ storage files */
   var FILES = {
-    raw: { title: "raw · batch 42", c: "var(--raw)", body: "{\"schema_version\":1,\n \"event_id\":\"01a12543-a844-7cc2-9a51-3f1f2b9d8e11\",\n \"endpoint\":\"coins_markets\",\n \"fetched_at\":\"2026-10-10T10:02:33.412Z\",\"outcome\":\"ok\",\n \"http\":{\"status\":200,\"cf_cache_status\":\"MISS\",...},\n \"payload_sha256\":\"1350ae15534a2a76…\",\n \"payload\":[{\"id\":\"bitcoin\",...}]}", note: "One line per API call; the payload sits inside verbatim." },
-    processed: { title: "processed · market_snapshot", c: "var(--processed)", body: "{\"coin_id\":\"figure-heloc\",\n \"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\n \"symbol\":\"FIGR_HELOC\",\"price\":\"1.001\",\n \"market_cap\":\"23748077381\",\"price_change_pct_24h\":null,...,\n \"source_updated_at\":\"2026-10-10T07:55:52.000Z\",\n \"is_stale\":true,\n \"_event_id\":\"01a12543-a844-…\",\"_kafka_offset\":1200,...}", note: "Stale but kept. Money as strings." },
-    rejected: { title: "rejected · coin_contract", c: "var(--rejected)", body: "{\"dataset\":\"coin_contract\",\"reason\":\"empty_platform\",\n \"record_key\":\"bitcoin||2026-10-10T10:01:51.000Z\",\n \"record\":{\"coin_id\":\"bitcoin\",\"platform_id\":\"\",\n           \"contract_address\":\"\",...},\n \"_kafka_offset\":1201,...}", note: "Bitcoin has no contracts; CoinGecko sends an empty platform anyway." },
-    dlq: { title: "dlq · stage=transform", c: "var(--dlq)", body: "{\"stage\":\"transform_output\",\n \"error_class\":\"output_schema_violation\",\n \"violations\":[{\"instance_location\":\"/price\",\n                \"message\":\"got null, want string\"}],\n \"origin\":{\"kind\":\"kafka\",\"topic\":\"coingecko.raw\",\n           \"partition\":0,\"offset\":1203},\n \"original_base64\":\"e30=\",\n \"occurred_at\":\"2026-10-10T10:03:52.204Z\"}", note: "Hypothetical record, to show the format." }
+    raw: { title: "raw · window 10:00, part 0", c: "var(--raw)", body: "{\"schema_version\":1,\n \"event_id\":\"01a12543-a844-7cc2-9a51-3f1f2b9d8e11\",\n \"endpoint\":\"coins_markets\",\n \"fetched_at\":\"2026-10-10T10:02:33.412Z\",\"outcome\":\"ok\",\n \"http\":{\"status\":200,\"cf_cache_status\":\"MISS\",...},\n \"payload_sha256\":\"1350ae15534a2a76…\",\n \"payload\":[{\"id\":\"bitcoin\",...}]}", note: "One line per API call; the payload sits inside verbatim." },
+    success: { title: "_SUCCESS · window 10:00", c: "var(--raw)", body: "{\"window_start\":\"2026-10-10T10:00:00.000Z\",\n \"window_end\":\"2026-10-10T10:05:00.000Z\",\n \"rows\":4,\n \"parts\":[{\"key\":\"source=coingecko/ingest_date=2026-10-10/window=1000/part-00000.jsonl\",\n           \"sha256\":\"7c0e91d4…\",\"rows\":4}]}", note: "Written last; the publisher reads only the parts it lists. One line of compact JSON on disk; an empty window has \"rows\":0,\"parts\":[]." },
+    processed: { title: "processed · market_snapshot", c: "var(--processed)", body: "{\"coin_id\":\"figure-heloc\",\n \"snapshot_at\":\"2026-10-10T10:01:51.000Z\",\n \"symbol\":\"FIGR_HELOC\",\"price\":\"1.001\",\n \"market_cap\":\"23748077381\",\"price_change_pct_24h\":null,...,\n \"source_updated_at\":\"2026-10-10T07:55:52.000Z\",\n \"is_stale\":true,\n \"_event_id\":\"01a12543-a844-…\",\"_kafka_offset\":1200,\n \"_processed_at\":\"2026-10-10T10:06:12.000Z\",...}", note: "Stale but kept. Money as strings. _processed_at is the batch's planned_at, which also names the file." },
+    rejected: { title: "rejected · coin_contract", c: "var(--rejected)", body: "{\"dataset\":\"coin_contract\",\"reason\":\"empty_platform\",\n \"record_key\":\"bitcoin||2026-10-10T10:01:51.000Z\",\n \"record\":{\"coin_id\":\"bitcoin\",\"platform_id\":\"\",\n           \"contract_address\":\"\",...},\n \"_kafka_partition\":0,\"_kafka_offset\":514,...}", note: "Bitcoin has no contracts; CoinGecko sends an empty platform anyway." },
+    dlq: { title: "dlq · stage=transform", c: "var(--dlq)", body: "{\"stage\":\"transform_output\",\n \"error_class\":\"output_schema_violation\",\n \"violations\":[{\"instance_location\":\"/price\",\n                \"message\":\"got null, want string\"}],\n \"origin\":{\"kind\":\"kafka\",\"topic\":\"coingecko.raw\",\n           \"partition\":5,\"offset\":830},\n \"original_base64\":\"e30=\",\n \"occurred_at\":\"2026-10-10T10:06:15.000Z\"}", note: "Hypothetical record, to show the format." }
   };
   function showFile(k) {
     var f = FILES[k];
@@ -1823,17 +1889,23 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
 
   /* ------------------------------------------------------------------ decisions */
   var DEC = [
-    { area: "Storage", topic: "Object storage", d: "versitygw: plain files, S3 API", why: "data/raw and data/processed stay plain folders while services use the S3 API, as in production. Honours If-None-Match (exactly one winner among 20 parallel writers).", alt: "Local file writes: not the production path. Other S3 servers: see ADR 0001." },
-    { area: "Data", topic: "Event", d: "a source snapshot", why: "A stale coin in two snapshots is two valid statements; two polls of one cached response are one.", alt: "Poll time: every CDN repeat becomes an event. The coin's own last_updated: stale coins collapse into one row." },
-    { area: "Delivery", topic: "Deduplication", d: "one step, by natural key", why: "Record claims cover CDN repeats, replays and redeliveries; the reasons are metric labels only.", alt: "A second, call-level dedup by idempotency_key: redundant." },
-    { area: "Delivery", topic: "Pipeline state", d: "Postgres schema pipeline", why: "Survives crashes, shared by replicas, atomic with the batch plan.", alt: "In-memory: lost on rebalance. Kafka Streams: JVM, exactly-once only Kafka to Kafka. goka: no transactions." },
-    { area: "Delivery", topic: "Exporter cursor", d: "xid8, below the oldest open transaction", why: "Raw data lands in Postgres per the assignment, and a transactional table is not a change log; this cursor stalls instead of skipping rows (timeouts and an alert bound the stall). A pragmatic workaround, not an elegant design.", alt: "Id watermark: loses rows (reproduced). exported flag + SKIP LOCKED: updates every raw row and still needs a claimed batch for byte-identical retries. Debezium CDC: production option, heavier stack." },
-    { area: "Platform", topic: "Broker", d: "Redpanda, Kafka protocol", why: "Replayable log, per-key order, consumer groups; no JVM; same code runs on Kafka or MSK.", alt: "NATS JetStream, Pulsar: viable with caveats. RabbitMQ classic queues, Redis Streams, SQS, Pub/Sub: no offset replay or per-key ordering at scale." },
-    { area: "Platform", topic: "Schemas", d: "in the repo, no registry", why: "One producer, one consumer, one repo; changes ship as redeploys; CI checks compatibility.", alt: "A schema registry: production note; its wire prefix would break byte equality." },
-    { area: "Operations", topic: "Logs", d: "one log file per replica", why: "No two containers append to the same file; each transformer replica gets its own.", alt: "One shared logs/etl.log: interleaved lines possible." },
-    { area: "Data", topic: "Cleaning", d: "reject empty, flag questionable", why: "Nothing disappears silently; readers decide about stale rows.", alt: "Dropping questionable rows: stale coins vanish from the series." },
-    { area: "Data", topic: "Polling cadence", d: "4 calls a minute, 15 s apart", why: "Markets at :00 and :30 meets the assignment's 'every 30 s'; a coin at :15 and :45 refreshes each of the four coins every 2 min, far below the keyless limit (10 calls/min at worst).", alt: "All four coins every minute: 6 calls/min, too close to the limit. Markets every 60 s: breaks 'every 30 s'. One coin a minute: each coin only every 4 min." },
-    { area: "Data", topic: "Numbers", d: "money as decimal strings", why: "Values pass 2^53 (bitcoin's VND market cap), where float64 stops holding every integer.", alt: "Plain JSON numbers: precision depends on the reader." }
+    { area: "Storage", topic: "Object storage", d: "versitygw: plain files, S3 API", why: "data/raw and data/processed stay plain folders while services use the S3 API, as in production. Honours If-None-Match (exactly one winner among 20 parallel writers). Cost: one more container, and files must not be edited by hand.", alt: "Local file writes: not the production path. Other S3 servers: see ADR 0001." },
+    { area: "Storage", topic: "Object names", d: "windows and processing time, no raw counters", why: "Raw and its export and publish dlq are named by window; processed, rejected and the transform dlq by the batch's planned_at hour plus a hash of its Kafka position and topic id. A retried batch writes the same key, and the lake does not depend on a database or broker lifetime, so it may be kept when the stack is recreated. Cost: queries by event time scan more files.", alt: "Batch ids and offsets: unique only within one database and topic lifetime. Random names: a retry writes a second object. event_date directories: late and re-planned batches write into old partitions." },
+    { area: "Storage", topic: "File format", d: "JSON Lines", why: "Keeps arrays, null versus empty string and nested fields in rejected and dlq records; every line describes itself as schemas evolve. Cost: larger files and slower scans than a columnar format.", alt: "Parquet: the production compaction format, not the write path." },
+    { area: "Data", topic: "Event", d: "a source snapshot", why: "A stale coin in two snapshots is two valid statements; two polls of one cached response are one. Cost: the copies travel to the transformer and are dropped there (about a quarter of all records).", alt: "Poll time: every CDN repeat becomes an event. The coin's own last_updated: stale coins collapse into one row." },
+    { area: "Delivery", topic: "Deduplication", d: "one step, by natural key", why: "Record claims cover CDN repeats, replays and redeliveries; the reasons are metric labels only. Cost: one Postgres claim per record, kept 8 days.", alt: "A second, call-level dedup by idempotency_key: redundant." },
+    { area: "Delivery", topic: "Pipeline state", d: "Postgres schema pipeline", why: "Survives crashes, shared by replicas, atomic with the batch plan. Cost: Postgres is on the transformer's write path.", alt: "In-memory: lost on rebalance. Kafka Streams: JVM, exactly-once only Kafka to Kafka. goka: no transactions." },
+    { area: "Delivery", topic: "Exporter claim", d: "FOR UPDATE SKIP LOCKED, stamped with the batch id", why: "Raw data lands in Postgres per the assignment, and a transactional table is not a change log, so the exporter treats it as a work queue. Rows are stamped in the same transaction as the ledger row: a late commit is never skipped, nothing waits for a long transaction, and a retry rewrites the same bytes. Cost: one UPDATE per raw row.", alt: "Id watermark: loses rows on out-of-order commits. xid8 cursor below the oldest open transaction: no row updates, but relies on Postgres internals and stalls behind long transactions. A separate export_claims table: keeps raw append-only, adds a second table to join. Debezium CDC: production option, heavier stack." },
+    { area: "Delivery", topic: "Raw windows", d: "ETL_WINDOW (5 min), _SUCCESS last", why: "Windows aligned to the UTC hour give readers a completeness signal: a window is ready when its _SUCCESS exists, and the manifest lists exactly its parts and checksums. Empty windows get one too. Cost: a row waits up to ETL_WINDOW for its window to close.", alt: "One object per export batch: no completeness signal. Listing the prefix: cannot tell late from empty." },
+    { area: "Delivery", topic: "Message key", d: "the event's idempotency_key", why: "Responses spread over all 6 partitions, and every copy of one response (a CDN repeat, a rerun) lands on one partition, judged in offset order by one transformer. Per-coin message order is not kept; nothing depends on it.", alt: "Endpoint or coin id: four of six partitions used, half the traffic on one." },
+    { area: "Platform", topic: "Broker", d: "Redpanda, Kafka protocol", why: "Replayable log with consumer groups; copies of a response share a partition; offsets make the transformer's batches replayable and crash-safe, and the topic is a 7-day replay buffer independent of the publish schedule. No JVM; the same code runs on Kafka or MSK. Cost: a stateful service to operate; locally one node without replication.", alt: "NATS JetStream, Pulsar: viable with caveats. RabbitMQ classic queues, Redis Streams, SQS, Pub/Sub: no offset replay or keyed partitions at scale." },
+    { area: "Platform", topic: "Schemas", d: "in the repo, no registry", why: "One producer, one consumer, one repo; changes ship as redeploys; CI checks compatibility. Cost: a schema change is a redeploy.", alt: "A schema registry: production note; its wire prefix would break byte equality." },
+    { area: "Operations", topic: "Logs", d: "one log file per writer", why: "No two processes append to one file at once: each transformer replica gets its own, and Cronicle runs one publish job and one maintenance job at a time.", alt: "One shared logs/etl.log: interleaved lines possible." },
+    { area: "Operations", topic: "Publisher job", d: "a job per closed window, run by Cronicle", why: "The publisher reads only S3 and needs no Postgres, so stages meet only through the artifacts they write. Cronicle gives catch-up, retries, timeouts, run history and a UI, like Airflow (MWAA in production). Cost: fetch to processed takes minutes, not seconds.", alt: "A long-running publisher with leases in Postgres: couples publisher and exporter. Plain cron: no catch-up, history or retries. Airflow locally: heavy for a laptop." },
+    { area: "Operations", topic: "Maintenance", d: "daily daytime Cronicle jobs", why: "Retention drops claim partitions and written manifests older than 8 days (never less than the topic's 7 days + 1); VACUUM (ANALYZE) clears the dead versions the claim leaves. Daytime, so a failure is seen by people at work. Cost: relies on the scheduler; a failing job is flagged after 26 hours.", alt: "pg_cron: custom Postgres image. Night runs: failures wait for the morning." },
+    { area: "Data", topic: "Cleaning", d: "reject empty, flag questionable", why: "Nothing disappears silently; readers decide about stale rows. Cost: readers filter flagged rows themselves.", alt: "Dropping questionable rows: stale coins vanish from the series." },
+    { area: "Data", topic: "Polling cadence", d: "4 calls a minute, 15 s apart", why: "Markets at :00 and :30 meets the assignment's 'every 30 s'; a coin at :15 and :45 refreshes each of the four coins every 2 min, far below the keyless limit (10 calls/min at worst). Cost: each coin's detail only every 2 min.", alt: "All four coins every minute: 6 calls/min, 60% of the worst-case limit, little room for retries. Markets every 60 s: breaks 'every 30 s'. One coin a minute: each coin only every 4 min." },
+    { area: "Data", topic: "Numbers", d: "money as decimal strings", why: "Values pass 2^53 (bitcoin's VND market cap), where float64 stops holding every integer. Cost: readers cast them.", alt: "Plain JSON numbers: precision depends on the reader." }
   ];
   var AREAS = ["All", "Storage", "Data", "Delivery", "Platform", "Operations"];
   var decFilter = $("#dec-filter"), decArea = "All";

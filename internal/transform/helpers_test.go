@@ -11,7 +11,7 @@ import (
 	"coingecko-etl/schemas"
 )
 
-// fixtureDir is the recorded CoinGecko responses copied in Task 4.
+// fixtureDir holds the recorded CoinGecko responses.
 const fixtureDir = "../../schemas/testdata/coingecko"
 
 var testRules = Rules{StaleAfter: 10 * time.Minute, TickerStaleAfter: time.Hour, TickerAnomalyPct: 2.0}

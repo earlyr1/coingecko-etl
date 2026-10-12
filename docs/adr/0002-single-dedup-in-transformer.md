@@ -7,8 +7,8 @@
 
 Duplicates enter the pipeline in two ways:
 
-- **Redelivery**: every hop is at-least-once, so the same event can reach the transformer more than once (publisher restarts, consumer rebalances, crashes before an offset commit).
-- **True duplicates**: CoinGecko's CDN caches responses for 60 s and we poll every 30 s, so about half of the markets responses are byte-identical; a stale coin also appears unchanged in consecutive snapshots.
+- **Redelivery**: every hop is at-least-once, so the same event can reach the transformer more than once (publisher reruns, consumer rebalances, crashes before an offset commit).
+- **True duplicates**: CoinGecko's CDN caches responses for 60 s and we poll every 30 s, so half or more of the markets responses are byte-identical (two in three on the demo stack); the same record can also arrive unchanged in another response. A stale coin repeated in two consecutive snapshots is not a duplicate: `snapshot_at` is part of the key, so it yields two rows, both flagged `is_stale`.
 
 The assignment requires raw data in Postgres before deduplication. Deduplicating at several stages (fetcher, exporter, publisher, transformer) would mean several rules to keep consistent and several places where a crash can lose data.
 
@@ -22,11 +22,13 @@ Deduplicate exactly once, in the transformer, on the natural key of each process
 - another position, same content hash (business fields only) → drop as a duplicate;
 - another position, different content hash → write to `rejected/` as `snapshot_conflict`.
 
-The fetcher's `idempotency_key` is an informational column used for SQL analysis and the drop-reason metric, not for decisions. Every other hop is made idempotent instead (primary keys, ledgers, write-once objects).
+A record without an id of its own is rejected as `missing_id` and still claims a key: its response's `idempotency_key` (the `event_id` when there is none), its index in the payload and `snapshot_at`, with the coin id in front for tickers. Keys from different coins and responses therefore never collide, and the copies of one response still deduplicate.
+
+The fetcher's `idempotency_key` is the Kafka message key ([ADR 0003](0003-redpanda.md)) and labels the drop-reason metric (`replay`: same `event_id`; `duplicate_response`: same `idempotency_key`; `duplicate_record`: the same content from another response); it is not a dedup input. Every other hop is made idempotent instead (primary keys, ledgers, write-once objects). The claim's `first_seen_at` column is kept for audit only; no code reads it.
 
 ## Consequences
 
 - Raw storage keeps everything, including duplicates, which makes the source behaviour observable.
 - Because a claim remembers its position, reprocessing a batch after a crash reproduces the same decisions and the same bytes; the naive rule "drop if already claimed" would have lost the batch.
-- The claim table grows with data volume. It is partitioned by `event_date` and must outlive the topic's 7-day retention so that replays within retention are still deduplicated; nothing in this stack deletes claims, and a production retention job (pg_partman) would keep at least 30 days.
+- Claims are partitioned by `event_date`. The daily `etl maintenance retention` job ([ADR 0007](0007-windowed-publisher-cronicle.md)) drops partitions older than `ETL_CLAIMS_RETENTION_DAYS` (default 8). Config refuses a value below the topic retention in days plus one, because partitions follow `event_date` while replays follow publish time (after an exporter outage a message published today can carry yesterday's `event_date`). Production would keep 30 days, which also covers a raw republish after a schema fix. Redeliveries, topic replays and window reruns are deduplicated only within that period; an older replay writes duplicates.
 - Every record costs one Postgres round trip inside a short transaction; at higher volume the claims can move to a key-value store with conditional writes (e.g. DynamoDB).

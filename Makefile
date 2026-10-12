@@ -60,8 +60,8 @@ up:
 down:
 	$(COMPOSE) down
 
-# Wipes everything: the containers (also those of services this file no
-# longer defines, such as the old publisher), the named volumes (Postgres,
+# Wipes everything: the containers (orphans of services this file does not
+# define included), the named volumes (Postgres,
 # Redpanda, Prometheus, Grafana, Pushgateway, Cronicle), the lake and the logs.
 # Object names carry only time, so the lake may also be kept when the stack is re-created.
 clean:

@@ -215,7 +215,7 @@ services:
       <<: *etl-env
       ETL_PUSHGATEWAY_URL: http://pushgateway:9091
       ETL_SCHEDULE_TZ: ${ETL_SCHEDULE_TZ:-UTC}
-      # Stored when a fresh cronicle volume is set up (make clean resets them);
+      # Stored when a fresh cronicle volume is set up (a new volume resets them);
       # provision.js uses the API key at every start.
       CRONICLE_ADMIN_PASSWORD: ${CRONICLE_ADMIN_PASSWORD:-admin}
       CRONICLE_API_KEY: ${CRONICLE_API_KEY:-etl_local_dev_api_key_0001}

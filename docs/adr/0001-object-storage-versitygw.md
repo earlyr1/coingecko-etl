@@ -16,11 +16,11 @@ Options considered:
 
 ## Decision
 
-Run `versity/versitygw:v1.8.0` with the posix backend. The gateway root `/lake` is the bind mount `./data`; the buckets `raw`, `processed`, `rejected` and `dlq` are its top-level directories. Metadata is stored with `--sidecar /meta` in `./.s3meta`, because Docker Desktop bind mounts on macOS do not support extended attributes (the default xattr mode refuses to start). All code talks to it through aws-sdk-go-v2 with path-style addressing. Every write is `PutObject` with `If-None-Match: *` and a `sha256` user-metadata entry; on 412 the writer reads the stored checksum and treats equal bytes as success.
+Run versitygw with the posix backend. The gateway root `/lake` is the bind mount `./data`; the buckets `raw`, `processed`, `rejected` and `dlq` are its top-level directories. Object metadata lives in a sidecar directory, `./.s3meta`, because Docker Desktop bind mounts lack extended attributes. All code talks to it through aws-sdk-go-v2 with path-style addressing. Every write is `PutObject` with `If-None-Match: *` and a `sha256` user-metadata entry; on 412 the writer reads the stored checksum and treats equal bytes as success.
 
 ## Consequences
 
 - Reviewers can `cat` every object; the same code targets Amazon S3 by changing the endpoint.
-- Files placed in `./data` by hand have no stored metadata, and versitygw then lets `If-None-Match: *` overwrite them. The lake must only be written through the gateway; the README says so.
-- `./data` and `./.s3meta` belong together: deleting only the metadata makes existing objects look foreign. Buckets are created through the gateway by `etl init` so that they get metadata. `make up` creates `./data`, `./logs` and `./.s3meta` but never the bucket directories: versitygw answers `CreateBucket` with `500 InternalError` for a bucket directory it did not create, so `etl init` checks `HeadBucket` first and skips `CreateBucket` when the bucket answers.
+- Files placed in `./data` by hand have no stored metadata, and versitygw then lets `If-None-Match: *` overwrite them. The lake must only be written through the gateway.
+- `./data` and `./.s3meta` belong together: deleting only the metadata makes existing objects look foreign. `etl init` creates the buckets through the gateway so that they get metadata, and skips a bucket that already answers `HeadBucket`, because versitygw rejects `CreateBucket` for a bucket directory it did not create.
 - Sidecar metadata is marked experimental upstream; the integration tests run against the same image and mode.
