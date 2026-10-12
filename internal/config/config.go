@@ -44,8 +44,6 @@ type Config struct {
 	ExportInterval      time.Duration // ETL_EXPORT_INTERVAL, default 15s; shorter than window.PublishGrace
 	ExportBatchMax      int           // ETL_EXPORT_BATCH_MAX, default 500; maximum rows per raw part
 	Window              time.Duration // ETL_WINDOW, default 5m; whole minutes in [1m,60m] dividing 60m; aligned to the UTC hour
-	PublishLease        time.Duration // ETL_PUBLISH_LEASE, default 2m
-	PublishPoll         time.Duration // ETL_PUBLISH_POLL, default 5s
 	TransformMaxRecords int           // ETL_TRANSFORM_MAX_RECORDS, default 500
 	StaleAfter          time.Duration // ETL_STALE_AFTER, default 10m
 	TickerStaleAfter    time.Duration // ETL_TICKER_STALE_AFTER, default 1h
@@ -84,8 +82,6 @@ func Load(service string) (Config, error) {
 		ExportInterval:      p.duration("ETL_EXPORT_INTERVAL", 15*time.Second, false),
 		ExportBatchMax:      p.int("ETL_EXPORT_BATCH_MAX", 500),
 		Window:              p.windowSize("ETL_WINDOW", 5*time.Minute),
-		PublishLease:        p.duration("ETL_PUBLISH_LEASE", 2*time.Minute, false),
-		PublishPoll:         p.duration("ETL_PUBLISH_POLL", 5*time.Second, false),
 		TransformMaxRecords: p.int("ETL_TRANSFORM_MAX_RECORDS", 500),
 		StaleAfter:          p.duration("ETL_STALE_AFTER", 10*time.Minute, false),
 		TickerStaleAfter:    p.duration("ETL_TICKER_STALE_AFTER", time.Hour, false),

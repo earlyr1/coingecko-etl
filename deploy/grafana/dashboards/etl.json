@@ -70,14 +70,13 @@
       "id": 5,
       "type": "timeseries",
       "title": "Records per stage",
-      "description": "Throughput of every hop: API calls stored, raw records published to the broker, processed records by outcome.",
+      "description": "Throughput of the long-running hops: API calls stored and processed records by outcome.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 0, "y": 4, "w": 24, "h": 8},
       "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
         {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum(rate(etl_api_requests_total{status=\"200\"}[5m])) * 60", "legendFormat": "fetched calls / min"},
-        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "sum(rate(etl_published_records_total[5m])) * 60", "legendFormat": "published / min"},
         {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "C", "expr": "sum by (outcome) (rate(etl_records_total[5m])) * 60", "legendFormat": "transformer {{outcome}} / min"}
       ]
     },

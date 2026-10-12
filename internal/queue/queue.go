@@ -9,11 +9,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kadm"
 	"github.com/twmb/franz-go/pkg/kerr"
 	"github.com/twmb/franz-go/pkg/kgo"
-	"github.com/twmb/franz-go/plugin/kprom"
 
 	"coingecko-etl/internal/event"
 )
@@ -40,12 +38,9 @@ func MessageKey(ev event.RawEvent) string {
 	return ev.EventID
 }
 
-// NewProducer returns an idempotent producer with acks=all.
-// kprom client metrics are registered on reg under namespace etl_publisher
-// (reg may be nil: no client metrics). kprom registers its collectors when
-// the client is created and panics on duplicate registration, so build at
-// most one producer per registry.
-func NewProducer(brokers []string, clientID string, reg prometheus.Registerer) (*kgo.Client, error) {
+// NewProducer returns an idempotent producer with acks=all. Building it does
+// not dial: the first produce connects.
+func NewProducer(brokers []string, clientID string) (*kgo.Client, error) {
 	if len(brokers) == 0 {
 		return nil, errors.New("queue: no brokers configured")
 	}
@@ -56,13 +51,6 @@ func NewProducer(brokers []string, clientID string, reg prometheus.Registerer) (
 		kgo.ProducerBatchCompression(kgo.ZstdCompression()),
 		kgo.ProducerLinger(20 * time.Millisecond),
 		kgo.RecordDeliveryTimeout(2 * time.Minute),
-	}
-	if reg != nil {
-		kopts := []kprom.Opt{kprom.Registerer(reg)}
-		if g, ok := reg.(prometheus.Gatherer); ok {
-			kopts = append(kopts, kprom.Gatherer(g))
-		}
-		opts = append(opts, kgo.WithHooks(kprom.NewMetrics("etl_publisher", kopts...)))
 	}
 	return kgo.NewClient(opts...)
 }

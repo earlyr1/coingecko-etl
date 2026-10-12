@@ -13,7 +13,7 @@ var allKeys = []string{
 	"ETL_TOPIC_RETENTION", "ETL_PIPELINE_EPOCH", "ETL_COINGECKO_BASE_URL", "COINGECKO_API_KEY",
 	"ETL_MARKETS_INTERVAL", "ETL_DETAIL_INTERVAL", "ETL_DETAIL_OFFSET", "ETL_WATCHLIST",
 	"ETL_MARKETS_PER_PAGE", "ETL_MIN_REQUEST_SPACING", "ETL_EXPORT_INTERVAL", "ETL_EXPORT_BATCH_MAX",
-	"ETL_PUBLISH_LEASE", "ETL_PUBLISH_POLL", "ETL_TRANSFORM_MAX_RECORDS", "ETL_STALE_AFTER",
+	"ETL_TRANSFORM_MAX_RECORDS", "ETL_STALE_AFTER",
 	"ETL_TICKER_STALE_AFTER", "ETL_TICKER_ANOMALY_PCT", "ETL_ANOMALY_TOLERANCE_PCT",
 	"ETL_WINDOW", "ETL_CLAIMS_RETENTION_DAYS", "ETL_PUSHGATEWAY_URL",
 }
@@ -59,8 +59,6 @@ func TestLoadDefaults(t *testing.T) {
 		ExportInterval:      15 * time.Second,
 		ExportBatchMax:      500,
 		Window:              5 * time.Minute,
-		PublishLease:        2 * time.Minute,
-		PublishPoll:         5 * time.Second,
 		TransformMaxRecords: 500,
 		StaleAfter:          10 * time.Minute,
 		TickerStaleAfter:    time.Hour,
@@ -97,8 +95,6 @@ func TestLoadOverrides(t *testing.T) {
 		"ETL_MIN_REQUEST_SPACING":   "1500ms",
 		"ETL_EXPORT_INTERVAL":       "1s",
 		"ETL_EXPORT_BATCH_MAX":      "10",
-		"ETL_PUBLISH_LEASE":         "30s",
-		"ETL_PUBLISH_POLL":          "1s",
 		"ETL_TRANSFORM_MAX_RECORDS": "50",
 		"ETL_STALE_AFTER":           "5m",
 		"ETL_TICKER_STALE_AFTER":    "2h",
@@ -142,8 +138,6 @@ func TestLoadOverrides(t *testing.T) {
 		{"MinRequestSpacing", c.MinRequestSpacing, 1500 * time.Millisecond},
 		{"ExportInterval", c.ExportInterval, time.Second},
 		{"ExportBatchMax", c.ExportBatchMax, 10},
-		{"PublishLease", c.PublishLease, 30 * time.Second},
-		{"PublishPoll", c.PublishPoll, time.Second},
 		{"TransformMaxRecords", c.TransformMaxRecords, 50},
 		{"StaleAfter", c.StaleAfter, 5 * time.Minute},
 		{"TickerStaleAfter", c.TickerStaleAfter, 2 * time.Hour},
@@ -167,7 +161,7 @@ func TestLoadInvalid(t *testing.T) {
 		{"ETL_EXPORT_INTERVAL", "-5s"},              // negative
 		{"ETL_EXPORT_INTERVAL", "1m"},               // not shorter than the publisher's grace
 		{"ETL_EXPORT_INTERVAL", "90s"},              // longer than the publisher's grace
-		{"ETL_PUBLISH_LEASE", "0s"},                 // zero not allowed
+		{"ETL_STALE_AFTER", "0s"},                   // zero not allowed
 		{"ETL_DETAIL_OFFSET", "-1s"},                // zero allowed, negative not
 		{"ETL_TOPIC_PARTITIONS", "abc"},             // not an int
 		{"ETL_TOPIC_PARTITIONS", "99999999999"},     // overflows int32

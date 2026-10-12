@@ -20,6 +20,9 @@ func TestRunDispatch(t *testing.T) {
 		{nil, 2, "usage: etl"},
 		{[]string{"bogus"}, 2, `unknown command "bogus"`},
 		{[]string{"help"}, 0, ""},
+		{[]string{"publisher"}, 2, `unknown command "publisher"`},
+		{[]string{"publish", "--now", "bogus"}, 2, "--now"},
+		{[]string{"publish", "extra"}, 2, `unexpected argument "extra"`},
 	}
 	for _, c := range cases {
 		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
@@ -37,7 +40,7 @@ func TestRunDispatch(t *testing.T) {
 func TestServiceRejectsBadConfig(t *testing.T) {
 	t.Setenv("ETL_LOG_DIR", t.TempDir())
 	t.Setenv("ETL_TOPIC_PARTITIONS", "six")
-	for _, svc := range []string{"init", "fetcher", "exporter", "publisher", "transformer"} {
+	for _, svc := range []string{"init", "fetcher", "exporter", "publish", "transformer"} {
 		var stderr bytes.Buffer
 		if code := run([]string{svc}, &bytes.Buffer{}, &stderr); code != 1 {
 			t.Fatalf("%s: exit %d, want 1", svc, code)
@@ -65,7 +68,7 @@ func TestServiceExitsWhenPostgresUnreachable(t *testing.T) {
 	t.Setenv("ETL_LOG_DIR", logDir)
 	t.Setenv("ETL_PG_DSN", "postgres://etl:etl@"+closedAddr(t)+"/etl?sslmode=disable&connect_timeout=1")
 	t.Setenv("ETL_HTTP_ADDR", closedAddr(t))
-	for _, svc := range []string{"fetcher", "exporter", "publisher", "transformer"} {
+	for _, svc := range []string{"fetcher", "exporter", "transformer"} {
 		if code := run([]string{svc}, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
 			t.Fatalf("%s: exit %d, want 1", svc, code)
 		}

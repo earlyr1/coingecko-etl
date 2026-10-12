@@ -81,9 +81,9 @@ func TestReadyzTimesOutHungCheck(t *testing.T) {
 func TestMetricsEndpoint(t *testing.T) {
 	reg := prometheus.NewRegistry()
 	m := NewMetrics(reg)
-	m.PublishedRecords.Add(3)
+	m.APIRateLimited.Add(3)
 	code, body := get(t, newMux(NewHealth(), reg), "/metrics")
-	if code != http.StatusOK || !strings.Contains(body, "etl_published_records_total 3") {
+	if code != http.StatusOK || !strings.Contains(body, "etl_api_rate_limited_total 3") {
 		t.Fatalf("/metrics = %d\n%s", code, body)
 	}
 }

@@ -18,7 +18,6 @@ type Metrics struct {
 	ExportLag          prometheus.Gauge         // etl_export_lag_seconds
 	ExportBatches      *prometheus.CounterVec   // etl_export_batches_total{result}
 	S3Puts             *prometheus.CounterVec   // etl_s3_put_total{result}  result=created|exists|error|mismatch
-	PublishedRecords   prometheus.Counter       // etl_published_records_total
 	Records            *prometheus.CounterVec   // etl_records_total{dataset,outcome}
 	DedupDropped       *prometheus.CounterVec   // etl_dedup_dropped_total{reason}
 	Rejected           *prometheus.CounterVec   // etl_rejected_total{reason}
@@ -75,10 +74,6 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Name: "etl_s3_put_total",
 			Help: "Conditional S3 PUTs by result: created, exists (412, same bytes), mismatch (412, different bytes), error.",
 		}, []string{"result"}),
-		PublishedRecords: f.NewCounter(prometheus.CounterOpts{
-			Name: "etl_published_records_total",
-			Help: "Records produced to the broker and acknowledged.",
-		}),
 		Records: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "etl_records_total",
 			Help: "Transformer records by dataset and outcome (written, duplicate, rejected, dlq).",

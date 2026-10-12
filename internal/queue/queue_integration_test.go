@@ -18,7 +18,7 @@ func TestQueueIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	prod, err := NewProducer(brokers, "queue-it", nil)
+	prod, err := NewProducer(brokers, "queue-it")
 	if err != nil {
 		t.Fatal(err)
 	}

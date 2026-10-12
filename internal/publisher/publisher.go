@@ -1,5 +1,8 @@
-// Package publisher leases exported raw batches, validates each JSONL line
-// against S1 and produces it verbatim to the broker.
+// Package publisher implements one run of `etl publish`: it publishes one closed
+// raw window. It reads the window's _SUCCESS from s3://raw (missing: ErrNotReady),
+// reads and verifies every listed part before producing anything, sends invalid
+// lines to one deterministic DLQ object per window and produces every valid line
+// verbatim, keyed by its idempotency_key. It never touches Postgres.
 package publisher
 
 import (
@@ -10,78 +13,211 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strconv"
-	"time"
+	"strings"
 	"unicode/utf8"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/twmb/franz-go/pkg/kgo"
 
-	"coingecko-etl/internal/config"
 	"coingecko-etl/internal/event"
-	"coingecko-etl/internal/obs"
 	"coingecko-etl/internal/queue"
 	"coingecko-etl/internal/storage/s3"
 	"coingecko-etl/internal/validation"
+	"coingecko-etl/internal/window"
 	"coingecko-etl/internal/xtime"
 )
 
 const (
 	stage            = "publish"
-	schemaLabel      = "raw_event.v1"
 	errClassDecode   = "decode_error"
 	errClassSchema   = "schema_violation"
+	errClassOutcome  = "unexpected_outcome"
 	maxMessageLength = 1024
 )
 
-// leaseSQL leases the oldest exported, unpublished batch whose lease is free
-// or expired. FOR UPDATE SKIP LOCKED lets several publishers run without
-// blocking each other; the single statement is its own short transaction.
-const leaseSQL = `
-UPDATE pipeline.export_batches
-   SET publish_lease_until = now() + make_interval(secs => $1)
- WHERE batch_id = (
-        SELECT batch_id
-          FROM pipeline.export_batches
-         WHERE status = 'exported'
-           AND published_at IS NULL
-           AND (publish_lease_until IS NULL OR publish_lease_until < now())
-         ORDER BY batch_id
-         LIMIT 1
-         FOR UPDATE SKIP LOCKED)
-RETURNING batch_id, object_key, COALESCE(exported_at, claimed_at)`
+var (
+	// ErrNotReady: the exporter has not closed the window (no _SUCCESS yet).
+	ErrNotReady = errors.New("window not closed by the exporter: no _SUCCESS")
+	// ErrIntegrity: _SUCCESS is malformed, is for another window, or does not
+	// match the parts it lists. A rerun does not fix it.
+	ErrIntegrity = errors.New("raw window does not match its _SUCCESS")
+)
 
-const markSQL = `
-UPDATE pipeline.export_batches
-   SET published_at = now(), publish_lease_until = NULL
- WHERE batch_id = $1 AND published_at IS NULL`
-
-type batch struct {
-	ID         int64
-	ObjectKey  string
-	ExportedAt time.Time // DLQ occurred_at and date: stable across retries of the batch
+// Deps are the clients of one run.
+type Deps struct {
+	S3       *s3.Client
+	Producer *kgo.Client
+	Reg      *validation.Registry
+	Topic    string
+	Log      *slog.Logger
 }
 
-// leaseBatch returns ok=false when no batch is available.
-func leaseBatch(ctx context.Context, pool *pgxpool.Pool, lease time.Duration) (batch, bool, error) {
-	var b batch
-	err := pool.QueryRow(ctx, leaseSQL, lease.Seconds()).Scan(&b.ID, &b.ObjectKey, &b.ExportedAt)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return batch{}, false, nil
+// Result describes one published window: Lines is every line of its parts,
+// Records the lines produced, DLQLines the lines sent to the publish DLQ.
+type Result struct {
+	Window                          window.Window
+	Parts, Lines, Records, DLQLines int
+}
+
+// part is one raw part of the window, read and verified.
+type part struct {
+	key   string
+	lines [][]byte
+}
+
+// PublishWindow publishes w. It returns nil only after the broker acknowledged
+// every record. A rerun of the same window produces the same records again
+// (the transformer drops the copies as replay) and rewrites the same DLQ bytes.
+func PublishWindow(ctx context.Context, d Deps, w window.Window) (Result, error) {
+	res := Result{Window: w}
+	man, err := readManifest(ctx, d.S3, w)
+	if err != nil {
+		return res, err
+	}
+	parts, err := readParts(ctx, d.S3, man)
+	if err != nil {
+		return res, err
+	}
+	res.Parts = len(parts)
+
+	var (
+		recs      []*kgo.Record
+		dlq       []dlqRecord
+		originals [][]byte
+	)
+	for _, p := range parts {
+		for j, line := range p.lines {
+			res.Lines++
+			rec, bad := classify(d.Reg, d.Topic, w, p.key, j+1, line)
+			if bad != nil {
+				dlq = append(dlq, *bad)
+				originals = append(originals, line)
+				continue
+			}
+			recs = append(recs, rec)
+		}
+	}
+	res.DLQLines = len(dlq)
+
+	// The DLQ object goes first, as before: a run that then fails to produce
+	// leaves an object that the rerun rewrites byte for byte.
+	if len(dlq) > 0 {
+		if err := writeDLQ(ctx, d.S3, d.Reg, d.Log, w, dlq, originals); err != nil {
+			return res, err
+		}
+	}
+	if len(recs) > 0 {
+		// ProduceSync waits for every ack; FirstErr is the first failed record.
+		if err := d.Producer.ProduceSync(ctx, recs...).FirstErr(); err != nil {
+			return res, fmt.Errorf("produce window %s: %w", xtime.Format(w.Start), err)
+		}
+	}
+	res.Records = len(recs)
+	return res, nil
+}
+
+// readManifest reads and checks the _SUCCESS of w. A missing object is
+// ErrNotReady; any other S3 error is returned as is (transient).
+func readManifest(ctx context.Context, s3c *s3.Client, w window.Window) (window.Success, error) {
+	key := window.RawSuccessKey(w)
+	b, err := s3c.Get(ctx, s3.BucketRaw, key)
+	if errors.Is(err, s3.ErrNotFound) {
+		return window.Success{}, fmt.Errorf("%w: s3://%s/%s", ErrNotReady, s3.BucketRaw, key)
 	}
 	if err != nil {
-		return batch{}, false, fmt.Errorf("lease batch: %w", err)
+		return window.Success{}, fmt.Errorf("read %s: %w", key, err)
 	}
-	return b, true, nil
+	s, err := window.ParseSuccess(b)
+	if err != nil {
+		return window.Success{}, fmt.Errorf("%w: %s: %v", ErrIntegrity, key, err)
+	}
+	if err := checkManifest(s, w); err != nil {
+		return window.Success{}, fmt.Errorf("%w: %s: %v", ErrIntegrity, key, err)
+	}
+	return s, nil
 }
 
-func markPublished(ctx context.Context, pool *pgxpool.Pool, batchID int64) error {
-	if _, err := pool.Exec(ctx, markSQL, batchID); err != nil {
-		return fmt.Errorf("mark batch %d published: %w", batchID, err)
+var partName = regexp.MustCompile(`^part-[0-9]{5}\.jsonl$`)
+
+// checkManifest checks that a parsed manifest describes w: the same window
+// bounds, and parts that are part objects of w. An empty window is valid.
+func checkManifest(s window.Success, w window.Window) error {
+	if start, end := xtime.Format(w.Start), xtime.Format(w.End); s.WindowStart != start || s.WindowEnd != end {
+		return fmt.Errorf("manifest is for %s..%s, expected %s..%s; is ETL_WINDOW the same for exporter and publisher?",
+			s.WindowStart, s.WindowEnd, start, end)
+	}
+	prefix := window.RawWindowPrefix(w)
+	for _, p := range s.Parts {
+		name, ok := strings.CutPrefix(p.Key, prefix)
+		if !ok || !partName.MatchString(name) {
+			return fmt.Errorf("part key %s is not %spart-NNNNN.jsonl", p.Key, prefix)
+		}
 	}
 	return nil
+}
+
+// readParts reads every part listed in s and checks its sha256 and line
+// count. It reads them all before anything is produced, so a bad part never
+// leaves the parts before it half-published. Memory is the whole window: a
+// few MB at 5m, about 30 MB at 60m.
+func readParts(ctx context.Context, s3c *s3.Client, s window.Success) ([]part, error) {
+	parts := make([]part, 0, len(s.Parts))
+	for _, p := range s.Parts {
+		body, err := s3c.Get(ctx, s3.BucketRaw, p.Key)
+		if errors.Is(err, s3.ErrNotFound) {
+			return nil, fmt.Errorf("%w: _SUCCESS lists missing part %s", ErrIntegrity, p.Key)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("read part %s: %w", p.Key, err)
+		}
+		if got := event.SHA256Hex(body); got != p.SHA256 {
+			return nil, fmt.Errorf("%w: sha256 mismatch for %s: manifest %s, object %s", ErrIntegrity, p.Key, p.SHA256, got)
+		}
+		lines := splitLines(body)
+		if len(lines) != p.Rows {
+			return nil, fmt.Errorf("%w: %s has %d lines, manifest says %d", ErrIntegrity, p.Key, len(lines), p.Rows)
+		}
+		parts = append(parts, part{key: p.Key, lines: lines})
+	}
+	return parts, nil
+}
+
+// classify turns one raw line into either a broker record or a DLQ record.
+// lineNo counts from 1 within the part.
+func classify(reg *validation.Registry, topic string, w window.Window, partKey string, lineNo int, line []byte) (*kgo.Record, *dlqRecord) {
+	bad := func(class string, viols []validation.Violation) (*kgo.Record, *dlqRecord) {
+		r := newDLQRecord(w, partKey, lineNo, line, class, viols)
+		return nil, &r
+	}
+	viols, err := reg.Validate(validation.IDRawEvent, line)
+	if err != nil { // not JSON
+		return bad(errClassDecode, []validation.Violation{{Message: err.Error()}})
+	}
+	if len(viols) > 0 {
+		return bad(errClassSchema, viols)
+	}
+	ev, err := event.Unmarshal(line)
+	if err != nil {
+		return bad(errClassDecode, []validation.Violation{{Message: err.Error()}})
+	}
+	// A guard: the exporter exports only ok rows, and only they have a key.
+	if ev.Outcome != event.OutcomeOK || ev.IdempotencyKey == nil {
+		return bad(errClassOutcome, []validation.Violation{{Message: fmt.Sprintf("outcome %s: only ok events are published", ev.Outcome)}})
+	}
+	return &kgo.Record{
+		Topic: topic,
+		Key:   []byte(queue.MessageKey(ev)),
+		Value: line, // verbatim bytes of the raw JSONL line
+		Headers: []kgo.RecordHeader{
+			{Key: queue.HeaderEventID, Value: []byte(ev.EventID)},
+			{Key: queue.HeaderIdempotencyKey, Value: []byte(*ev.IdempotencyKey)},
+			{Key: queue.HeaderSchema, Value: []byte(validation.IDRawEvent)},
+			{Key: queue.HeaderRawObject, Value: []byte(partKey)},
+			{Key: queue.HeaderLineNo, Value: []byte(strconv.Itoa(lineNo))},
+		},
+	}, nil
 }
 
 // splitLines splits a JSONL object into lines. The trailing newline does not
@@ -98,8 +234,8 @@ func splitLines(body []byte) [][]byte {
 	return lines
 }
 
-// dlqRecord is one line of a DLQ object (schema pipeline/dlq_record.v1.json,
-// Task 3). The exporter and the transformer write the same shape.
+// dlqRecord is one line of a DLQ object (schema pipeline/dlq_record.v1.json).
+// The exporter and the transformer write the same shape.
 type dlqRecord struct {
 	SchemaVersion  int                    `json:"schema_version"`
 	Stage          string                 `json:"stage"`
@@ -115,7 +251,6 @@ type dlqOrigin struct {
 	Bucket    string `json:"bucket"`
 	ObjectKey string `json:"object_key"`
 	LineNo    int    `json:"line_no"`
-	BatchID   int64  `json:"batch_id"`
 	EventID   string `json:"event_id,omitempty"`
 }
 
@@ -132,19 +267,20 @@ func truncate(s string) string {
 	return s[:n]
 }
 
-// newDLQRecord builds a DLQ record for one bad line. Nothing in it depends on
-// the clock: occurred_at is the batch's exported_at, so a retried batch
-// rebuilds byte-identical DLQ lines and the write-once PUT gets 412 with an
-// equal checksum. event_id is copied only when the line carries a valid UUID.
-func newDLQRecord(b batch, lineNo int, line []byte, class string, viols []validation.Violation) dlqRecord {
+// newDLQRecord builds a DLQ record for one bad line of part partKey of w.
+// Nothing in it depends on the clock: occurred_at is the window end, so a
+// rerun rebuilds byte-identical DLQ lines and the write-once PUT gets 412
+// with an equal checksum. event_id is copied only when the line carries a
+// valid UUID.
+func newDLQRecord(w window.Window, partKey string, lineNo int, line []byte, class string, viols []validation.Violation) dlqRecord {
 	r := dlqRecord{
 		SchemaVersion:  1,
 		Stage:          stage,
 		ErrorClass:     class,
 		Violations:     make([]validation.Violation, 0, len(viols)), // [] not null
-		Origin:         dlqOrigin{Kind: "s3", Bucket: s3.BucketRaw, ObjectKey: b.ObjectKey, LineNo: lineNo, BatchID: b.ID},
+		Origin:         dlqOrigin{Kind: "s3", Bucket: s3.BucketRaw, ObjectKey: partKey, LineNo: lineNo},
 		OriginalBase64: base64.StdEncoding.EncodeToString(line),
-		OccurredAt:     xtime.Format(b.ExportedAt),
+		OccurredAt:     xtime.Format(w.End),
 	}
 	for _, v := range viols {
 		v.Message = truncate(v.Message)
@@ -161,18 +297,11 @@ func newDLQRecord(b batch, lineNo int, line []byte, class string, viols []valida
 	return r
 }
 
-// dlqObjectKey follows the DLQ layout:
-// stage=publish/date=<UTC date of exported_at>/publish+batch+<%020d batch_id>.jsonl.
-// The date comes from the batch, not the clock, so a retry writes the same key.
-func dlqObjectKey(exportedAt time.Time, batchID int64) string {
-	return fmt.Sprintf("stage=%s/date=%s/publish+batch+%020d.jsonl", stage, xtime.FormatDate(exportedAt), batchID)
-}
-
 // writeDLQ validates each DLQ record against its own schema
-// (pipeline/dlq_record.v1.json) and writes the valid ones as one write-once
-// object. A record that fails that schema is logged at ERROR with the original
-// bytes in base64 and left out. log already carries stage and batch.
-func writeDLQ(ctx context.Context, s3c *s3.Client, reg *validation.Registry, m *obs.Metrics, log *slog.Logger, b batch, recs []dlqRecord, originals [][]byte) error {
+// (pipeline/dlq_record.v1.json) and writes the valid ones as the window's one
+// write-once DLQ object. A record that fails that schema is logged at ERROR
+// with the original bytes in base64 and left out.
+func writeDLQ(ctx context.Context, s3c *s3.Client, reg *validation.Registry, log *slog.Logger, w window.Window, recs []dlqRecord, originals [][]byte) error {
 	var buf bytes.Buffer
 	written := 0
 	for i, r := range recs {
@@ -186,7 +315,7 @@ func writeDLQ(ctx context.Context, s3c *s3.Client, reg *validation.Registry, m *
 		}
 		if err != nil {
 			log.Error("dlq record invalid; original logged",
-				"line_no", r.Origin.LineNo, "err", err,
+				"object_key", r.Origin.ObjectKey, "line_no", r.Origin.LineNo, "error", err,
 				"original_base64", base64.StdEncoding.EncodeToString(originals[i]))
 			continue
 		}
@@ -197,144 +326,18 @@ func writeDLQ(ctx context.Context, s3c *s3.Client, reg *validation.Registry, m *
 	if written == 0 {
 		return nil
 	}
-	key := dlqObjectKey(b.ExportedAt, b.ID)
+	key := window.PublishDLQKey(w)
 	created, err := s3c.PutIfAbsent(ctx, s3.BucketDLQ, key, buf.Bytes())
 	switch {
 	case errors.Is(err, s3.ErrChecksumMismatch):
 		// DLQ lines are deterministic, so this only happens when the
-		// validator's messages changed between attempts (a redeploy with a
-		// new schema build). Keep the first object.
-		m.S3Puts.WithLabelValues("mismatch").Inc()
-		log.Warn("dlq object already exists from an earlier attempt", "key", key)
+		// validator's messages changed between runs (a new build). Keep the
+		// first object.
+		log.Error("dlq object exists with different bytes; keeping the first", "key", key)
 		return nil
 	case err != nil:
-		m.S3Puts.WithLabelValues("error").Inc()
 		return fmt.Errorf("put dlq object %s: %w", key, err)
-	case created:
-		m.S3Puts.WithLabelValues("created").Inc()
-	default:
-		m.S3Puts.WithLabelValues("exists").Inc()
 	}
-	log.Error("records sent to dlq", "count", written, "key", key)
+	log.Error("records sent to dlq", "count", written, "key", key, "created", created)
 	return nil
-}
-
-// PublishOnce leases one exported batch, publishes every valid line and marks
-// the batch published. It returns published=false when nothing was leased.
-// Any produce error returns before the mark: the lease expires and the batch
-// is republished (the transformer drops the duplicates).
-func PublishOnce(ctx context.Context, pool *pgxpool.Pool, s3c *s3.Client, prod *kgo.Client, reg *validation.Registry, topic string, lease time.Duration, m *obs.Metrics, log *slog.Logger) (published bool, err error) {
-	b, ok, err := leaseBatch(ctx, pool, lease)
-	if err != nil || !ok {
-		return false, err
-	}
-	log = log.With("stage", stage, "batch", b.ID)
-
-	body, err := s3c.Get(ctx, s3.BucketRaw, b.ObjectKey)
-	if err != nil {
-		return false, fmt.Errorf("get raw object %s: %w", b.ObjectKey, err)
-	}
-
-	var (
-		recs      []*kgo.Record
-		dlq       []dlqRecord
-		originals [][]byte
-	)
-	// toDLQ counts one bad line and queues its DLQ record and original bytes.
-	toDLQ := func(lineNo int, line []byte, class string, viols []validation.Violation) {
-		m.DLQ.WithLabelValues(stage, class).Inc()
-		dlq = append(dlq, newDLQRecord(b, lineNo, line, class, viols))
-		originals = append(originals, line)
-	}
-	decodeViolation := func(err error) []validation.Violation {
-		return []validation.Violation{{Message: err.Error()}}
-	}
-
-	for i, line := range splitLines(body) {
-		lineNo := i + 1
-		viols, verr := reg.Validate(validation.IDRawEvent, line)
-		if verr != nil { // not JSON
-			m.SchemaValidations.WithLabelValues(stage, schemaLabel, "fail").Inc()
-			toDLQ(lineNo, line, errClassDecode, decodeViolation(verr))
-			continue
-		}
-		if len(viols) > 0 {
-			m.SchemaValidations.WithLabelValues(stage, schemaLabel, "fail").Inc()
-			for _, v := range viols {
-				m.SchemaViolations.WithLabelValues(stage, schemaLabel, validation.Keyword(v)).Inc()
-			}
-			toDLQ(lineNo, line, errClassSchema, viols)
-			continue
-		}
-		m.SchemaValidations.WithLabelValues(stage, schemaLabel, "pass").Inc()
-
-		ev, uerr := event.Unmarshal(line)
-		if uerr != nil {
-			toDLQ(lineNo, line, errClassDecode, decodeViolation(uerr))
-			continue
-		}
-		idem := ""
-		if ev.IdempotencyKey != nil {
-			idem = *ev.IdempotencyKey
-		}
-		recs = append(recs, &kgo.Record{
-			Topic: topic,
-			Key:   []byte(queue.MessageKey(ev)),
-			Value: line, // verbatim bytes of the raw JSONL line
-			Headers: []kgo.RecordHeader{
-				{Key: queue.HeaderEventID, Value: []byte(ev.EventID)},
-				{Key: queue.HeaderIdempotencyKey, Value: []byte(idem)},
-				{Key: queue.HeaderSchema, Value: []byte(validation.IDRawEvent)},
-				{Key: queue.HeaderRawObject, Value: []byte(b.ObjectKey)},
-				{Key: queue.HeaderLineNo, Value: []byte(strconv.Itoa(lineNo))},
-			},
-		})
-	}
-
-	if len(dlq) > 0 {
-		if err := writeDLQ(ctx, s3c, reg, m, log, b, dlq, originals); err != nil {
-			return false, err
-		}
-	}
-
-	if len(recs) > 0 {
-		// ProduceSync produces every record (batched by the client) and waits
-		// for all acks; FirstErr is the first per-record failure.
-		if err := prod.ProduceSync(ctx, recs...).FirstErr(); err != nil {
-			return false, fmt.Errorf("produce batch %d: %w", b.ID, err)
-		}
-		if err := prod.Flush(ctx); err != nil {
-			return false, fmt.Errorf("flush batch %d: %w", b.ID, err)
-		}
-	}
-
-	if err := markPublished(ctx, pool, b.ID); err != nil {
-		return false, err
-	}
-	m.PublishedRecords.Add(float64(len(recs)))
-	log.Info("batch published", "object_key", b.ObjectKey, "records", len(recs), "dlq", len(dlq))
-	return true, nil
-}
-
-// Run publishes batches until ctx is cancelled. It drains back to back while
-// batches are available; after an idle pass or an error it sleeps
-// cfg.PublishPoll.
-func Run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, s3c *s3.Client, prod *kgo.Client, reg *validation.Registry, m *obs.Metrics, log *slog.Logger) error {
-	for {
-		if ctx.Err() != nil {
-			return nil
-		}
-		published, err := PublishOnce(ctx, pool, s3c, prod, reg, cfg.Topic, cfg.PublishLease, m, log)
-		if err != nil && ctx.Err() == nil {
-			log.Error("publish failed", "stage", stage, "err", err)
-		}
-		if published && err == nil {
-			continue
-		}
-		select {
-		case <-ctx.Done():
-			return nil
-		case <-time.After(cfg.PublishPoll):
-		}
-	}
 }

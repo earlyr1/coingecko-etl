@@ -78,7 +78,7 @@ tests:
     input_series:
       - series: 'etl_export_lag_seconds{job="fetcher",instance="10.0.0.4:8080"}'
         values: '0x10'
-      - series: 'etl_export_lag_seconds{job="publisher",instance="10.0.0.6:8080"}'
+      - series: 'etl_export_lag_seconds{job="transformer",instance="10.0.0.7:8080"}'
         values: '0x10'
     alert_rule_test:
       - eval_time: 5m
@@ -169,8 +169,6 @@ tests:
       - series: 'up{job="fetcher",instance="10.0.0.4:8080"}'
         values: '1x10'
       - series: 'up{job="exporter",instance="10.0.0.5:8080"}'
-        values: '1x10'
-      - series: 'up{job="publisher",instance="10.0.0.6:8080"}'
         values: '1 1 0 0 0 0 0 0 0 0 0'
       - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
         values: '1x10'
@@ -183,9 +181,9 @@ tests:
       - eval_time: 6m
         alertname: ETLServiceDown
         exp_alerts:
-          - exp_labels: {severity: critical, job: publisher, instance: "10.0.0.6:8080"}
+          - exp_labels: {severity: critical, job: exporter, instance: "10.0.0.5:8080"}
             exp_annotations:
-              summary: "publisher is down (10.0.0.6:8080)"
+              summary: "exporter is down (10.0.0.5:8080)"
               description: "Prometheus cannot scrape it, or Docker DNS knows no running container for it. Check docker compose ps and its log."
 
   - name: a service without any scrape target is down
@@ -194,8 +192,6 @@ tests:
       - series: 'up{job="fetcher",instance="10.0.0.4:8080"}'
         values: '1x10'
       - series: 'up{job="exporter",instance="10.0.0.5:8080"}'
-        values: '1x10'
-      - series: 'up{job="publisher",instance="10.0.0.6:8080"}'
         values: '1x10'
       - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
         values: '1 1 _ _ _ _ _ _ _ _ _' # both replicas stopped: no DNS records, no target
@@ -214,8 +210,6 @@ tests:
       - series: 'up{job="fetcher",instance="10.0.0.4:8080"}'
         values: '1x10'
       - series: 'up{job="exporter",instance="10.0.0.5:8080"}'
-        values: '1x10'
-      - series: 'up{job="publisher",instance="10.0.0.6:8080"}'
         values: '1x10'
       - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
         values: '1x10'

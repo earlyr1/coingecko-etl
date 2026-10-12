@@ -7,13 +7,17 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"testing"
 	"time"
 
 	"coingecko-etl/internal/storage/pg"
+	"coingecko-etl/internal/storage/s3"
 	"coingecko-etl/internal/testutil"
+	"coingecko-etl/internal/window"
 )
 
 // TestFetcherServesAndStopsOnSIGTERM runs `etl fetcher` in-process against a
@@ -117,5 +121,101 @@ func waitFor(t *testing.T, d time.Duration, ok func() bool) {
 			t.Fatalf("condition not met within %v", d)
 		}
 		time.Sleep(200 * time.Millisecond)
+	}
+}
+
+// TestPublishCommand runs `etl publish` in-process against versitygw and
+// Redpanda with a fake Pushgateway: a window without _SUCCESS fails, the same
+// window succeeds once the exporter closed it, and a dead Pushgateway does not
+// change the exit code.
+func TestPublishCommand(t *testing.T) {
+	testutil.SkipIfNoDocker(t)
+	brokers := testutil.StartRedpanda(t)
+	endpoint, _ := testutil.StartVersityGW(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	var mu sync.Mutex
+	var pushes []string
+	pgw := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		pushes = append(pushes, r.Method+" "+r.URL.Path)
+		mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer pgw.Close()
+	pushed := func() []string {
+		mu.Lock()
+		defer mu.Unlock()
+		return append([]string(nil), pushes...)
+	}
+
+	logDir := t.TempDir()
+	t.Setenv("ETL_LOG_DIR", logDir)
+	t.Setenv("ETL_LOG_PER_HOST", "")
+	t.Setenv("ETL_S3_ENDPOINT", endpoint)
+	t.Setenv("ETL_S3_ACCESS_KEY", testutil.VersityGWAccessKey)
+	t.Setenv("ETL_S3_SECRET_KEY", testutil.VersityGWSecretKey)
+	t.Setenv("ETL_BROKERS", strings.Join(brokers, ","))
+	t.Setenv("ETL_PUSHGATEWAY_URL", pgw.URL)
+	t.Setenv("ETL_WINDOW", "5m")
+	readLog := func() string {
+		b, err := os.ReadFile(filepath.Join(logDir, "publisher", "etl.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	publish := func() int {
+		var stderr bytes.Buffer
+		code := run([]string{"publish", "--now", "1791813960"}, &bytes.Buffer{}, &stderr)
+		if stderr.Len() > 0 {
+			t.Logf("stderr: %s", stderr.String())
+		}
+		return code
+	}
+	const push = "POST /metrics/job/etl_publisher"
+
+	// 1. The exporter has not closed [14:00, 14:05) yet.
+	if code := publish(); code != 1 {
+		t.Fatalf("without _SUCCESS: exit %d, want 1", code)
+	}
+	if l := readLog(); !strings.Contains(l, `"msg":"window not ready"`) || !strings.Contains(l, "window=1400/_SUCCESS") {
+		t.Fatalf("log does not report the missing _SUCCESS:\n%s", l)
+	}
+	if got := pushed(); len(got) != 1 || got[0] != push {
+		t.Fatalf("pushes = %q, want [%s]", got, push)
+	}
+
+	// 2. The exporter closed it, empty.
+	s3c, err := s3.New(ctx, s3.Config{Endpoint: endpoint, AccessKey: testutil.VersityGWAccessKey, SecretKey: testutil.VersityGWSecretKey, Region: "us-east-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w := window.ForPublish(time.Unix(1791813960, 0), 5*time.Minute)
+	body, err := window.NewSuccess(w, nil).Marshal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s3c.PutIfAbsent(ctx, s3.BucketRaw, window.RawSuccessKey(w), body); err != nil {
+		t.Fatal(err)
+	}
+	if code := publish(); code != 0 {
+		t.Fatalf("with _SUCCESS: exit %d, want 0\n%s", code, readLog())
+	}
+	if l := readLog(); !strings.Contains(l, `"msg":"window published"`) {
+		t.Fatalf("log lacks window published:\n%s", l)
+	}
+	if got := pushed(); len(got) != 2 || got[1] != push {
+		t.Fatalf("pushes = %q, want two %s", got, push)
+	}
+
+	// 3. A dead Pushgateway is logged and does not fail the job.
+	t.Setenv("ETL_PUSHGATEWAY_URL", "http://"+closedAddr(t))
+	if code := publish(); code != 0 {
+		t.Fatalf("with the Pushgateway down: exit %d, want 0", code)
+	}
+	if l := readLog(); !strings.Contains(l, `"level":"ERROR","msg":"pushgateway push failed"`) {
+		t.Fatalf("log lacks the push failure:\n%s", l)
 	}
 }

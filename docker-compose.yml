@@ -161,10 +161,6 @@ services:
     <<: *etl
     command: ["exporter"]
 
-  publisher:
-    <<: *etl
-    command: ["publisher"]
-
   transformer:
     <<: *etl
     command: ["transformer"]

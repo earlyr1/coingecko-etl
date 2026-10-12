@@ -79,12 +79,12 @@ groups:
       - alert: ETLServiceDown
         # Prometheus finds the containers through Docker DNS: a stopped or
         # crash-looping container has no target at all (absent), a hung one
-        # fails its scrape (up == 0).
+        # fails its scrape (up == 0). The publisher is a batch job (etl
+        # publish), not a service.
         expr: |
-          up{job=~"fetcher|exporter|publisher|transformer"} == 0
+          up{job=~"fetcher|exporter|transformer"} == 0
           or absent(up{job="fetcher"})
           or absent(up{job="exporter"})
-          or absent(up{job="publisher"})
           or absent(up{job="transformer"})
         for: 2m
         labels:
@@ -111,7 +111,7 @@ groups:
       - alert: ETLObjectChecksumMismatch
         # A write-once key already holds other bytes (PUT 412 with another
         # sha256), or a re-planned transformer batch differs from its manifest.
-        # The exporter, publisher and transformer count it. The transformer
+        # The exporter and the transformer count it. The transformer
         # halts the affected partition and keeps running, so the counter, and
         # this alert, stay up until a human resolves the conflict and restarts it.
         expr: sum by (job) (etl_s3_put_total{result="mismatch"}) > 0

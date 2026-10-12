@@ -84,8 +84,7 @@ func TestPostgresIntegration(t *testing.T) {
 		if got, want := columns("pipeline", "export_batches"), "batch_id bigint, window_start timestamp with time zone, "+
 			"part_index integer, row_count integer, line_count integer, "+
 			"min_fetched_at timestamp with time zone, max_fetched_at timestamp with time zone, object_key text, "+
-			"content_sha256 bytea, status text, claimed_at timestamp with time zone, exported_at timestamp with time zone, "+
-			"publish_lease_until timestamp with time zone, published_at timestamp with time zone"; got != want {
+			"content_sha256 bytea, status text, claimed_at timestamp with time zone, exported_at timestamp with time zone"; got != want {
 			t.Errorf("pipeline.export_batches columns =\n  %s\nwant\n  %s", got, want)
 		}
 		for _, idx := range []string{"api_calls_unexported_idx", "api_calls_export_batch_idx"} {
@@ -109,6 +108,14 @@ func TestPostgresIntegration(t *testing.T) {
 			WHERE conrelid = 'pipeline.export_batches'::regclass AND contype = 'u'
 			  AND pg_get_constraintdef(oid) = 'UNIQUE (window_start, part_index)'`).Scan(&uniq); err != nil || uniq != 1 {
 			t.Errorf("UNIQUE (window_start, part_index) on pipeline.export_batches: count=%d err=%v", uniq, err)
+		}
+		// The ledger has no publisher index: the publish job reads only S3.
+		var batchIdx string
+		if err := pool.QueryRow(ctx, `SELECT string_agg(indexname, ', ' ORDER BY indexname) FROM pg_indexes
+			WHERE schemaname = 'pipeline' AND tablename = 'export_batches'`).Scan(&batchIdx); err != nil {
+			t.Errorf("indexes of pipeline.export_batches: %v", err)
+		} else if want := "export_batches_object_key_key, export_batches_pkey, export_batches_window_start_part_index_key"; batchIdx != want {
+			t.Errorf("pipeline.export_batches indexes = %s, want %s", batchIdx, want)
 		}
 		var fk string
 		if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint

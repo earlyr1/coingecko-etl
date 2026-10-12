@@ -1,11 +1,9 @@
 package queue
 
 import (
-	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/twmb/franz-go/pkg/kgo"
 
 	"coingecko-etl/internal/event"
@@ -56,33 +54,16 @@ func TestMessageKeySpreadsResponsesAcrossPartitions(t *testing.T) {
 }
 
 func TestNewProducerRequiresBrokers(t *testing.T) {
-	if _, err := NewProducer(nil, "x", nil); err == nil {
+	if _, err := NewProducer(nil, "x"); err == nil {
 		t.Fatal("expected error for empty broker list")
 	}
 }
 
-func TestNewProducerNilRegistry(t *testing.T) {
-	cl, err := NewProducer([]string{"127.0.0.1:1"}, "test", nil)
+func TestNewProducerBuildsClient(t *testing.T) {
+	// No broker listens on port 1: building the client must not dial.
+	cl, err := NewProducer([]string{"127.0.0.1:1"}, "test")
 	if err != nil {
 		t.Fatal(err)
 	}
 	cl.Close()
-}
-
-func TestNewProducerRegistersClientMetrics(t *testing.T) {
-	reg := prometheus.NewRegistry()
-	cl, err := NewProducer([]string{"127.0.0.1:1"}, "test", reg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer cl.Close()
-	// kprom registered etl_publisher_connects_total{node_id} when the client was built.
-	dup := prometheus.NewCounterVec(prometheus.CounterOpts{
-		Namespace: "etl_publisher", Name: "connects_total", Help: "Total number of connections opened",
-	}, []string{"node_id"})
-	err = reg.Register(dup)
-	var are prometheus.AlreadyRegisteredError
-	if !errors.As(err, &are) {
-		t.Fatalf("expected kprom collector to be registered, Register returned %v", err)
-	}
 }

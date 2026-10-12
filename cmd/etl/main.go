@@ -26,8 +26,6 @@ import (
 	"coingecko-etl/internal/exporter"
 	"coingecko-etl/internal/fetcher"
 	"coingecko-etl/internal/obs"
-	"coingecko-etl/internal/publisher"
-	"coingecko-etl/internal/queue"
 	"coingecko-etl/internal/storage/pg"
 	"coingecko-etl/internal/storage/s3"
 	"coingecko-etl/internal/transform"
@@ -42,7 +40,7 @@ commands:
   init         run migrations, create partitions, topic and buckets (one-shot)
   fetcher      poll CoinGecko into raw.api_calls
   exporter     export raw.api_calls to s3://raw in ETL_WINDOW windows (JSONL parts + _SUCCESS)
-  publisher    publish exported batches to the broker
+  publish      publish one closed raw window to the broker and exit (--now <unix seconds|RFC3339>)
   transformer  consume, clean, dedup and write s3://processed
   healthcheck  exit 0 if the local /readyz returns 200 (for container healthchecks)
 `
@@ -65,8 +63,10 @@ func run(args []string, stdout, stderr io.Writer) int {
 	switch args[0] {
 	case "healthcheck":
 		return healthcheck(os.Getenv("ETL_HTTP_ADDR"), stderr)
-	case "init", "fetcher", "exporter", "publisher", "transformer":
+	case "init", "fetcher", "exporter", "transformer":
 		return runService(args[0], stderr)
+	case "publish":
+		return runPublish(args[1:], stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usageText)
 		return 0
@@ -131,7 +131,7 @@ func logDir(dir string) string {
 // either the loop or the HTTP server stops, the other one is stopped too.
 func serveAndRun(parent context.Context, cfg config.Config, log *slog.Logger) error {
 	// One registry per process: the Go runtime and process collectors, the
-	// etl_* catalogue and (publisher only) the kprom producer metrics.
+	// etl_* catalogue.
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(
 		collectors.NewGoCollector(),
@@ -141,7 +141,7 @@ func serveAndRun(parent context.Context, cfg config.Config, log *slog.Logger) er
 	health := obs.NewHealth()
 
 	startCtx, cancelStart := context.WithTimeout(parent, startupTimeout)
-	svc, cleanup, err := buildService(startCtx, cfg, reg, m, health, log)
+	svc, cleanup, err := buildService(startCtx, cfg, m, health, log)
 	cancelStart()
 	defer cleanup()
 	if err != nil {
@@ -183,7 +183,7 @@ type serviceFunc func(ctx context.Context) error
 // buildService connects the dependencies of cfg.Service, registers its
 // readiness checks and returns its loop. cleanup is always non-nil and
 // releases whatever was opened, even when err != nil.
-func buildService(ctx context.Context, cfg config.Config, reg *prometheus.Registry, m *obs.Metrics,
+func buildService(ctx context.Context, cfg config.Config, m *obs.Metrics,
 	health *obs.Health, log *slog.Logger) (svc serviceFunc, cleanup func(), err error) {
 	var closers []func()
 	cleanup = func() {
@@ -211,7 +211,7 @@ func buildService(ctx context.Context, cfg config.Config, reg *prometheus.Regist
 		}, cleanup, nil
 	}
 
-	// exporter, publisher and transformer need object storage and schemas.
+	// exporter and transformer need object storage and schemas.
 	s3c, err := s3.New(ctx, s3.Config{
 		Endpoint: cfg.S3Endpoint, AccessKey: cfg.S3AccessKey, SecretKey: cfg.S3SecretKey, Region: cfg.S3Region,
 	})
@@ -228,19 +228,6 @@ func buildService(ctx context.Context, cfg config.Config, reg *prometheus.Regist
 	case "exporter":
 		return func(ctx context.Context) error {
 			return exporter.Run(ctx, cfg, pool, s3c, schemaReg, m, log)
-		}, cleanup, nil
-
-	case "publisher":
-		// kprom registers the producer's client metrics on reg and panics on a
-		// duplicate registration: this is the only producer of the registry.
-		prod, err := queue.NewProducer(cfg.Brokers, "etl-publisher", reg)
-		if err != nil {
-			return nil, cleanup, fmt.Errorf("producer: %w", err)
-		}
-		closers = append(closers, prod.Close)
-		health.AddReadiness("broker", prod.Ping)
-		return func(ctx context.Context) error {
-			return publisher.Run(ctx, cfg, pool, s3c, prod, schemaReg, m, log)
 		}, cleanup, nil
 
 	case "transformer":

@@ -23,7 +23,6 @@ func TestNewMetricsRegistersCatalogue(t *testing.T) {
 	m.ExportLag.Set(3)
 	m.ExportBatches.WithLabelValues("ok").Inc()
 	m.S3Puts.WithLabelValues("created").Inc()
-	m.PublishedRecords.Inc()
 	m.Records.WithLabelValues("market_snapshot", "written").Inc()
 	m.DedupDropped.WithLabelValues("replay").Inc()
 	m.Rejected.WithLabelValues("empty_record").Inc()
@@ -43,7 +42,6 @@ func TestNewMetricsRegistersCatalogue(t *testing.T) {
 		"etl_export_lag_seconds":             nil,
 		"etl_export_batches_total":           {"result"},
 		"etl_s3_put_total":                   {"result"},
-		"etl_published_records_total":        nil,
 		"etl_records_total":                  {"dataset", "outcome"},
 		"etl_dedup_dropped_total":            {"reason"},
 		"etl_rejected_total":                 {"reason"},

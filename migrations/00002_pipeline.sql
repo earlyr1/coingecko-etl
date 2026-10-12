@@ -38,8 +38,6 @@ CREATE TABLE pipeline.export_batches (
   status              text   NOT NULL DEFAULT 'claimed' CHECK (status IN ('claimed','exported')),
   claimed_at          timestamptz NOT NULL DEFAULT now(),
   exported_at         timestamptz,
-  publish_lease_until timestamptz,
-  published_at        timestamptz,
   UNIQUE (window_start, part_index),
   CHECK (max_fetched_at >= min_fetched_at),
   CHECK ((content_sha256 IS NULL) = (line_count IS NULL))
@@ -47,10 +45,6 @@ CREATE TABLE pipeline.export_batches (
 
 ALTER TABLE raw.api_calls ADD CONSTRAINT api_calls_export_batch_fk
   FOREIGN KEY (export_batch_id) REFERENCES pipeline.export_batches (batch_id);
-
--- Publisher picks the oldest exported, unpublished batch.
-CREATE INDEX export_batches_unpublished_idx ON pipeline.export_batches (batch_id)
-  WHERE status = 'exported' AND published_at IS NULL;
 
 CREATE TABLE pipeline.dedup_claims (
   dataset         text   NOT NULL,
