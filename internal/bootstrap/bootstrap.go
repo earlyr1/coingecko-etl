@@ -31,12 +31,12 @@ import (
 // [today-1, today+3].
 const partitionDaysAhead = 3
 
-// ErrLakeFromOtherLifetime: pipeline.export_batches is empty but the raw
-// bucket already holds objects. Object keys are unique only within one
+// ErrLakeFromOtherLifetime: pipeline.export_windows is empty (the exporter
+// never closed a window here) but the raw bucket already holds objects. Object keys are unique only within one
 // Postgres and Redpanda lifetime (batch ids restart at 1, topic offsets at
 // 0), so the new objects would collide with the old ones and stop the
 // exporter and the transformers with checksum mismatches.
-var ErrLakeFromOtherLifetime = errors.New("the raw bucket already holds objects but pipeline.export_batches is empty: " +
+var ErrLakeFromOtherLifetime = errors.New("the raw bucket already holds objects but pipeline.export_windows is empty: " +
 	"the lake (./data and ./.s3meta) belongs to a different Postgres/Redpanda lifetime. " +
 	"Wipe the lake together with the volumes (make clean) or restore the matching volumes")
 
@@ -99,7 +99,9 @@ func initPostgres(ctx context.Context, cfg config.Config, log *slog.Logger) (led
 		return false, err
 	}
 	err = step(ctx, log, "postgres_export_ledger", func(ctx context.Context) error {
-		return pool.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM pipeline.export_batches)`).Scan(&ledgerEmpty)
+		// Every part references its window, and an empty window has no part,
+		// so the window table is the whole ledger.
+		return pool.QueryRow(ctx, `SELECT NOT EXISTS (SELECT 1 FROM pipeline.export_windows)`).Scan(&ledgerEmpty)
 	})
 	return ledgerEmpty, err
 }

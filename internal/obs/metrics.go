@@ -65,7 +65,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}, []string{"stage", "schema", "keyword"}),
 		ExportLag: f.NewGauge(prometheus.GaugeOpts{
 			Name: "etl_export_lag_seconds",
-			Help: "Age of the oldest outcome=ok raw.api_calls row not yet exported (0 when caught up).",
+			Help: "Seconds since the end of the oldest ETL_WINDOW window the exporter has not closed yet (0 while on schedule).",
 		}),
 		ExportBatches: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "etl_export_batches_total",

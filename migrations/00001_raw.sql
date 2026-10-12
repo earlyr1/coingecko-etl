@@ -25,8 +25,9 @@ CREATE TABLE raw.api_calls (
 COMMENT ON COLUMN raw.api_calls.payload IS 'Response body byte-for-byte (json, not jsonb).';
 COMMENT ON COLUMN raw.api_calls.export_batch_id IS 'pipeline.export_batches.batch_id of the batch that exported this row; NULL = not exported yet (rows with outcome <> ok stay NULL forever).';
 
--- Exporter claim and lag: unexported ok rows in seq order. Small in steady
--- state; behaves like a queue index (dead entries until vacuum).
+-- Exporter claim (and the first window on an empty ledger): unexported ok
+-- rows in seq order. Small in steady state; behaves like a queue index (dead
+-- entries until vacuum).
 CREATE INDEX api_calls_unexported_idx ON raw.api_calls (seq) WHERE outcome = 'ok' AND export_batch_id IS NULL;
 -- Exporter read-back of one batch.
 CREATE INDEX api_calls_export_batch_idx ON raw.api_calls (export_batch_id, seq) WHERE export_batch_id IS NOT NULL;

@@ -48,8 +48,10 @@ groups:
           description: "See data/dlq/stage=transform/ for source_schema_violation records."
 
       - alert: ETLExportLagHigh
-        # Only the exporter moves etl_export_lag_seconds; the other services
-        # export a constant 0, which must not hide a missing exporter.
+        # etl_export_lag_seconds is the time past the end of the oldest raw
+        # window the exporter has not closed yet (0 on schedule). Only the
+        # exporter moves it; the other services export a constant 0, which
+        # must not hide a missing exporter.
         expr: |
           max(etl_export_lag_seconds{job="exporter"}) > 300
           or
@@ -58,8 +60,8 @@ groups:
         labels:
           severity: warning
         annotations:
-          summary: "{{ if $labels.job }}The exporter reports no export lag{{ else }}Exporter is {{ $value | humanizeDuration }} behind raw.api_calls{{ end }}"
-          description: "S3 is failing, a claimed batch keeps failing, rows are locked by another session, or the exporter is down."
+          summary: "{{ if $labels.job }}The exporter reports no export lag{{ else }}Exporter is {{ $value | humanizeDuration }} behind closing raw windows{{ end }}"
+          description: "A raw window cannot close: S3 is failing, a claimed part keeps failing (checksum or row-count mismatch), Postgres is unreachable, or the exporter is down."
 
       - alert: ETLConsumerLagGrowing
         # Total lag has been rising for 10 minutes and is not trivially small.

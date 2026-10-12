@@ -60,7 +60,7 @@ func TestRunTwiceAgainstRealDependencies(t *testing.T) {
 	}
 	defer pool.Close()
 	today := time.Now().UTC().Format("20060102")
-	for _, tbl := range []string{"raw.api_calls", "pipeline.export_batches", "pipeline.consumer_batches",
+	for _, tbl := range []string{"raw.api_calls", "pipeline.export_windows", "pipeline.export_batches", "pipeline.consumer_batches",
 		"raw.api_calls_p" + today, "pipeline.dedup_claims_p" + today} {
 		var ok bool
 		if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, tbl).Scan(&ok); err != nil || !ok {
@@ -130,7 +130,7 @@ func TestRunRefusesALakeFromAnotherLifetime(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s3c.PutIfAbsent(ctx, s3.BucketRaw, "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl", []byte("{}\n")); err != nil {
+	if _, err := s3c.PutIfAbsent(ctx, s3.BucketRaw, "source=coingecko/ingest_date=2026-10-10/window=1000/part-00000.jsonl", []byte("{}\n")); err != nil {
 		t.Fatal(err)
 	}
 	err = Run(ctx, cfg, discardLogger())
@@ -149,9 +149,8 @@ func TestRunRefusesALakeFromAnotherLifetime(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer pool.Close()
-	if _, err := pool.Exec(ctx, `INSERT INTO pipeline.export_batches
-		(row_count, min_fetched_at, max_fetched_at, object_key)
-		VALUES (1, now(), now(), 'source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl')`); err != nil {
+	if _, err := pool.Exec(ctx, `INSERT INTO pipeline.export_windows (window_start, window_end, success_key)
+		VALUES ('2026-10-10 10:00+00', '2026-10-10 10:05+00', 'source=coingecko/ingest_date=2026-10-10/window=1000/_SUCCESS')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := Run(ctx, cfg, discardLogger()); err != nil {

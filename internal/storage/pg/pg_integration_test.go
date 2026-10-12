@@ -45,7 +45,7 @@ func TestPostgresIntegration(t *testing.T) {
 		if version != 2 {
 			t.Fatalf("goose version = %d, want 2", version)
 		}
-		for _, tbl := range []string{"raw.api_calls", "pipeline.export_batches",
+		for _, tbl := range []string{"raw.api_calls", "pipeline.export_windows", "pipeline.export_batches",
 			"pipeline.dedup_claims", "pipeline.consumer_batches"} {
 			var ok bool
 			if err := pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, tbl).Scan(&ok); err != nil || !ok {
@@ -76,7 +76,13 @@ func TestPostgresIntegration(t *testing.T) {
 			"error text, payload json, payload_sha256 bytea, export_batch_id bigint"; got != want {
 			t.Errorf("raw.api_calls columns =\n  %s\nwant\n  %s", got, want)
 		}
-		if got, want := columns("pipeline", "export_batches"), "batch_id bigint, row_count integer, "+
+		if got, want := columns("pipeline", "export_windows"), "window_start timestamp with time zone, "+
+			"window_end timestamp with time zone, status text, success_key text, success_sha256 bytea, "+
+			"row_count integer, part_count integer, opened_at timestamp with time zone, closed_at timestamp with time zone"; got != want {
+			t.Errorf("pipeline.export_windows columns =\n  %s\nwant\n  %s", got, want)
+		}
+		if got, want := columns("pipeline", "export_batches"), "batch_id bigint, window_start timestamp with time zone, "+
+			"part_index integer, row_count integer, line_count integer, "+
 			"min_fetched_at timestamp with time zone, max_fetched_at timestamp with time zone, object_key text, "+
 			"content_sha256 bytea, status text, claimed_at timestamp with time zone, exported_at timestamp with time zone, "+
 			"publish_lease_until timestamp with time zone, published_at timestamp with time zone"; got != want {
@@ -88,6 +94,21 @@ func TestPostgresIntegration(t *testing.T) {
 				WHERE schemaname = 'raw' AND tablename = 'api_calls' AND indexname = $1`, idx).Scan(&def); err != nil {
 				t.Errorf("index %s on raw.api_calls: %v", idx, err)
 			}
+		}
+		// Windows close strictly in order (one pending window at most), and a
+		// window has each part index once.
+		var pending string
+		if err := pool.QueryRow(ctx, `SELECT indexdef FROM pg_indexes
+			WHERE schemaname = 'pipeline' AND indexname = 'export_windows_one_pending'`).Scan(&pending); err != nil {
+			t.Errorf("index export_windows_one_pending: %v", err)
+		} else if !strings.Contains(pending, "UNIQUE") || !strings.Contains(pending, "WHERE (status <> 'closed'::text)") {
+			t.Errorf("export_windows_one_pending = %s, want a unique index WHERE status <> 'closed'", pending)
+		}
+		var uniq int
+		if err := pool.QueryRow(ctx, `SELECT count(*) FROM pg_constraint
+			WHERE conrelid = 'pipeline.export_batches'::regclass AND contype = 'u'
+			  AND pg_get_constraintdef(oid) = 'UNIQUE (window_start, part_index)'`).Scan(&uniq); err != nil || uniq != 1 {
+			t.Errorf("UNIQUE (window_start, part_index) on pipeline.export_batches: count=%d err=%v", uniq, err)
 		}
 		var fk string
 		if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint

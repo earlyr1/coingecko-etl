@@ -22,6 +22,7 @@ import (
 	"coingecko-etl/internal/storage/s3"
 	"coingecko-etl/internal/testutil"
 	"coingecko-etl/internal/validation"
+	"coingecko-etl/internal/window"
 	"coingecko-etl/internal/xtime"
 	"coingecko-etl/schemas"
 )
@@ -83,8 +84,9 @@ func setup(t *testing.T, ctx context.Context) env {
 	}
 }
 
-// okEvent builds a successful RawEvent around a recorded CoinGecko response.
-func okEvent(t *testing.T, endpoint string, req event.Request, fixture string) event.RawEvent {
+// okEvent builds a successful RawEvent fetched at fetchedAt around a
+// recorded CoinGecko response.
+func okEvent(t *testing.T, endpoint string, req event.Request, fixture string, fetchedAt time.Time) event.RawEvent {
 	t.Helper()
 	payload, err := os.ReadFile("../../schemas/testdata/coingecko/" + fixture)
 	if err != nil {
@@ -99,7 +101,7 @@ func okEvent(t *testing.T, endpoint string, req event.Request, fixture string) e
 		Source:         event.SourceCoinGecko,
 		Endpoint:       endpoint,
 		Request:        req,
-		FetchedAt:      xtime.Format(time.Now()),
+		FetchedAt:      xtime.Format(fetchedAt),
 		Outcome:        event.OutcomeOK,
 		HTTP:           &event.HTTPMeta{Status: 200, LatencyMS: 120},
 		PayloadSHA256:  &sha,
@@ -152,17 +154,21 @@ func TestPublisherIntegration(t *testing.T) {
 	defer cancel()
 	e := setup(t, ctx)
 
+	// One-minute export windows: the first three events fall into the window
+	// at base, the event of "expired lease republishes" into the next one.
+	base := window.Floor(time.Now(), time.Minute).Add(-10 * time.Minute)
+	set := exporter.Settings{Window: time.Minute, PartMax: 500}
 	evs := []event.RawEvent{
-		okEvent(t, event.EndpointMarkets, coingecko.MarketsRequest(100), "markets_top10_t0.json"),
-		okEvent(t, event.EndpointMarkets, coingecko.MarketsRequest(100), "markets_top10_t1.json"),
-		okEvent(t, event.EndpointCoinDetail, coingecko.CoinDetailRequest("bitcoin"), "coin_bitcoin_full_t0.json"),
+		okEvent(t, event.EndpointMarkets, coingecko.MarketsRequest(100), "markets_top10_t0.json", base.Add(10*time.Second)),
+		okEvent(t, event.EndpointMarkets, coingecko.MarketsRequest(100), "markets_top10_t1.json", base.Add(10*time.Second)),
+		okEvent(t, event.EndpointCoinDetail, coingecko.CoinDetailRequest("bitcoin"), "coin_bitcoin_full_t0.json", base.Add(10*time.Second)),
 	}
 	for _, ev := range evs {
 		if err := pg.InsertAPICall(ctx, e.pool, ev); err != nil {
 			t.Fatal(err)
 		}
 	}
-	n, err := exporter.ExportOnce(ctx, e.pool, e.s3c, e.reg, e.m, e.log, 500)
+	n, err := exporter.ExportOnce(ctx, e.pool, e.s3c, e.reg, e.m, e.log, set, base.Add(time.Minute+time.Second))
 	if err != nil || n != len(evs) {
 		t.Fatalf("ExportOnce = %d, %v; want %d", n, err, len(evs))
 	}
@@ -227,11 +233,11 @@ func TestPublisherIntegration(t *testing.T) {
 	})
 
 	t.Run("expired lease republishes", func(t *testing.T) {
-		ev := okEvent(t, event.EndpointMarkets, coingecko.MarketsRequest(100), "markets_top10_t2.json")
+		ev := okEvent(t, event.EndpointMarkets, coingecko.MarketsRequest(100), "markets_top10_t2.json", base.Add(70*time.Second))
 		if err := pg.InsertAPICall(ctx, e.pool, ev); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := exporter.ExportOnce(ctx, e.pool, e.s3c, e.reg, e.m, e.log, 500); err != nil || n != 1 {
+		if n, err := exporter.ExportOnce(ctx, e.pool, e.s3c, e.reg, e.m, e.log, set, base.Add(2*time.Minute+time.Second)); err != nil || n != 1 {
 			t.Fatalf("ExportOnce = %d, %v", n, err)
 		}
 		lease := time.Second
@@ -267,22 +273,29 @@ UPDATE pipeline.export_batches SET published_at = NULL, publish_lease_until = no
 		}
 	})
 	t.Run("invalid line goes to dlq, valid line is published", func(t *testing.T) {
-		good := okEvent(t, event.EndpointCoinDetail, coingecko.CoinDetailRequest("bitcoin"), "coin_bitcoin_full_t0.json")
+		good := okEvent(t, event.EndpointCoinDetail, coingecko.CoinDetailRequest("bitcoin"), "coin_bitcoin_full_t0.json", time.Now())
 		goodLine, err := event.Marshal(good)
 		if err != nil {
 			t.Fatal(err)
 		}
 		bad := []byte(`{"schema_version":1,"event_id":"` + uuid.Must(uuid.NewV7()).String() + `"}`)
 		obj := append(append(append(goodLine, '\n'), bad...), '\n')
-		key := "source=coingecko/ingest_date=2026-10-10/batch=manual-dlq.jsonl"
+		key := "source=coingecko/ingest_date=2000-01-01/window=0000/part-00000.jsonl"
 		if _, err := e.s3c.PutIfAbsent(ctx, s3.BucketRaw, key, obj); err != nil {
+			t.Fatal(err)
+		}
+		// A closed window for the hand-made part. line_count and content_sha256
+		// stay NULL (the CHECK wants both or neither); this publisher reads neither.
+		if _, err := e.pool.Exec(ctx, `
+INSERT INTO pipeline.export_windows (window_start, window_end, status, success_key, success_sha256, row_count, part_count, closed_at)
+VALUES ('2000-01-01 00:00+00', '2000-01-01 00:01+00', 'closed', 'manual/_SUCCESS', decode(repeat('00', 32), 'hex'), 2, 1, now())`); err != nil {
 			t.Fatal(err)
 		}
 		var id int64
 		var exportedAt time.Time
 		err = e.pool.QueryRow(ctx, `
-INSERT INTO pipeline.export_batches (row_count, min_fetched_at, max_fetched_at, object_key, status, exported_at)
-VALUES (2, now(), now(), $1, 'exported', now()) RETURNING batch_id, exported_at`, key).Scan(&id, &exportedAt)
+INSERT INTO pipeline.export_batches (window_start, part_index, row_count, min_fetched_at, max_fetched_at, object_key, status, exported_at)
+VALUES ('2000-01-01 00:00+00', 0, 2, now(), now(), $1, 'exported', now()) RETURNING batch_id, exported_at`, key).Scan(&id, &exportedAt)
 		if err != nil {
 			t.Fatal(err)
 		}

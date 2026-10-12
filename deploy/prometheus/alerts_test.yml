@@ -70,8 +70,8 @@ tests:
         exp_alerts:
           - exp_labels: {severity: warning}
             exp_annotations:
-              summary: "Exporter is 6m 40s behind raw.api_calls"
-              description: "S3 is failing, a claimed batch keeps failing, rows are locked by another session, or the exporter is down."
+              summary: "Exporter is 6m 40s behind closing raw windows"
+              description: "A raw window cannot close: S3 is failing, a claimed part keeps failing (checksum or row-count mismatch), Postgres is unreachable, or the exporter is down."
 
   - name: export lag fires when the exporter is gone, even though other jobs export 0
     interval: 1m
@@ -87,7 +87,7 @@ tests:
           - exp_labels: {severity: warning, job: exporter}
             exp_annotations:
               summary: "The exporter reports no export lag"
-              description: "S3 is failing, a claimed batch keeps failing, rows are locked by another session, or the exporter is down."
+              description: "A raw window cannot close: S3 is failing, a claimed part keeps failing (checksum or row-count mismatch), Postgres is unreachable, or the exporter is down."
 
   - name: no export lag alert while the exporter keeps up
     interval: 1m

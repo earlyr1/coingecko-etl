@@ -35,6 +35,9 @@ const (
 // treat it as fatal for the batch.
 var ErrChecksumMismatch = errors.New("s3: object exists with different checksum")
 
+// ErrNotFound means the object does not exist (Get wraps it with bucket/key).
+var ErrNotFound = errors.New("s3: object not found")
+
 const (
 	metaSHA256  = "sha256" // sent as x-amz-meta-sha256
 	contentType = "application/x-ndjson"
@@ -123,9 +126,12 @@ func (c *Client) PutIfAbsent(ctx context.Context, bucket, key string, body []byt
 	return false, fmt.Errorf("%w: %s/%s", ErrChecksumMismatch, bucket, key)
 }
 
-// Get returns the whole object body.
+// Get returns the whole object body; a missing key gives an error wrapping ErrNotFound.
 func (c *Client) Get(ctx context.Context, bucket, key string) ([]byte, error) {
 	out, err := c.api.GetObject(ctx, &s3.GetObjectInput{Bucket: aws.String(bucket), Key: aws.String(key)})
+	if isNotFound(err) {
+		return nil, fmt.Errorf("%w: %s/%s", ErrNotFound, bucket, key)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("s3: get %s/%s: %w", bucket, key, err)
 	}
@@ -182,6 +188,16 @@ func isPreconditionFailed(err error) bool {
 	}
 	var re *awshttp.ResponseError
 	return errors.As(err, &re) && re.HTTPStatusCode() == http.StatusPreconditionFailed
+}
+
+// isNotFound reports whether err is the 404 answer to GetObject on a missing key.
+func isNotFound(err error) bool {
+	var nsk *types.NoSuchKey
+	if errors.As(err, &nsk) {
+		return true
+	}
+	var re *awshttp.ResponseError
+	return errors.As(err, &re) && re.HTTPStatusCode() == http.StatusNotFound
 }
 
 func isBucketExists(err error) bool {

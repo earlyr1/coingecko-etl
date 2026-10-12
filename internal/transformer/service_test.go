@@ -57,7 +57,7 @@ func TestRunEndToEnd(t *testing.T) {
 		key := keys[i]
 		recs = append(recs, &kgo.Record{Topic: topic, Key: []byte(key), Value: v, Headers: []kgo.RecordHeader{
 			{Key: queue.HeaderEventID, Value: []byte(ev.EventID)},
-			{Key: queue.HeaderRawObject, Value: []byte("source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl")},
+			{Key: queue.HeaderRawObject, Value: []byte("source=coingecko/ingest_date=2026-10-10/window=1000/part-00001.jsonl")},
 		}})
 	}
 	if err := cl.ProduceSync(ctx, recs...).FirstErr(); err != nil {
@@ -164,7 +164,7 @@ func TestRunEndToEnd(t *testing.T) {
 	}
 	rec := &kgo.Record{Topic: topic, Key: []byte("coins_markets"), Value: v, Headers: []kgo.RecordHeader{
 		{Key: queue.HeaderEventID, Value: []byte(extra.EventID)},
-		{Key: queue.HeaderRawObject, Value: []byte("source=coingecko/ingest_date=2026-10-10/batch=00000000000000000002.jsonl")},
+		{Key: queue.HeaderRawObject, Value: []byte("source=coingecko/ingest_date=2026-10-10/window=1000/part-00002.jsonl")},
 	}}
 	if err := cl.ProduceSync(ctx, rec).FirstErr(); err != nil {
 		t.Fatal(err)

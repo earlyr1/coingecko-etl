@@ -181,7 +181,7 @@
       "id": 13,
       "type": "timeseries",
       "title": "Export lag and S3 writes",
-      "description": "Age of the oldest unexported raw row, and conditional S3 PUT results (exists = idempotent retry, mismatch = alert).",
+      "description": "How far the exporter is behind closing raw windows (0 on schedule), and conditional S3 PUT results (exists = idempotent retry, mismatch = alert).",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 12, "y": 36, "w": 12, "h": 8},
       "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},

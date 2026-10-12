@@ -165,6 +165,8 @@ func TestLoadInvalid(t *testing.T) {
 		{"ETL_MARKETS_INTERVAL", "30"},              // no unit
 		{"ETL_DETAIL_INTERVAL", "soon"},             // not a duration
 		{"ETL_EXPORT_INTERVAL", "-5s"},              // negative
+		{"ETL_EXPORT_INTERVAL", "1m"},               // not shorter than the publisher's grace
+		{"ETL_EXPORT_INTERVAL", "90s"},              // longer than the publisher's grace
 		{"ETL_PUBLISH_LEASE", "0s"},                 // zero not allowed
 		{"ETL_DETAIL_OFFSET", "-1s"},                // zero allowed, negative not
 		{"ETL_TOPIC_PARTITIONS", "abc"},             // not an int

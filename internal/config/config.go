@@ -41,8 +41,8 @@ type Config struct {
 	Watchlist           []string      // ETL_WATCHLIST, default "bitcoin,ethereum,tether,usd-coin"
 	MarketsPerPage      int           // ETL_MARKETS_PER_PAGE, default 100
 	MinRequestSpacing   time.Duration // ETL_MIN_REQUEST_SPACING, default 15s
-	ExportInterval      time.Duration // ETL_EXPORT_INTERVAL, default 15s
-	ExportBatchMax      int           // ETL_EXPORT_BATCH_MAX, default 500
+	ExportInterval      time.Duration // ETL_EXPORT_INTERVAL, default 15s; shorter than window.PublishGrace
+	ExportBatchMax      int           // ETL_EXPORT_BATCH_MAX, default 500; maximum rows per raw part
 	Window              time.Duration // ETL_WINDOW, default 5m; whole minutes in [1m,60m] dividing 60m; aligned to the UTC hour
 	PublishLease        time.Duration // ETL_PUBLISH_LEASE, default 2m
 	PublishPoll         time.Duration // ETL_PUBLISH_POLL, default 5s
@@ -102,6 +102,12 @@ func Load(service string) (Config, error) {
 			p.errs = append(p.errs, fmt.Errorf("ETL_CLAIMS_RETENTION_DAYS=%d: must be at least %d (ETL_TOPIC_RETENTION=%s in whole days, rounded up, plus 1)",
 				c.ClaimsRetentionDays, minDays, c.TopicRetention))
 		}
+	}
+	// The exporter must close a window before the publish run reads it, one
+	// grace after the window end. Checked only for a parsed value, so a bad
+	// value reports one error.
+	if c.ExportInterval > 0 && c.ExportInterval >= window.PublishGrace {
+		p.errs = append(p.errs, fmt.Errorf("ETL_EXPORT_INTERVAL=%s: must be shorter than the publisher's %s grace", c.ExportInterval, window.PublishGrace))
 	}
 	if len(p.errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(p.errs...))

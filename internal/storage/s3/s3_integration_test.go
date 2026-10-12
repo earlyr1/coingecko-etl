@@ -45,7 +45,7 @@ func TestClientIntegration(t *testing.T) {
 		t.Fatalf("Ping: %v", err)
 	}
 
-	key := "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl"
+	key := "source=coingecko/ingest_date=2026-10-10/window=1000/part-00001.jsonl"
 	body := []byte("{\"a\":1}\n{\"b\":2}\n")
 
 	created, err := c.PutIfAbsent(ctx, s3.BucketRaw, key, body)
@@ -81,9 +81,12 @@ func TestClientIntegration(t *testing.T) {
 		t.Fatalf("Get = %q, want %q", got, body)
 	}
 
-	if _, err := c.Get(ctx, s3.BucketRaw, "source=coingecko/missing.jsonl"); err == nil {
-		t.Fatal("Get of a missing key returned no error")
-	}
+	t.Run("get missing key", func(t *testing.T) {
+		_, err := c.Get(ctx, s3.BucketRaw, "source=coingecko/ingest_date=2026-10-10/window=1000/_SUCCESS")
+		if !errors.Is(err, s3.ErrNotFound) {
+			t.Fatalf("Get of a missing key = %v, want s3.ErrNotFound", err)
+		}
+	})
 }
 
 // A bucket directory created on the host (mkdir data/raw before the first
@@ -133,7 +136,7 @@ func TestEnsureBucketsCreatesMissingBucket(t *testing.T) {
 		t.Fatalf("EnsureBuckets again on the created bucket: %v", err)
 	}
 
-	key := "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000002.jsonl"
+	key := "source=coingecko/ingest_date=2026-10-10/window=1000/part-00002.jsonl"
 	body := []byte("{\"fresh\":true}\n")
 	if created, err := c.PutIfAbsent(ctx, bucket, key, body); err != nil || !created {
 		t.Fatalf("put into created bucket: created=%v err=%v", created, err)
@@ -167,7 +170,7 @@ func TestHasAnyObject(t *testing.T) {
 	if got, err := c.HasAnyObject(ctx, s3.BucketRaw); err != nil || got {
 		t.Fatalf("bucket with empty directories: HasAnyObject = %v, %v; want false", got, err)
 	}
-	key := "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl"
+	key := "source=coingecko/ingest_date=2026-10-10/window=1000/part-00001.jsonl"
 	if _, err := c.PutIfAbsent(ctx, s3.BucketRaw, key, []byte("{}\n")); err != nil {
 		t.Fatal(err)
 	}

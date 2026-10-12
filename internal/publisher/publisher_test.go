@@ -48,7 +48,7 @@ func TestDLQRecordsSatisfySchema(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := batch{ID: 1, ObjectKey: "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl",
+	b := batch{ID: 1, ObjectKey: "source=coingecko/ingest_date=2026-10-10/window=1000/part-00001.jsonl",
 		ExportedAt: time.Date(2026, 10, 10, 10, 7, 55, 0, time.UTC)}
 	cases := map[string][]byte{
 		"valid json, wrong shape": []byte(`{"event_id":"0199c8a0-0000-7000-8000-000000000001","idempotency_key":"` + sixtyFourHex() + `","extra":1}`),

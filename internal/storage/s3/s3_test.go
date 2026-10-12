@@ -194,3 +194,27 @@ func TestNewIgnoresHostAWSEnvironment(t *testing.T) {
 		t.Fatalf("options: endpoint=%v region=%q path-style=%v, want http://versitygw:7070, us-east-1, true", o.BaseEndpoint, o.Region, o.UsePathStyle)
 	}
 }
+
+// TestGetNotFound: a missing key is reported as ErrNotFound, so callers can
+// tell "not written yet" from a failing gateway.
+func TestGetNotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = io.WriteString(w, `<?xml version="1.0" encoding="UTF-8"?><Error><Code>NoSuchKey</Code><Message>The specified key does not exist.</Message></Error>`)
+	}))
+	t.Cleanup(srv.Close)
+	o := options(Config{Endpoint: srv.URL, AccessKey: "etl", SecretKey: "etlsecret123", Region: "us-east-1"})
+	o.RetryMaxAttempts = 1
+	c := &Client{api: s3.New(o)}
+
+	_, err := c.Get(context.Background(), BucketRaw, "source=coingecko/missing/_SUCCESS")
+	if !errors.Is(err, ErrNotFound) {
+		t.Fatalf("Get of a missing key = %v, want ErrNotFound", err)
+	}
+
+	other := &smithy.GenericAPIError{Code: "AccessDenied"}
+	if isNotFound(other) {
+		t.Fatal("AccessDenied treated as not found")
+	}
+}

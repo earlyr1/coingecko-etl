@@ -47,7 +47,7 @@ func fixtureEvent(t *testing.T, endpoint, name string) event.RawEvent {
 func testLineage(offset int64) Lineage {
 	return Lineage{
 		EventID:     "0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11",
-		RawObject:   "source=coingecko/ingest_date=2026-10-10/batch=00000000000000000042.jsonl",
+		RawObject:   "source=coingecko/ingest_date=2026-10-10/window=1000/part-00042.jsonl",
 		Partition:   0,
 		Offset:      offset,
 		SchemaVer:   1,

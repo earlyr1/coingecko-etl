@@ -41,7 +41,7 @@ const usageText = `usage: etl <command>
 commands:
   init         run migrations, create partitions, topic and buckets (one-shot)
   fetcher      poll CoinGecko into raw.api_calls
-  exporter     export raw.api_calls to s3://raw as JSONL
+  exporter     export raw.api_calls to s3://raw in ETL_WINDOW windows (JSONL parts + _SUCCESS)
   publisher    publish exported batches to the broker
   transformer  consume, clean, dedup and write s3://processed
   healthcheck  exit 0 if the local /readyz returns 200 (for container healthchecks)
