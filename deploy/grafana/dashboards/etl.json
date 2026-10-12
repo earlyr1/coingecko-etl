@@ -181,7 +181,7 @@
       "id": 19,
       "type": "timeseries",
       "title": "CoinGecko API latency",
-      "description": "p50 and p95 of the CoinGecko call latency by endpoint over 5 minutes, from sending the request to the end of the body read, for every call that got an HTTP response (network errors are not timed). Under a second is normal; the client gives up at 10 s.",
+      "description": "p50 and p95 of the CoinGecko call latency by endpoint over 5 minutes, from sending the request to the end of the body read, for every call that got a complete HTTP response (network errors, a failed body read or a timeout among them, are not timed). Under a second is normal; the client gives up at 10 s.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 8, "y": 36, "w": 8, "h": 8},
       "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},

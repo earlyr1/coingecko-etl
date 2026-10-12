@@ -12,6 +12,7 @@ deploy/
 !deploy/cronicle/
 deploy/cronicle/*.test.js
 *.md
+architecture.html
 *.test
 *.out
 Dockerfile

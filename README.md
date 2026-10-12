@@ -438,7 +438,7 @@ Every long-running service (fetcher, exporter, transformer) listens on `:8080` w
 | Metric | Type | Labels | What it tells you |
 |---|---|---|---|
 | `etl_api_requests_total` | counter | endpoint, status | CoinGecko calls by HTTP status, `network_error` or `skipped` (a skipped tick, not an error) |
-| `etl_api_request_duration_seconds` | histogram | endpoint | latency of calls that got an HTTP response, body read included |
+| `etl_api_request_duration_seconds` | histogram | endpoint | latency of calls that got a complete HTTP response, body read included |
 | `etl_api_rate_limited_total` | counter | — | HTTP 429 responses |
 | `etl_last_success_timestamp_seconds` | gauge | endpoint | Unix time of the last successful call; freshness = `time() - this` |
 | `etl_source_data_age_seconds` | gauge | endpoint | how old CoinGecko's data was when we fetched it (`fetched_at` minus the newest `last_updated`) |
@@ -463,7 +463,7 @@ Expected freshness: a record reaches `processed/` within about `ETL_WINDOW` + 1 
 
 The transformer's record, duplicate, reject, dlq, latency and batch-duration metrics are counted once per batch, when it is marked `written`, so a retried batch does not count twice; schema validation counters count every attempt. Every service also exposes the standard Go runtime and process metrics. Labels stay low-cardinality: no coin ids or offsets.
 
-The Grafana dashboard shows data freshness, duplicate share, DLQ records and end-to-end latency at the top; then records per stage, freshness and source age, end-to-end latency, duplicate share, rejects by reason, dead letters (a total that reads 0 while nothing is dead-lettered, plus the breakdown by stage and error class), consumer lag, API status codes, API latency (p50 and p95 by endpoint, from `etl_api_request_duration_seconds`), export lag with S3 writes and schema validations; and for the jobs, time since each job's last success next to time since its last run (`etl_job_last_run_timestamp_seconds`, failed runs included: a recent run with an old success means the job runs and fails, both old mean it does not run), records published per window, job runs and retention results.
+The Grafana dashboard shows data freshness, duplicate share, DLQ records and end-to-end latency at the top; then records per stage, freshness and source age, end-to-end latency, duplicate share, rejects by reason, dead letters (a total that reads 0 while nothing is dead-lettered, plus the breakdown by stage and error class), consumer lag, API status codes, API latency (p50 and p95 by endpoint, from `etl_api_request_duration_seconds`), export lag with S3 writes and schema validations; and for the jobs, time since each job's last success next to time since its last run (`etl_job_last_run_timestamp_seconds`, failed runs included: a recent run with an old success means the job runs and fails, both old means it does not run), records published per window, job runs and retention results.
 
 ## Alerts
 

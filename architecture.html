@@ -1248,7 +1248,7 @@ footer { padding-block: 32px 0; display: grid; gap: 6px; color: var(--muted); fo
         <dt>etl_schema_validations_total{stage,schema,result}</dt><dd>pass or fail per stage; drives the source-schema alert</dd>
         <dt>etl_schema_violations_total{stage,schema,keyword}</dt><dd>which JSON Schema keyword failed</dd>
         <dt>etl_api_requests_total{endpoint,status}</dt><dd>calls by result; 429 and 5xx stand out</dd>
-        <dt>etl_api_request_duration_seconds{endpoint}</dt><dd>latency of calls that got an HTTP response, body read included; p50 and p95 on the dashboard</dd>
+        <dt>etl_api_request_duration_seconds{endpoint}</dt><dd>latency of calls that got a complete HTTP response, body read included; p50 and p95 on the dashboard</dd>
         <dt>etl_last_success_timestamp_seconds{endpoint}</dt><dd>drives the stale-data alert</dd>
         <dt>etl_source_data_age_seconds{endpoint}</dt><dd>how old CoinGecko's data was when fetched</dd>
         <dt>etl_export_lag_seconds</dt><dd>seconds past the end of the oldest window not yet closed (0 on schedule)</dd>
