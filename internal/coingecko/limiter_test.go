@@ -7,12 +7,22 @@ import (
 	"time"
 )
 
+// wait blocks until a request may start and records that start, through the
+// same acquire/release path the client uses around every request.
+func wait(l *Limiter, ctx context.Context) error {
+	if err := l.acquire(ctx); err != nil {
+		return err
+	}
+	l.release()
+	return nil
+}
+
 func TestLimiterFirstWaitIsImmediate(t *testing.T) {
 	l := NewLimiter(time.Hour)
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	start := time.Now()
-	if err := l.Wait(ctx); err != nil {
+	if err := wait(l, ctx); err != nil {
 		t.Fatalf("Wait: %v", err)
 	}
 	if d := time.Since(start); d > 100*time.Millisecond {
@@ -24,11 +34,11 @@ func TestLimiterEnforcesSpacing(t *testing.T) {
 	const spacing = 150 * time.Millisecond
 	l := NewLimiter(spacing)
 	ctx := context.Background()
-	if err := l.Wait(ctx); err != nil {
+	if err := wait(l, ctx); err != nil {
 		t.Fatal(err)
 	}
 	start := time.Now()
-	if err := l.Wait(ctx); err != nil {
+	if err := wait(l, ctx); err != nil {
 		t.Fatal(err)
 	}
 	if d := time.Since(start); d < spacing-10*time.Millisecond {
@@ -57,7 +67,7 @@ func TestLimiterCooldown(t *testing.T) {
 		t.Fatal("shorter Cooldown shortened the active cooldown")
 	}
 	start := time.Now()
-	if err := l.Wait(context.Background()); err != nil {
+	if err := wait(l, context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if d := time.Since(start); d < 150*time.Millisecond {
@@ -70,7 +80,7 @@ func TestLimiterWaitHonorsContext(t *testing.T) {
 	l.Cooldown(time.Hour)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
-	err := l.Wait(ctx)
+	err := wait(l, ctx)
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Wait err = %v, want context.DeadlineExceeded", err)
 	}

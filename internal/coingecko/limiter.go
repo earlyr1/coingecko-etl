@@ -14,8 +14,8 @@ import (
 // Allowed is the non-blocking check the fetcher uses to SKIP a tick: it
 // reports false while a request is in flight or a cooldown is active.
 // Spacing is deliberately not part of Allowed: two schedules that are
-// minSpacing apart would otherwise lose ticks to scheduler jitter, so Wait
-// absorbs spacing by sleeping (at most minSpacing).
+// minSpacing apart would otherwise lose ticks to scheduler jitter, so the
+// client's blocking acquire absorbs spacing by sleeping (at most minSpacing).
 type Limiter struct {
 	mu            sync.Mutex
 	minSpacing    time.Duration
@@ -29,17 +29,6 @@ type Limiter struct {
 // NewLimiter returns a limiter that keeps request starts at least minSpacing apart.
 func NewLimiter(minSpacing time.Duration) *Limiter {
 	return &Limiter{minSpacing: minSpacing, now: time.Now, changed: make(chan struct{})}
-}
-
-// Wait blocks until a request may start and records that start (spacing is
-// measured from it). It does not keep the in-flight slot. It returns
-// ctx.Err() if ctx ends first.
-func (l *Limiter) Wait(ctx context.Context) error {
-	if err := l.acquire(ctx); err != nil {
-		return err
-	}
-	l.release()
-	return nil
 }
 
 // Cooldown forbids any request start before now+d. A shorter cooldown never

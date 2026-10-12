@@ -42,18 +42,6 @@ const (
 	Conflict                 // another position won with different content: reject as snapshot_conflict
 )
 
-func (d Decision) String() string {
-	switch d {
-	case Emit:
-		return "emit"
-	case Drop:
-		return "drop"
-	case Conflict:
-		return "conflict"
-	}
-	return fmt.Sprintf("Decision(%d)", int(d))
-}
-
 // Drop reasons (metric label values only; they do not change behaviour).
 const (
 	ReasonReplay            = "replay"             // same event_id: the same message published twice
