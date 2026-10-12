@@ -21,9 +21,10 @@ import (
 	"coingecko-etl/migrations"
 )
 
-// partitionLockKey serializes partition DDL across processes: EnsurePartitions
-// (init, fetcher maintenance loop, insert-time repair) and DropClaimPartition
-// (etl maintenance retention).
+// partitionLockKey serializes partition DDL across processes:
+// EnsureRawPartitions (init, the fetcher's hourly loop, its insert-time
+// repair), EnsureClaimPartitions (init, the transformer) and
+// DropClaimPartition (etl maintenance retention).
 // Arbitrary constant: "cgetl-pt" in ASCII.
 const partitionLockKey int64 = 0x6367_6574_6c2d_7074
 
@@ -66,10 +67,25 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 	return nil
 }
 
-// EnsurePartitions creates the daily partitions of raw.api_calls and
-// pipeline.dedup_claims for every UTC day in [today-1, today+daysAhead].
-// It is idempotent and safe to call concurrently.
-func EnsurePartitions(ctx context.Context, pool *pgxpool.Pool, now time.Time, daysAhead int) error {
+// EnsureRawPartitions creates the daily partitions of raw.api_calls for
+// every UTC day in [today-1, today+daysAhead]: the fetcher's tables, created
+// by init, the fetcher's hourly loop and its insert-time repair. It is
+// idempotent and safe to call concurrently.
+func EnsureRawPartitions(ctx context.Context, pool *pgxpool.Pool, now time.Time, daysAhead int) error {
+	return ensurePartitions(ctx, pool, now, daysAhead, rawPartitionDDL)
+}
+
+// EnsureClaimPartitions creates the daily partitions of pipeline.dedup_claims
+// for every UTC day in [today-1, today+daysAhead]: the transformer's table,
+// created by init and by the transformer for the event dates it meets. It is
+// idempotent and safe to call concurrently.
+func EnsureClaimPartitions(ctx context.Context, pool *pgxpool.Pool, now time.Time, daysAhead int) error {
+	return ensurePartitions(ctx, pool, now, daysAhead, claimPartitionDDL)
+}
+
+// ensurePartitions runs ddl for every UTC day in [today-1, today+daysAhead]
+// in one transaction under the partition advisory lock.
+func ensurePartitions(ctx context.Context, pool *pgxpool.Pool, now time.Time, daysAhead int, ddl func(day time.Time) string) error {
 	if daysAhead < 0 {
 		return errors.New("pg: daysAhead must be >= 0")
 	}
@@ -81,29 +97,28 @@ func EnsurePartitions(ctx context.Context, pool *pgxpool.Pool, now time.Time, da
 			return fmt.Errorf("pg: partition lock: %w", err)
 		}
 		for d := -1; d <= daysAhead; d++ {
-			for _, stmt := range partitionDDL(today.AddDate(0, 0, d)) {
-				if _, err := tx.Exec(ctx, stmt); err != nil {
-					return fmt.Errorf("pg: create partition: %w", err)
-				}
+			if _, err := tx.Exec(ctx, ddl(today.AddDate(0, 0, d))); err != nil {
+				return fmt.Errorf("pg: create partition: %w", err)
 			}
 		}
 		return nil
 	})
 }
 
-// partitionDDL returns the CREATE statements for one UTC day.
-// raw.api_calls is ranged on timestamptz, so bounds carry an explicit +00
-// offset; otherwise the session TimeZone would shift the day boundaries.
-func partitionDDL(day time.Time) []string {
-	next := day.AddDate(0, 0, 1)
-	suffix := day.Format("20060102")
-	from, to := day.Format("2006-01-02"), next.Format("2006-01-02")
-	return []string{
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS raw.api_calls_p%s PARTITION OF raw.api_calls
-  FOR VALUES FROM ('%s 00:00:00+00') TO ('%s 00:00:00+00')`, suffix, from, to),
-		fmt.Sprintf(`CREATE TABLE IF NOT EXISTS pipeline.dedup_claims_p%s PARTITION OF pipeline.dedup_claims
-  FOR VALUES FROM ('%s') TO ('%s')`, suffix, from, to),
-	}
+// rawPartitionDDL returns the CREATE statement of one UTC day of
+// raw.api_calls. The table is ranged on timestamptz, so bounds carry an
+// explicit +00 offset; otherwise the session TimeZone would shift the day
+// boundaries.
+func rawPartitionDDL(day time.Time) string {
+	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS raw.api_calls_p%s PARTITION OF raw.api_calls
+  FOR VALUES FROM ('%s 00:00:00+00') TO ('%s 00:00:00+00')`, day.Format("20060102"), day.Format(time.DateOnly), day.AddDate(0, 0, 1).Format(time.DateOnly))
+}
+
+// claimPartitionDDL returns the CREATE statement of one UTC day (event_date)
+// of pipeline.dedup_claims.
+func claimPartitionDDL(day time.Time) string {
+	return fmt.Sprintf(`CREATE TABLE IF NOT EXISTS pipeline.dedup_claims_p%s PARTITION OF pipeline.dedup_claims
+  FOR VALUES FROM ('%s') TO ('%s')`, day.Format("20060102"), day.Format(time.DateOnly), day.AddDate(0, 0, 1).Format(time.DateOnly))
 }
 
 // ClaimPartition is one daily partition of pipeline.dedup_claims, with its
@@ -172,7 +187,7 @@ func ListClaimPartitions(ctx context.Context, pool *pgxpool.Pool) (parts []Claim
 }
 
 // DropClaimPartition drops p in its own short transaction: lock_timeout, then
-// the partition advisory lock (serializes with EnsurePartitions), then DROP
+// the partition advisory lock (serializes with EnsureClaimPartitions), then DROP
 // TABLE IF EXISTS. The DROP needs an AccessExclusive lock on the parent
 // pipeline.dedup_claims, and while it waits every new claim insert queues
 // behind it; lock_timeout bounds that wait. A wait longer than lockTimeout

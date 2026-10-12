@@ -141,7 +141,7 @@ func newEnv(t *testing.T) *env {
 		t.Fatal(err)
 	}
 	// Fixture snapshots are dated 2026-10-10: create dedup_claims partitions around it.
-	if err := pg.EnsurePartitions(ctx, pool, time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), 2); err != nil {
+	if err := pg.EnsureClaimPartitions(ctx, pool, time.Date(2026, 10, 10, 0, 0, 0, 0, time.UTC), 2); err != nil {
 		t.Fatal(err)
 	}
 	s3c, err := s3.New(ctx, s3.Config{Endpoint: endpoint, AccessKey: "etl", SecretKey: "etlsecret123", Region: "us-east-1"})

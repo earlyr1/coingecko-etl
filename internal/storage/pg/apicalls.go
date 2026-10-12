@@ -78,7 +78,7 @@ func InsertAPICall(ctx context.Context, pool *pgxpool.Pool, ev event.RawEvent) e
 	_, err = pool.Exec(ctx, insertAPICallSQL, args...)
 	if IsMissingPartition(err) {
 		fetchedAt := args[6].(time.Time)
-		if perr := EnsurePartitions(ctx, pool, fetchedAt, 1); perr != nil {
+		if perr := EnsureRawPartitions(ctx, pool, fetchedAt, 1); perr != nil {
 			return fmt.Errorf("pg: insert api call: %w (partition repair: %v)", err, perr)
 		}
 		_, err = pool.Exec(ctx, insertAPICallSQL, args...)

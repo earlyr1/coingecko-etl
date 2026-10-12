@@ -1,7 +1,8 @@
 // Package bootstrap implements `etl init`: a one-shot, idempotent setup of
 // every dependency the long-running services expect to exist.
 //
-//   - Postgres: goose migrations, then daily partitions [today-1, today+3].
+//   - Postgres: goose migrations, then the daily partitions [today-1, today+3]
+//     of raw.api_calls and pipeline.dedup_claims.
 //   - Broker: the raw topic with the configured partitions and retention
 //     (an existing topic is verified, never altered).
 //   - Object storage: the raw, processed, rejected and dlq buckets.
@@ -25,8 +26,8 @@ import (
 	"coingecko-etl/internal/storage/s3"
 )
 
-// partitionDaysAhead matches the fetcher's maintenance loop: daily partitions
-// [today-1, today+3].
+// partitionDaysAhead matches the fetcher's raw partitions loop and the
+// transformer's claims partitions loop: daily partitions [today-1, today+3].
 const partitionDaysAhead = 3
 
 // Retry policy for reaching a dependency. Compose starts init only after the
@@ -81,7 +82,11 @@ func initPostgres(ctx context.Context, cfg config.Config, log *slog.Logger) erro
 		return err
 	}
 	return step(ctx, log, "postgres_partitions", func(ctx context.Context) error {
-		return pg.EnsurePartitions(ctx, pool, time.Now(), partitionDaysAhead)
+		now := time.Now()
+		if err := pg.EnsureRawPartitions(ctx, pool, now, partitionDaysAhead); err != nil {
+			return err
+		}
+		return pg.EnsureClaimPartitions(ctx, pool, now, partitionDaysAhead)
 	})
 }
 
@@ -104,7 +109,9 @@ func initBroker(ctx context.Context, cfg config.Config, log *slog.Logger) error 
 
 // initBuckets creates the buckets. Objects already in them (a lake kept
 // across a stack re-creation) are left alone: object names carry only time,
-// never a database or broker counter, so they cannot collide with new ones.
+// never a database or broker counter. Raw window keys do not carry the window
+// size, though, so a kept lake must have been written with the same
+// ETL_WINDOW; the exporter refuses a lake of another size.
 func initBuckets(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	s3c, err := s3.New(ctx, s3.Config{
 		Endpoint:  cfg.S3Endpoint,

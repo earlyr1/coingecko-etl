@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -42,23 +43,51 @@ func TestRunDispatch(t *testing.T) {
 	}
 }
 
+// TestServiceRejectsBadConfig: a bad variable stops exactly the commands
+// that read it (exit 1 before the logger, the message names the variable and
+// the command as typed); every other command gets past its configuration. The
+// log directory is a regular file, so a command that passed its configuration
+// stops at once at the logger, without touching any dependency.
 func TestServiceRejectsBadConfig(t *testing.T) {
-	t.Setenv("ETL_LOG_DIR", t.TempDir())
-	commands := [][]string{{"init"}, {"fetcher"}, {"exporter"}, {"publish"}, {"transformer"},
-		{"maintenance", "retention"}, {"maintenance", "vacuum"}}
-	for _, bad := range []struct{ name, value string }{
-		{"ETL_TOPIC_PARTITIONS", "six"},
-		{"ETL_CLAIMS_RETENTION_DAYS", "3"}, // below the 168h topic retention in days + 1
+	notADir := filepath.Join(t.TempDir(), "file")
+	if err := os.WriteFile(notADir, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("ETL_LOG_DIR", notADir)
+	commands := map[string][]string{
+		"init": {"init"}, "fetcher": {"fetcher"}, "exporter": {"exporter"}, "transformer": {"transformer"},
+		"publish": {"publish"}, "maintenance retention": {"maintenance", "retention"},
+		"maintenance vacuum": {"maintenance", "vacuum"},
+	}
+	for _, c := range []struct {
+		name, value string
+		fails       []string
+	}{
+		{"ETL_WINDOW", "7m", []string{"exporter", "publish"}},
+		{"ETL_TOPIC_PARTITIONS", "six", []string{"init"}},
+		{"ETL_CLAIMS_RETENTION_DAYS", "3", []string{"maintenance retention"}}, // below the 168h topic retention in days + 1
+		{"ETL_TOPIC_RETENTION", "720h", []string{"maintenance retention"}},    // valid, but needs 31 claims days
+		{"ETL_PUSHGATEWAY_URL", "pushgateway:9091", []string{"publish", "maintenance retention", "maintenance vacuum"}},
+		{"ETL_EXPORT_INTERVAL", "1m", []string{"exporter"}},
+		{"ETL_BROKERS", " , ", []string{"init", "transformer", "publish"}},
+		{"ETL_MARKETS_INTERVAL", "30", []string{"fetcher"}},
+		{"ETL_PIPELINE_EPOCH", "nope", []string{"transformer"}},
 	} {
-		t.Run(bad.name, func(t *testing.T) {
-			t.Setenv(bad.name, bad.value)
-			for _, args := range commands {
+		t.Run(c.name+"="+c.value, func(t *testing.T) {
+			t.Setenv(c.name, c.value)
+			for cmd, args := range commands {
 				var stderr bytes.Buffer
 				if code := run(args, &bytes.Buffer{}, &stderr); code != 1 {
-					t.Fatalf("%v: exit %d, want 1", args, code)
+					t.Fatalf("%s: exit %d, want 1 (stderr %q)", cmd, code, stderr.String())
 				}
-				if !strings.Contains(stderr.String(), bad.name) {
-					t.Fatalf("%v: stderr %q does not name the bad variable", args, stderr.String())
+				fails := slices.Contains(c.fails, cmd)
+				switch got := stderr.String(); {
+				case !strings.HasPrefix(got, "etl "+cmd+": "):
+					t.Errorf("%s: stderr %q does not start with %q", cmd, got, "etl "+cmd+": ")
+				case fails && !strings.Contains(got, c.name):
+					t.Errorf("%s: stderr %q does not name %s", cmd, got, c.name)
+				case !fails && (strings.Contains(got, c.name) || !strings.Contains(got, "obs: create log dir")):
+					t.Errorf("%s does not read %s, yet its configuration failed: %q", cmd, c.name, got)
 				}
 			}
 		})

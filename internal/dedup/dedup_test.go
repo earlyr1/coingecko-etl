@@ -33,7 +33,7 @@ func setup(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	// dedup_claims is partitioned by event_date: create 2026-10-09 .. 2026-10-12.
-	if err := pg.EnsurePartitions(ctx, pool, time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), 2); err != nil {
+	if err := pg.EnsureClaimPartitions(ctx, pool, time.Date(2026, 10, 10, 12, 0, 0, 0, time.UTC), 2); err != nil {
 		t.Fatal(err)
 	}
 	return pool

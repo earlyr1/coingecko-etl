@@ -113,6 +113,16 @@ func TestRunEndToEnd(t *testing.T) {
 	if !committedAll() {
 		t.Fatal("not every partition was committed to its end offset within 60s")
 	}
+	// Run keeps the dedup_claims partitions [today-1, today+3] itself (the
+	// fetcher creates only raw partitions).
+	today := time.Now().UTC()
+	for d := -1; d <= 3; d++ {
+		name := "pipeline.dedup_claims_p" + today.AddDate(0, 0, d).Format("20060102")
+		var ok bool
+		if err := e.deps.Pool.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, name).Scan(&ok); err != nil || !ok {
+			t.Fatalf("Run did not create %s (err=%v)", name, err)
+		}
+	}
 
 	// Collect every object listed by written manifest rows.
 	rows, err := e.deps.Pool.Query(ctx, `SELECT topic_id, kafka_partition, first_offset FROM pipeline.consumer_batches WHERE status = 'written'`)

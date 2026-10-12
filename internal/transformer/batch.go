@@ -217,8 +217,8 @@ func ProcessBatch(ctx context.Context, d Deps, b Batch) (Result, error) {
 	p, err := planBatch(ctx, d, b)
 	if pg.IsMissingPartition(err) {
 		// A replay of old raw objects or a late snapshot can carry an
-		// event_date outside the dedup_claims partitions kept by init and the
-		// fetcher (today-1 .. today+3). TX1 rolled back; create the partitions
+		// event_date outside the dedup_claims partitions kept by init and Run
+		// (today-1 .. today+3). TX1 rolled back; create the partitions
 		// this batch needs, outside any transaction, and plan once more.
 		if perr := ensureClaimPartitions(ctx, d, b); perr != nil {
 			return Result{}, errors.Join(err, perr)
@@ -249,8 +249,8 @@ func ProcessBatch(ctx context.Context, d Deps, b Batch) (Result, error) {
 	return Result{Written: true, LastOffset: p.last}, nil
 }
 
-// ensureClaimPartitions creates the daily partitions (day-1 .. day) for the
-// snapshot date of every decodable ok message in the batch.
+// ensureClaimPartitions creates the daily dedup_claims partitions (day-1 ..
+// day) for the snapshot date of every decodable ok message in the batch.
 func ensureClaimPartitions(ctx context.Context, d Deps, b Batch) error {
 	done := map[string]bool{}
 	for _, m := range b.Messages {
@@ -263,7 +263,7 @@ func ensureClaimPartitions(ctx context.Context, d Deps, b Batch) error {
 			continue
 		}
 		done[xtime.FormatDate(at)] = true
-		if err := pg.EnsurePartitions(ctx, d.Pool, at, 0); err != nil {
+		if err := pg.EnsureClaimPartitions(ctx, d.Pool, at, 0); err != nil {
 			return err
 		}
 	}

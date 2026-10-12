@@ -53,7 +53,7 @@ func runPublish(args []string, stderr io.Writer) int {
 		}
 		now = t
 	}
-	return runJob("publisher", obs.JobPublisher, stderr, func(ctx context.Context, cfg config.Config, log *slog.Logger) (map[string]float64, error) {
+	return runJob(config.CmdPublish, "publisher", obs.JobPublisher, stderr, func(ctx context.Context, cfg config.Config, log *slog.Logger) (map[string]float64, error) {
 		ctx, cancel := context.WithTimeout(ctx, publishTimeout)
 		defer cancel()
 		w := window.ForPublish(now, cfg.Window)

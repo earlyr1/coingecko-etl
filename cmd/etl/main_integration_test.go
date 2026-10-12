@@ -235,7 +235,10 @@ func TestMaintenanceJobs(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Two expired claims partitions (and their raw twins, which stay).
-	if err := pg.EnsurePartitions(ctx, pool, time.Now().AddDate(0, 0, -30), 0); err != nil {
+	if err := pg.EnsureClaimPartitions(ctx, pool, time.Now().AddDate(0, 0, -30), 0); err != nil {
+		t.Fatal(err)
+	}
+	if err := pg.EnsureRawPartitions(ctx, pool, time.Now().AddDate(0, 0, -30), 0); err != nil {
 		t.Fatal(err)
 	}
 

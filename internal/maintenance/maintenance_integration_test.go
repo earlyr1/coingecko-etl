@@ -43,7 +43,10 @@ func TestMaintenance(t *testing.T) {
 		day   time.Time
 		ahead int
 	}{{time.Date(2026, 10, 3, 0, 0, 0, 0, time.UTC), 2}, {now, 1}} {
-		if err := pg.EnsurePartitions(ctx, pool, p.day, p.ahead); err != nil {
+		if err := pg.EnsureClaimPartitions(ctx, pool, p.day, p.ahead); err != nil {
+			t.Fatal(err)
+		}
+		if err := pg.EnsureRawPartitions(ctx, pool, p.day, p.ahead); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -200,7 +203,7 @@ func TestMaintenance(t *testing.T) {
 		deadline := time.Now().Add(5 * time.Second)
 		for {
 			missing := 0
-			for _, rel := range []string{"raw.api_calls_p20261012", "pipeline.export_batches", "pipeline.consumer_batches"} {
+			for _, rel := range []string{"raw.api_calls_p20261012", "pipeline.export_windows", "pipeline.export_batches", "pipeline.consumer_batches"} {
 				if count(t, pool, `SELECT count(*) FROM pg_stat_user_tables
 					WHERE relid = $1::regclass AND last_vacuum IS NOT NULL AND last_analyze IS NOT NULL`, rel) != 1 {
 					missing++
@@ -262,6 +265,21 @@ func TestMaintenance(t *testing.T) {
 		tx = lock()
 		done := make(chan error, 1)
 		go func() { done <- Vacuum(ctx, fresh, quiet) }()
+		// Start the hold only once Vacuum waits on the lock: the earlier
+		// tables may take longer than holdLock on a slow machine.
+		deadline := time.Now().Add(30 * time.Second)
+		for count(t, pool, `SELECT count(*) FROM pg_stat_activity
+			WHERE query = 'VACUUM (ANALYZE) pipeline.consumer_batches' AND wait_event_type = 'Lock'`) != 1 {
+			select {
+			case err := <-done:
+				t.Fatalf("Vacuum returned %v while consumer_batches was locked", err)
+			default:
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("Vacuum did not reach the lock on pipeline.consumer_batches within 30 s")
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
 		select {
 		case err := <-done:
 			t.Fatalf("Vacuum returned %v while consumer_batches was locked", err)

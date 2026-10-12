@@ -83,8 +83,8 @@ func setup(t *testing.T) *env {
 	if err := pg.Migrate(ctx, pool); err != nil {
 		t.Fatalf("pg.Migrate: %v", err)
 	}
-	if err := pg.EnsurePartitions(ctx, pool, time.Now(), 3); err != nil {
-		t.Fatalf("pg.EnsurePartitions: %v", err)
+	if err := pg.EnsureRawPartitions(ctx, pool, time.Now(), 3); err != nil {
+		t.Fatalf("pg.EnsureRawPartitions: %v", err)
 	}
 
 	s3c, err := s3.New(ctx, s3.Config{Endpoint: endpoint, AccessKey: "etl", SecretKey: "etlsecret123", Region: "us-east-1"})
@@ -120,8 +120,8 @@ RETURNING seq`
 // makes sure the partition of that day exists.
 func (e *env) okArgs(t *testing.T, source, endpoint string, fetchedAt time.Time) (eventID string, args []any) {
 	t.Helper()
-	if err := pg.EnsurePartitions(context.Background(), e.pool, fetchedAt, 0); err != nil {
-		t.Fatalf("EnsurePartitions(%s): %v", fetchedAt, err)
+	if err := pg.EnsureRawPartitions(context.Background(), e.pool, fetchedAt, 0); err != nil {
+		t.Fatalf("EnsureRawPartitions(%s): %v", fetchedAt, err)
 	}
 	eventID = uuid.Must(uuid.NewV7()).String()
 	sha := event.SHA256Hex(e.payload)
@@ -146,8 +146,8 @@ func (e *env) insertCommitted(t *testing.T, source, endpoint string, fetchedAt t
 // insertFailedCall inserts an http_error row fetched at fetchedAt and returns its event id.
 func (e *env) insertFailedCall(t *testing.T, fetchedAt time.Time) string {
 	t.Helper()
-	if err := pg.EnsurePartitions(context.Background(), e.pool, fetchedAt, 0); err != nil {
-		t.Fatalf("EnsurePartitions(%s): %v", fetchedAt, err)
+	if err := pg.EnsureRawPartitions(context.Background(), e.pool, fetchedAt, 0); err != nil {
+		t.Fatalf("EnsureRawPartitions(%s): %v", fetchedAt, err)
 	}
 	id := uuid.Must(uuid.NewV7()).String()
 	_, err := e.pool.Exec(context.Background(), `
@@ -591,6 +591,39 @@ func TestWindowExportCrashAfterClaim(t *testing.T) {
 	}
 }
 
+// TestClaimAfterSealReturnsNothing: once a window is sealed its manifest is
+// frozen, so a claim (a racing or zombie caller) adds no part to it, and a row
+// fetched before the window's end waits for the next window.
+func TestClaimAfterSealReturnsNothing(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(time.Minute))
+	w0 := win5(0)
+	if err := openWindow(ctx, e.pool, w0); err != nil {
+		t.Fatal(err)
+	}
+	b, ok, err := claimNext(ctx, e.pool, w0, 500)
+	if err != nil || !ok {
+		t.Fatalf("claimNext: ok=%v err=%v", ok, err)
+	}
+	if err := exportBatch(ctx, e.pool, e.s3, e.reg, e.m, e.log, b); err != nil {
+		t.Fatal(err)
+	}
+	if err := sealWindow(ctx, e.pool, w0); err != nil {
+		t.Fatal(err)
+	}
+	late, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(4*time.Minute))
+	if b, ok, err := claimNext(ctx, e.pool, w0, 500); err != nil || ok {
+		t.Fatalf("claimNext on a sealed window = %+v, ok=%v, err=%v; want nothing", b, ok, err)
+	}
+	if got := e.batchOf(t, late); got != nil {
+		t.Fatalf("late row stamped with batch %d", *got)
+	}
+	if l := e.ledger(t); len(l) != 1 {
+		t.Fatalf("ledger = %+v, want only the part claimed before the seal", l)
+	}
+}
+
 // TestWindowExportCrashAfterPartPutAndAfterSuccessPut: retries after a
 // crash at any later step write byte-identical objects.
 func TestWindowExportCrashAfterPartPutAndAfterSuccessPut(t *testing.T) {
@@ -850,15 +883,26 @@ func TestWindowExportBootstrapWindow(t *testing.T) {
 	})
 	t.Run("a _SUCCESS already in the lake is never overwritten", func(t *testing.T) {
 		e := setup(t)
-		earlier := []byte(`{"left":"by an earlier stack"}`)
+		earlier, err := window.NewSuccess(prev, nil).Marshal() // closed by an earlier stack with the same ETL_WINDOW
+		if err != nil {
+			t.Fatal(err)
+		}
 		if _, err := e.s3.PutIfAbsent(ctx, s3.BucketRaw, window.RawSuccessKey(prev), earlier); err != nil {
 			t.Fatal(err)
 		}
-		if n, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, set, b.Add(2*time.Minute)); n != 0 || err != nil {
-			t.Fatalf("ExportOnce = %d, %v; want 0, nil", n, err)
+		var logged bytes.Buffer
+		e.log = slog.New(slog.NewJSONHandler(&logged, nil))
+		kept := Settings{Window: set.Window, PartMax: set.PartMax, keptLake: map[string]bool{}} // as Run builds it
+		for range 3 {                                                                           // three ticks before the current window ends
+			if n, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, kept, b.Add(2*time.Minute)); n != 0 || err != nil {
+				t.Fatalf("ExportOnce = %d, %v; want 0, nil", n, err)
+			}
 		}
 		if got := e.get(t, window.RawSuccessKey(prev)); !bytes.Equal(got, earlier) {
 			t.Fatalf("the earlier _SUCCESS was replaced by %s", got)
+		}
+		if n := strings.Count(logged.String(), "raw window already in the lake"); n != 1 {
+			t.Fatalf("the kept-lake WARN was logged %d times in three ticks, want once:\n%s", n, logged.String())
 		}
 		if ws := e.windows(t); len(ws) != 0 {
 			t.Fatalf("export_windows = %+v, want empty", ws)
@@ -869,7 +913,7 @@ func TestWindowExportBootstrapWindow(t *testing.T) {
 		if got := promtest.ToFloat64(e.m.ExportLag); got != 0 {
 			t.Fatalf("export lag = %v, want 0", got)
 		}
-		e.exportOnce(t, set, b.Add(5*time.Minute+time.Second))
+		e.exportOnce(t, kept, b.Add(5*time.Minute+time.Second))
 		ws := e.windows(t)
 		if len(ws) != 1 || !ws[0].w.Start.Equal(b) || ws[0].status != statusClosed {
 			t.Fatalf("export_windows = %+v, want only %s, closed", ws, xtime.Format(b))
@@ -878,6 +922,78 @@ func TestWindowExportBootstrapWindow(t *testing.T) {
 			t.Fatalf("the earlier _SUCCESS was replaced by %s", got)
 		}
 	})
+	t.Run("a _SUCCESS in the lake that is no manifest stops the exporter", func(t *testing.T) {
+		e := setup(t)
+		if _, err := e.s3.PutIfAbsent(ctx, s3.BucketRaw, window.RawSuccessKey(prev), []byte(`{"left":"by something else"}`)); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, set, b.Add(2*time.Minute))
+		if err == nil || !strings.Contains(err.Error(), window.RawSuccessKey(prev)) || !strings.Contains(err.Error(), "not a raw manifest") {
+			t.Fatalf("ExportOnce = %v, want an error naming %s as not a raw manifest", err, window.RawSuccessKey(prev))
+		}
+		if ws := e.windows(t); len(ws) != 0 {
+			t.Fatalf("export_windows = %+v, want empty", ws)
+		}
+	})
+}
+
+// TestWindowExportRefusesAKeptLakeOfAnotherSize: a lake kept from a stack that
+// ran with ETL_WINDOW=1m, read by a fresh ledger with 5m. Raw keys do not carry
+// the size, so the 5m windows would land on the 1m keys: the exporter refuses
+// to open its first window, writes nothing and counts the failure.
+func TestWindowExportRefusesAKeptLakeOfAnotherSize(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	// The old 1m stack closed [10:00, 10:01) .. [10:05, 10:06); window 1005 held a part.
+	for i := range 6 {
+		w := window.Window{Start: base.Add(time.Duration(i) * time.Minute), End: base.Add(time.Duration(i+1) * time.Minute)}
+		var parts []window.SuccessPart
+		if i == 5 {
+			body := []byte("{\"old\":\"line\"}\n")
+			if _, err := e.s3.PutIfAbsent(ctx, s3.BucketRaw, window.RawPartKey(w, 0), body); err != nil {
+				t.Fatal(err)
+			}
+			sum := sha256.Sum256(body)
+			parts = []window.SuccessPart{{Key: window.RawPartKey(w, 0), SHA256: hex.EncodeToString(sum[:]), Rows: 1}}
+		}
+		manifest, err := window.NewSuccess(w, parts).Marshal()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := e.s3.PutIfAbsent(ctx, s3.BucketRaw, window.RawSuccessKey(w), manifest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(8*time.Minute+30*time.Second))
+
+	// 10:08:35: the bootstrap window [10:00, 10:05) meets the 1m manifest at window=1000.
+	// 10:10:05: the first window [10:05, 10:10) meets the 1m manifest at window=1005.
+	for i, now := range []time.Time{base.Add(8*time.Minute + 35*time.Second), base.Add(10*time.Minute + 5*time.Second)} {
+		_, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, set5, now)
+		if err == nil || !strings.Contains(err.Error(), "the lake holds raw windows of another ETL_WINDOW") ||
+			!strings.Contains(err.Error(), "use a fresh lake or the same ETL_WINDOW") {
+			t.Fatalf("ExportOnce #%d = %v, want the refusal of a lake of another ETL_WINDOW", i+1, err)
+		}
+		if got := promtest.ToFloat64(e.m.ExportBatches.WithLabelValues("error")); got != float64(i+1) {
+			t.Fatalf("export_batches_total{error} = %v after %d refusals", got, i+1)
+		}
+	}
+	if ws := e.windows(t); len(ws) != 0 {
+		t.Fatalf("export_windows = %+v, want empty", ws)
+	}
+	if l := e.ledger(t); len(l) != 0 {
+		t.Fatalf("ledger = %+v, want empty", l)
+	}
+	if got := promtest.ToFloat64(e.m.S3Puts.WithLabelValues("created")) + promtest.ToFloat64(e.m.S3Puts.WithLabelValues("mismatch")); got != 0 {
+		t.Fatalf("the exporter wrote to the kept lake (%v PUTs)", got)
+	}
+	if b := e.batchOf(t, id); b != nil {
+		t.Fatalf("row stamped with batch %d", *b)
+	}
+	// The row waits past its window's end: the lag shows it.
+	if got := promtest.ToFloat64(e.m.ExportLag); got != 5 {
+		t.Fatalf("export lag = %v, want 5 (seconds past 10:10)", got)
+	}
 }
 
 // TestWindowExportKeysIgnoreLocalZone: keys and manifest bytes are UTC even
@@ -906,32 +1022,87 @@ func TestWindowExportKeysIgnoreLocalZone(t *testing.T) {
 	e.exportedEventIDs(t)
 }
 
-// TestWindowExportWindowSizeChange: after ETL_WINDOW changes, the next window
-// starts at the first boundary of the new size and takes every row fetched
-// before its end; no key collides.
-func TestWindowExportWindowSizeChange(t *testing.T) {
-	e := setup(t)
-	a, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(time.Minute))
-	b, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(6*time.Minute))
-	c, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(12*time.Minute))
-	d, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(19*time.Minute))
-	if n := e.exportOnce(t, set5, base.Add(5*time.Minute+time.Second)); n != 1 {
-		t.Fatalf("ExportOnce with 5m = %d, want 1", n)
+// TestWindowExportRefusesAWindowSizeChange: ETL_WINDOW is fixed for the
+// lifetime of the ledger. Each publish run reads one window on the grid of its
+// own ETL_WINDOW, so a window closed with the old size whose publish minute
+// falls after the change would never be published. The exporter refuses every
+// tick with an error naming both sizes and the remedy, counts it, and the lag
+// keeps growing on the old grid; with the old size back it carries on.
+func TestWindowExportRefusesAWindowSizeChange(t *testing.T) {
+	ctx := context.Background()
+	set1 := Settings{Window: time.Minute, PartMax: 500}
+	win1 := func(i int) window.Window {
+		return window.Window{Start: base.Add(time.Duration(i) * time.Minute), End: base.Add(time.Duration(i+1) * time.Minute)}
 	}
-	if n := e.exportOnce(t, Settings{Window: 10 * time.Minute, PartMax: 500}, base.Add(20*time.Minute+time.Second)); n != 3 {
-		t.Fatalf("ExportOnce with 10m = %d, want 3", n)
+	for _, c := range []struct {
+		name     string
+		old, new Settings
+		want     string
+	}{
+		{"1m to 5m", set1, set5, "ETL_WINDOW changed from 1m to 5m: windows closed with 1m would never be published; run make clean, or set ETL_WINDOW back to 1m"},
+		{"5m to 1m", set5, set1, "ETL_WINDOW changed from 5m to 1m: windows closed with 5m would never be published; run make clean, or set ETL_WINDOW back to 5m"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			e := setup(t)
+			a, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(30*time.Second))
+			b, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(6*time.Minute+30*time.Second))
+			first := e.exportOnce(t, c.old, base.Add(5*time.Minute+10*time.Second)) // closes the old-size windows up to 10:05
+			if first != 1 {
+				t.Fatalf("ExportOnce with the old size = %d, want 1", first)
+			}
+			before := e.windows(t)
+
+			// The restart with the new size: every tick refuses.
+			for i, now := range []time.Time{base.Add(7*time.Minute + 30*time.Second), base.Add(16 * time.Minute)} {
+				n, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, c.new, now)
+				if n != 0 || err == nil || err.Error() != "exporter: "+c.want {
+					t.Fatalf("ExportOnce #%d with the new size = %d, %v; want 0 and\n  exporter: %s", i+1, n, err, c.want)
+				}
+				if got := promtest.ToFloat64(e.m.ExportBatches.WithLabelValues("error")); got != float64(i+1) {
+					t.Fatalf("export_batches_total{error} = %v after %d refusals", got, i+1)
+				}
+			}
+			if got := e.windows(t); len(got) != len(before) {
+				t.Fatalf("export_windows went from %d to %d rows during the refusal", len(before), len(got))
+			}
+			if got := e.batchOf(t, b); got != nil {
+				t.Fatalf("row B stamped with batch %d during the refusal", *got)
+			}
+			// Lag on the old grid: the next old-size window ended at 10:05 + old size.
+			nextEnd := base.Add(5*time.Minute + c.old.Window)
+			if got, want := promtest.ToFloat64(e.m.ExportLag), base.Add(16*time.Minute).Sub(nextEnd).Seconds(); got != want {
+				t.Fatalf("export lag = %v, want %v (past the next old-size window)", got, want)
+			}
+
+			// ETL_WINDOW back to the old size: the missed windows close in order.
+			e.exportOnce(t, c.old, base.Add(16*time.Minute))
+			if ids := e.exportedEventIDs(t); fmt.Sprint(ids) != fmt.Sprint([]string{a, b}) {
+				t.Fatalf("exported %v, want [%s %s]", ids, a, b)
+			}
+			for _, wr := range e.windows(t) {
+				if size := wr.w.End.Sub(wr.w.Start); size != c.old.Window {
+					t.Fatalf("window %s has size %v, want %v", xtime.Format(wr.w.Start), size, c.old.Window)
+				}
+			}
+		})
 	}
-	ws := e.windows(t)
-	w10 := window.Window{Start: base.Add(10 * time.Minute), End: base.Add(20 * time.Minute)}
-	if len(ws) != 2 || !ws[1].w.Start.Equal(w10.Start) || !ws[1].w.End.Equal(w10.End) || ws[1].status != statusClosed {
-		t.Fatalf("export_windows = %+v, want [10:00,10:05) and [10:10,10:20) closed", ws)
-	}
-	if got := e.objectEventIDs(t, window.RawPartKey(w10, 0)); fmt.Sprint(got) != fmt.Sprint([]string{b, c, d}) {
-		t.Fatalf("10-minute window holds %v, want [%s %s %s]", got, b, c, d)
-	}
-	if ids := e.exportedEventIDs(t); fmt.Sprint(ids) != fmt.Sprint([]string{a, b, c, d}) {
-		t.Fatalf("exported %v", ids)
-	}
+	t.Run("an open window of the old size is not finished with the new size", func(t *testing.T) {
+		e := setup(t)
+		e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, base.Add(30*time.Second))
+		if err := openWindow(ctx, e.pool, win1(0)); err != nil {
+			t.Fatal(err)
+		}
+		_, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, set5, base.Add(5*time.Minute+time.Second))
+		if err == nil || !strings.Contains(err.Error(), "ETL_WINDOW changed from 1m to 5m") {
+			t.Fatalf("ExportOnce = %v, want the size refusal", err)
+		}
+		if ws := e.windows(t); len(ws) != 1 || ws[0].status != statusClaiming {
+			t.Fatalf("export_windows = %+v, want window 1000 still claiming", ws)
+		}
+		if l := e.ledger(t); len(l) != 0 {
+			t.Fatalf("ledger = %+v: a part was claimed during the refusal", l)
+		}
+	})
 }
 
 // TestConcurrentClaimsSerializeOnWindow: claims of one window wait for each
@@ -1145,8 +1316,8 @@ func TestExportsRowInPartitionCreatedAfterClaim(t *testing.T) {
 	}
 
 	later := hour.AddDate(0, 0, 4).Add(30 * time.Minute) // beyond setup's today+3
-	if err := pg.EnsurePartitions(ctx, e.pool, later, 0); err != nil {
-		t.Fatalf("EnsurePartitions: %v", err)
+	if err := pg.EnsureRawPartitions(ctx, e.pool, later, 0); err != nil {
+		t.Fatalf("EnsureRawPartitions: %v", err)
 	}
 	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets, later)
 	if n := e.exportOnce(t, set, window.Floor(later, time.Hour).Add(time.Hour+time.Second)); n != 2 {

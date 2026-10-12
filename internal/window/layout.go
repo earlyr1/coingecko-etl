@@ -78,7 +78,9 @@ var sha256Hex = regexp.MustCompile(`^[0-9a-f]{64}$`)
 // data; window_start/window_end are exact xtime.Format values with end > start;
 // parts is an array (never null); every part has a non-empty key, a lowercase
 // 64-hex sha256 and rows >= 0; keys strictly increase; rows equals the sum of
-// the parts' rows.
+// the parts' rows. Last, b must be exactly the bytes Marshal writes for the
+// parsed manifest (compact, keys in contract order, no duplicate key, no
+// trailing newline), so one window has one valid _SUCCESS spelling.
 func ParseSuccess(b []byte) (Success, error) {
 	var s Success
 	dec := json.NewDecoder(bytes.NewReader(b))
@@ -119,6 +121,13 @@ func ParseSuccess(b []byte) (Success, error) {
 	}
 	if s.Rows != sum {
 		return Success{}, fmt.Errorf("window: _SUCCESS: rows %d, but the parts hold %d", s.Rows, sum)
+	}
+	canonical, err := s.Marshal()
+	if err != nil {
+		return Success{}, fmt.Errorf("window: _SUCCESS: %w", err)
+	}
+	if !bytes.Equal(canonical, b) {
+		return Success{}, errors.New("window: _SUCCESS: not in the canonical form (compact JSON, keys in contract order, no duplicate key or trailing newline)")
 	}
 	return s, nil
 }

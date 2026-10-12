@@ -2,6 +2,7 @@ package config
 
 import (
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -190,16 +191,154 @@ func TestLoadInvalid(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.key+"="+c.val, func(t *testing.T) {
-			clearEnv(t)
-			t.Setenv(c.key, c.val)
-			_, err := Load("fetcher")
-			if err == nil {
-				t.Fatalf("Load succeeded, want error for %s=%q", c.key, c.val)
+			readers := commandsReading(c.key)
+			if len(readers) == 0 {
+				t.Fatalf("no command reads %s", c.key)
 			}
-			if !strings.Contains(err.Error(), c.key) {
-				t.Fatalf("error %q does not name %s", err, c.key)
+			for _, cmd := range readers {
+				clearEnv(t)
+				t.Setenv(c.key, c.val)
+				_, err := Load(cmd)
+				if err == nil {
+					t.Fatalf("Load(%q) succeeded, want error for %s=%q", cmd, c.key, c.val)
+				}
+				if !strings.Contains(err.Error(), c.key) {
+					t.Fatalf("Load(%q): error %q does not name %s", cmd, err, c.key)
+				}
 			}
 		})
+	}
+}
+
+// commandsReading returns the commands whose key set holds key.
+func commandsReading(key string) []string {
+	var out []string
+	for _, cmd := range commands {
+		if slices.Contains(commandKeys[cmd], key) {
+			out = append(out, cmd)
+		}
+	}
+	return out
+}
+
+var commands = []string{CmdInit, CmdFetcher, CmdExporter, CmdTransformer, CmdPublish, CmdRetention, CmdVacuum}
+
+// TestCommandKeys pins the variables each command reads, taken from its code
+// path: cmd/etl (logger, HTTP server, Pushgateway, clients), internal/bootstrap,
+// internal/fetcher, internal/exporter, internal/transformer, the publish job and
+// the maintenance jobs. A command validates only these, so a bad setting of one
+// stage never stops another.
+func TestCommandKeys(t *testing.T) {
+	const s3 = "ETL_S3_ACCESS_KEY ETL_S3_ENDPOINT ETL_S3_REGION ETL_S3_SECRET_KEY"
+	want := map[string]string{
+		CmdInit: "ETL_BROKERS ETL_LOG_DIR ETL_PG_DSN " + s3 + " ETL_TOPIC ETL_TOPIC_PARTITIONS ETL_TOPIC_RETENTION",
+		CmdFetcher: "COINGECKO_API_KEY ETL_COINGECKO_BASE_URL ETL_DETAIL_INTERVAL ETL_DETAIL_OFFSET ETL_HTTP_ADDR ETL_LOG_DIR " +
+			"ETL_MARKETS_INTERVAL ETL_MARKETS_PER_PAGE ETL_MIN_REQUEST_SPACING ETL_PG_DSN ETL_WATCHLIST",
+		CmdExporter: "ETL_EXPORT_BATCH_MAX ETL_EXPORT_INTERVAL ETL_HTTP_ADDR ETL_LOG_DIR ETL_PG_DSN " + s3 + " ETL_WINDOW",
+		CmdTransformer: "ETL_ANOMALY_TOLERANCE_PCT ETL_BROKERS ETL_HTTP_ADDR ETL_LOG_DIR ETL_PG_DSN ETL_PIPELINE_EPOCH " + s3 +
+			" ETL_STALE_AFTER ETL_TICKER_ANOMALY_PCT ETL_TICKER_STALE_AFTER ETL_TOPIC ETL_TRANSFORM_MAX_RECORDS",
+		CmdPublish: "ETL_BROKERS ETL_LOG_DIR ETL_PUSHGATEWAY_URL " + s3 + " ETL_TOPIC ETL_WINDOW",
+		// ETL_TOPIC_RETENTION only feeds the claims-retention guard.
+		CmdRetention: "ETL_CLAIMS_RETENTION_DAYS ETL_LOG_DIR ETL_PG_DSN ETL_PUSHGATEWAY_URL ETL_TOPIC_RETENTION",
+		CmdVacuum:    "ETL_LOG_DIR ETL_PG_DSN ETL_PUSHGATEWAY_URL",
+	}
+	if len(commandKeys) != len(want) {
+		t.Fatalf("commandKeys has %d commands, want %d", len(commandKeys), len(want))
+	}
+	read := map[string]bool{}
+	for cmd, keys := range want {
+		got := slices.Sorted(slices.Values(commandKeys[cmd]))
+		if strings.Join(got, " ") != keys {
+			t.Errorf("%s reads\n  %s\nwant\n  %s", cmd, strings.Join(got, " "), keys)
+		}
+		for _, k := range got {
+			read[k] = true
+		}
+	}
+	for _, k := range allKeys {
+		if !read[k] {
+			t.Errorf("no command reads %s", k)
+		}
+	}
+	if _, err := Load("publisher"); err == nil || !strings.Contains(err.Error(), `unknown command "publisher"`) {
+		t.Errorf(`Load("publisher") = %v, want an unknown command error`, err)
+	}
+}
+
+// TestLoadValidatesPerCommand: a bad value fails exactly the commands that
+// read the variable; every other command starts and gets the default.
+func TestLoadValidatesPerCommand(t *testing.T) {
+	bad := map[string]string{
+		"ETL_PUSHGATEWAY_URL":       "pushgateway:9091",
+		"ETL_BROKERS":               " , ",
+		"ETL_TOPIC_PARTITIONS":      "six",
+		"ETL_TOPIC_RETENTION":       "week",
+		"ETL_CLAIMS_RETENTION_DAYS": "0",
+		"ETL_PIPELINE_EPOCH":        "not-a-uuid",
+		"ETL_MARKETS_INTERVAL":      "30",
+		"ETL_DETAIL_INTERVAL":       "soon",
+		"ETL_DETAIL_OFFSET":         "-1s",
+		"ETL_WATCHLIST":             " , ,",
+		"ETL_MARKETS_PER_PAGE":      "0",
+		"ETL_MIN_REQUEST_SPACING":   "-1s",
+		"ETL_EXPORT_INTERVAL":       "-5s",
+		"ETL_EXPORT_BATCH_MAX":      "0",
+		"ETL_WINDOW":                "7m",
+		"ETL_TRANSFORM_MAX_RECORDS": "x",
+		"ETL_STALE_AFTER":           "0s",
+		"ETL_TICKER_STALE_AFTER":    "x",
+		"ETL_TICKER_ANOMALY_PCT":    "NaN",
+		"ETL_ANOMALY_TOLERANCE_PCT": "-0.5",
+	}
+	// Free-form strings: no value is invalid.
+	unchecked := []string{"ETL_HTTP_ADDR", "ETL_LOG_DIR", "ETL_PG_DSN", "ETL_S3_ENDPOINT", "ETL_S3_ACCESS_KEY",
+		"ETL_S3_SECRET_KEY", "ETL_S3_REGION", "ETL_TOPIC", "ETL_COINGECKO_BASE_URL", "COINGECKO_API_KEY"}
+	for _, k := range allKeys {
+		if _, ok := bad[k]; !ok && !slices.Contains(unchecked, k) {
+			t.Errorf("%s has no bad value in this test", k)
+		}
+	}
+	clearEnv(t)
+	defaults, err := Load(CmdFetcher)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for key, val := range bad {
+		for _, cmd := range commands {
+			clearEnv(t)
+			t.Setenv(key, val)
+			c, err := Load(cmd)
+			reads := slices.Contains(commandKeys[cmd], key)
+			switch {
+			case reads && (err == nil || !strings.Contains(err.Error(), key)):
+				t.Errorf("%s=%q: Load(%q) = %v, want an error naming %s", key, val, cmd, err, key)
+			case !reads && err != nil:
+				t.Errorf("%s=%q: Load(%q) = %v; %s does not read it", key, val, cmd, err, cmd)
+			case !reads:
+				c.Service = defaults.Service
+				if !reflect.DeepEqual(c, defaults) {
+					t.Errorf("%s=%q: Load(%q) = %+v, want the defaults", key, val, cmd, c)
+				}
+			}
+		}
+	}
+	// Cross-field checks run only where both sides are read.
+	for _, c := range []struct {
+		key, val string
+		fails    []string
+	}{
+		{"ETL_TOPIC_RETENTION", "720h", []string{CmdRetention}}, // 31 claims days needed; init reads only the topic retention
+		{"ETL_CLAIMS_RETENTION_DAYS", "3", []string{CmdRetention}},
+		{"ETL_EXPORT_INTERVAL", "1m", []string{CmdExporter}}, // not shorter than the publish grace
+	} {
+		for _, cmd := range commands {
+			clearEnv(t)
+			t.Setenv(c.key, c.val)
+			_, err := Load(cmd)
+			if want := slices.Contains(c.fails, cmd); want != (err != nil) {
+				t.Errorf("%s=%s: Load(%q) = %v, want failure %v", c.key, c.val, cmd, err, want)
+			}
+		}
 	}
 }
 
@@ -248,7 +387,7 @@ func TestLoadClaimsRetentionVsTopic(t *testing.T) {
 			clearEnv(t)
 			t.Setenv("ETL_TOPIC_RETENTION", c.topic)
 			t.Setenv("ETL_CLAIMS_RETENTION_DAYS", c.days)
-			_, err := Load("maintenance")
+			_, err := Load(CmdRetention)
 			switch {
 			case c.ok && err != nil:
 				t.Fatalf("Load: %v", err)
@@ -262,7 +401,7 @@ func TestLoadClaimsRetentionVsTopic(t *testing.T) {
 	t.Run("bad topic retention reports one error", func(t *testing.T) {
 		clearEnv(t)
 		t.Setenv("ETL_TOPIC_RETENTION", "abc")
-		_, err := Load("maintenance")
+		_, err := Load(CmdRetention)
 		if err == nil {
 			t.Fatal("Load succeeded, want an error")
 		}

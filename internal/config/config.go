@@ -1,5 +1,8 @@
-// Package config loads the runtime configuration of every etl subcommand from
+// Package config loads the runtime configuration of every etl command from
 // environment variables. An unset or blank variable means "use the default".
+// Every command gets a value for every variable, but validates only the
+// variables its own code path reads (commandKeys), so a bad setting of one
+// stage never stops another.
 package config
 
 import (
@@ -8,6 +11,7 @@ import (
 	"math"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -18,7 +22,7 @@ import (
 )
 
 type Config struct {
-	Service             string
+	Service             string        // the command Load was called for (Cmd*)
 	HTTPAddr            string        // ETL_HTTP_ADDR, default ":8080"
 	PushgatewayURL      string        // ETL_PUSHGATEWAY_URL, default "http://pushgateway:9091" (trailing "/" trimmed)
 	LogDir              string        // ETL_LOG_DIR, default "logs"
@@ -31,7 +35,7 @@ type Config struct {
 	Topic               string        // ETL_TOPIC, default "coingecko.raw"
 	TopicPartitions     int32         // ETL_TOPIC_PARTITIONS, default 6
 	TopicRetention      time.Duration // ETL_TOPIC_RETENTION, default 168h
-	ClaimsRetentionDays int           // ETL_CLAIMS_RETENTION_DAYS, default 8; >= ceil(TopicRetention/24h)+1
+	ClaimsRetentionDays int           // ETL_CLAIMS_RETENTION_DAYS, default 8; >= ceil(TopicRetention/24h)+1 (checked by the retention job)
 	PipelineEpoch       string        // ETL_PIPELINE_EPOCH (uuid), default "00000000-0000-0000-0000-000000000001"
 	CoinGeckoBaseURL    string        // ETL_COINGECKO_BASE_URL, default "https://api.coingecko.com/api/v3"
 	CoinGeckoAPIKey     string        // COINGECKO_API_KEY, optional
@@ -51,12 +55,55 @@ type Config struct {
 	AnomalyTolerancePct float64       // ETL_ANOMALY_TOLERANCE_PCT, default 0.5 (0 = strict range check)
 }
 
-// Load reads the environment. service names the subcommand ("fetcher", ...) and is
-// copied into Config.Service. All invalid variables are reported together.
-func Load(service string) (Config, error) {
-	var p parser
+// The commands Load knows, as typed after "etl".
+const (
+	CmdInit        = "init"
+	CmdFetcher     = "fetcher"
+	CmdExporter    = "exporter"
+	CmdTransformer = "transformer"
+	CmdPublish     = "publish"
+	CmdRetention   = "maintenance retention"
+	CmdVacuum      = "maintenance vacuum"
+)
+
+var keysS3 = []string{"ETL_S3_ENDPOINT", "ETL_S3_ACCESS_KEY", "ETL_S3_SECRET_KEY", "ETL_S3_REGION"}
+
+// commandKeys lists, per command, the variables its code path reads: the
+// logger (ETL_LOG_DIR), the HTTP server of the long-running services, the
+// Pushgateway of the batch jobs, its clients and its own settings. Load
+// reports errors only for these; TestCommandKeys pins the sets.
+var commandKeys = map[string][]string{
+	CmdInit: append([]string{"ETL_LOG_DIR", "ETL_PG_DSN", "ETL_BROKERS", "ETL_TOPIC", "ETL_TOPIC_PARTITIONS",
+		"ETL_TOPIC_RETENTION"}, keysS3...),
+	CmdFetcher: {"ETL_LOG_DIR", "ETL_HTTP_ADDR", "ETL_PG_DSN", "ETL_COINGECKO_BASE_URL", "COINGECKO_API_KEY",
+		"ETL_MIN_REQUEST_SPACING", "ETL_MARKETS_INTERVAL", "ETL_DETAIL_INTERVAL", "ETL_DETAIL_OFFSET",
+		"ETL_WATCHLIST", "ETL_MARKETS_PER_PAGE"},
+	CmdExporter: append([]string{"ETL_LOG_DIR", "ETL_HTTP_ADDR", "ETL_PG_DSN", "ETL_EXPORT_INTERVAL",
+		"ETL_EXPORT_BATCH_MAX", "ETL_WINDOW"}, keysS3...),
+	CmdTransformer: append([]string{"ETL_LOG_DIR", "ETL_HTTP_ADDR", "ETL_PG_DSN", "ETL_BROKERS", "ETL_TOPIC",
+		"ETL_PIPELINE_EPOCH", "ETL_TRANSFORM_MAX_RECORDS", "ETL_STALE_AFTER", "ETL_TICKER_STALE_AFTER",
+		"ETL_TICKER_ANOMALY_PCT", "ETL_ANOMALY_TOLERANCE_PCT"}, keysS3...),
+	CmdPublish: append([]string{"ETL_LOG_DIR", "ETL_PUSHGATEWAY_URL", "ETL_BROKERS", "ETL_TOPIC", "ETL_WINDOW"}, keysS3...),
+	// ETL_TOPIC_RETENTION only feeds the claims-retention guard.
+	CmdRetention: {"ETL_LOG_DIR", "ETL_PUSHGATEWAY_URL", "ETL_PG_DSN", "ETL_CLAIMS_RETENTION_DAYS", "ETL_TOPIC_RETENTION"},
+	CmdVacuum:    {"ETL_LOG_DIR", "ETL_PUSHGATEWAY_URL", "ETL_PG_DSN"},
+}
+
+// Load reads the environment for command cmd (Cmd*), which is copied into
+// Config.Service. Every field gets a value: the variable's, or the default
+// when the variable is unset, blank, or invalid but not read by cmd. Invalid
+// variables cmd reads are reported together.
+func Load(cmd string) (Config, error) {
+	keys, ok := commandKeys[cmd]
+	if !ok {
+		return Config{}, fmt.Errorf("config: unknown command %q", cmd)
+	}
+	p := parser{check: map[string]bool{}, bad: map[string]bool{}}
+	for _, k := range keys {
+		p.check[k] = true
+	}
 	c := Config{
-		Service:             service,
+		Service:             cmd,
 		HTTPAddr:            p.str("ETL_HTTP_ADDR", ":8080"),
 		PushgatewayURL:      p.httpURL("ETL_PUSHGATEWAY_URL", "http://pushgateway:9091"),
 		LogDir:              p.str("ETL_LOG_DIR", "logs"),
@@ -89,9 +136,9 @@ func Load(service string) (Config, error) {
 		AnomalyTolerancePct: p.nonNegFloat("ETL_ANOMALY_TOLERANCE_PCT", 0.5),
 	}
 	// Claims must outlive every message the topic still holds, so a replay
-	// from the earliest offset still finds them. Checked only when both inputs
-	// parsed, so a bad input reports one error, not two.
-	if c.ClaimsRetentionDays > 0 && c.TopicRetention > 0 {
+	// from the earliest offset still finds them. Only the retention job reads
+	// both; checked only when both parsed, so a bad input reports one error.
+	if p.valid("ETL_CLAIMS_RETENTION_DAYS", "ETL_TOPIC_RETENTION") {
 		const day = 24 * time.Hour
 		minDays := int((c.TopicRetention+day-1)/day) + 1 // 168h -> 8, 169h -> 9, 24h -> 2
 		if c.ClaimsRetentionDays < minDays {
@@ -100,9 +147,8 @@ func Load(service string) (Config, error) {
 		}
 	}
 	// The exporter must close a window before the publish run reads it, one
-	// grace after the window end. Checked only for a parsed value, so a bad
-	// value reports one error.
-	if c.ExportInterval > 0 && c.ExportInterval >= window.PublishGrace {
+	// grace after the window end.
+	if p.valid("ETL_EXPORT_INTERVAL") && c.ExportInterval >= window.PublishGrace {
 		p.errs = append(p.errs, fmt.Errorf("ETL_EXPORT_INTERVAL=%s: must be shorter than the publisher's %s grace", c.ExportInterval, window.PublishGrace))
 	}
 	if len(p.errs) > 0 {
@@ -111,8 +157,14 @@ func Load(service string) (Config, error) {
 	return c, nil
 }
 
-// parser collects every bad variable instead of stopping at the first one.
-type parser struct{ errs []error }
+// parser collects every bad variable the command reads instead of stopping
+// at the first one. A bad value is replaced by the default, so a variable the
+// command does not read can never leave a broken field behind.
+type parser struct {
+	check map[string]bool // variables the command reads: their errors are reported
+	bad   map[string]bool // variables whose value was invalid
+	errs  []error
+}
 
 func (p *parser) raw(key string) (string, bool) {
 	v, ok := os.LookupEnv(key)
@@ -121,7 +173,16 @@ func (p *parser) raw(key string) (string, bool) {
 }
 
 func (p *parser) fail(key, val, why string) {
-	p.errs = append(p.errs, fmt.Errorf("%s=%q: %s", key, val, why))
+	p.bad[key] = true
+	if p.check[key] {
+		p.errs = append(p.errs, fmt.Errorf("%s=%q: %s", key, val, why))
+	}
+}
+
+// valid reports whether the command reads every key and each parsed: the
+// condition of a cross-field check.
+func (p *parser) valid(keys ...string) bool {
+	return !slices.ContainsFunc(keys, func(k string) bool { return !p.check[k] || p.bad[k] })
 }
 
 func (p *parser) str(key, def string) string {
@@ -133,14 +194,19 @@ func (p *parser) str(key, def string) string {
 
 func (p *parser) list(key, def string) []string {
 	v := p.str(key, def)
+	if out := splitList(v); len(out) > 0 {
+		return out
+	}
+	p.fail(key, v, "must contain at least one comma-separated value")
+	return splitList(def)
+}
+
+func splitList(v string) []string {
 	var out []string
 	for _, part := range strings.Split(v, ",") {
 		if part = strings.TrimSpace(part); part != "" {
 			out = append(out, part)
 		}
-	}
-	if len(out) == 0 {
-		p.fail(key, v, "must contain at least one comma-separated value")
 	}
 	return out
 }
@@ -156,8 +222,10 @@ func (p *parser) duration(key string, def time.Duration, allowZero bool) time.Du
 		p.fail(key, v, "not a Go duration (examples: 30s, 2m, 168h)")
 	case d < 0 || (d == 0 && !allowZero):
 		p.fail(key, v, "must be positive")
+	default:
+		return d
 	}
-	return d
+	return def
 }
 
 // windowSize parses ETL_WINDOW (named so it does not read like the window package).
@@ -169,10 +237,11 @@ func (p *parser) windowSize(key string, def time.Duration) time.Duration {
 	d, err := time.ParseDuration(v)
 	if err != nil {
 		p.fail(key, v, "not a Go duration (examples: 1m, 5m, 15m)")
-		return d
+		return def
 	}
 	if err := window.Validate(d); err != nil {
 		p.fail(key, v, err.Error())
+		return def
 	}
 	return d
 }
@@ -183,6 +252,7 @@ func (p *parser) httpURL(key, def string) string {
 	u, err := url.Parse(v)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 		p.fail(key, v, "must be an absolute http(s) URL, e.g. http://pushgateway:9091")
+		v = def
 	}
 	return strings.TrimRight(v, "/")
 }
@@ -195,6 +265,7 @@ func (p *parser) int(key string, def int) int {
 	n, err := strconv.Atoi(v)
 	if err != nil || n <= 0 {
 		p.fail(key, v, "must be a positive integer")
+		return def
 	}
 	return n
 }
@@ -207,6 +278,7 @@ func (p *parser) int32(key string, def int32) int32 {
 	n, err := strconv.ParseInt(v, 10, 32)
 	if err != nil || n <= 0 {
 		p.fail(key, v, "must be a positive 32-bit integer")
+		return def
 	}
 	return int32(n)
 }
@@ -221,6 +293,7 @@ func (p *parser) float(key string, def float64) float64 {
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil || !(f > 0) || math.IsInf(f, 0) {
 		p.fail(key, v, "must be a positive number")
+		return def
 	}
 	return f
 }
@@ -234,6 +307,7 @@ func (p *parser) nonNegFloat(key string, def float64) float64 {
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil || !(f >= 0) || math.IsInf(f, 0) {
 		p.fail(key, v, "must be a number >= 0")
+		return def
 	}
 	return f
 }
@@ -243,7 +317,7 @@ func (p *parser) uuid(key, def string) string {
 	u, err := uuid.Parse(v)
 	if err != nil {
 		p.fail(key, v, "must be a UUID")
-		return v
+		return def
 	}
 	return u.String()
 }

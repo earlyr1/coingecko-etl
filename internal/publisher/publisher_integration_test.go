@@ -410,12 +410,22 @@ func TestPublisherIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := PublishWindow(ctx, e.deps(dlqTopic), dlqWin); err != nil {
+		// The write-once DLQ object hides a rerun that built other bytes (a
+		// checksum mismatch is logged and kept), so the log tells an equal-sha
+		// 412 apart from a mismatch.
+		var logged bytes.Buffer
+		d := e.deps(dlqTopic)
+		d.Log = slog.New(slog.NewJSONHandler(&logged, nil))
+		if _, err := PublishWindow(ctx, d, dlqWin); err != nil {
 			t.Fatalf("rerun: %v", err)
 		}
 		after, err := e.s3c.Get(ctx, s3.BucketDLQ, window.PublishDLQKey(dlqWin))
 		if err != nil || !bytes.Equal(before, after) {
 			t.Fatalf("dlq object changed on rerun (err %v)", err)
+		}
+		if l := logged.String(); !strings.Contains(l, `"msg":"records sent to dlq"`) || !strings.Contains(l, `"created":false`) ||
+			strings.Contains(l, "keeping the first") {
+			t.Fatalf("rerun log does not show the DLQ object accepted as the same bytes (created=false, no mismatch):\n%s", l)
 		}
 		recs := e.consumeAll(t, ctx, dlqTopic, 2)
 		if len(recs) != 2 {

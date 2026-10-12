@@ -18,7 +18,7 @@ import (
 
 // RetentionOptions configures one Retention run.
 type RetentionOptions struct {
-	Days        int           // cfg.ClaimsRetentionDays; must be >= 2 so today-1..today+3 (EnsurePartitions) is never touched
+	Days        int           // cfg.ClaimsRetentionDays; must be >= 2 so today-1..today+3 (EnsureClaimPartitions) is never touched
 	LockTimeout time.Duration // per DROP attempt
 	Attempts    int           // DROP attempts per partition on lock timeout
 	RetryDelay  time.Duration // pause between attempts
@@ -56,7 +56,7 @@ func Retention(ctx context.Context, pool *pgxpool.Pool, now time.Time, opt Reten
 	res := RetentionResult{Cutoff: retentionCutoff(now, opt.Days)}
 	switch {
 	case opt.Days < 2:
-		return res, fmt.Errorf("maintenance: retention of %d days is below 2: it would drop partitions EnsurePartitions keeps", opt.Days)
+		return res, fmt.Errorf("maintenance: retention of %d days is below 2: it would drop partitions EnsureClaimPartitions keeps", opt.Days)
 	case opt.Attempts < 1:
 		return res, fmt.Errorf("maintenance: %d drop attempts, want >= 1", opt.Attempts)
 	}
@@ -122,8 +122,11 @@ func dropWithRetry(ctx context.Context, pool *pgxpool.Pool, p pg.ClaimPartition,
 	}
 }
 
-// VacuumTables are vacuumed in this order, one statement each.
-var VacuumTables = []string{"raw.api_calls", "pipeline.export_batches", "pipeline.consumer_batches"}
+// VacuumTables are the tables the pipeline updates, vacuumed in this order,
+// one statement each: raw.api_calls (each exported row is stamped once), the
+// export ledger (two updates per window and per part) and the transformer's
+// batch manifests.
+var VacuumTables = []string{"raw.api_calls", "pipeline.export_windows", "pipeline.export_batches", "pipeline.consumer_batches"}
 
 // Vacuum runs VACUUM (ANALYZE) on VacuumTables, one autocommit statement per
 // table on one dedicated connection (VACUUM cannot run inside a transaction
@@ -141,7 +144,11 @@ func Vacuum(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) error {
 	}
 	conn := c.Hijack()
 	defer func() { _ = conn.Close(context.WithoutCancel(ctx)) }()
-	for _, set := range []string{"SET transaction_timeout = 0", "SET statement_timeout = 0"} {
+	var version int
+	if err := conn.QueryRow(ctx, "SELECT current_setting('server_version_num')::int").Scan(&version); err != nil {
+		return fmt.Errorf("maintenance: vacuum: server version: %w", err)
+	}
+	for _, set := range noTimeouts(version) {
 		if _, err := conn.Exec(ctx, set); err != nil {
 			return fmt.Errorf("maintenance: vacuum: %s: %w", set, err)
 		}
@@ -155,4 +162,14 @@ func Vacuum(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) error {
 		log.Info("vacuumed", "table", table, "duration_ms", time.Since(t0).Milliseconds())
 	}
 	return nil
+}
+
+// noTimeouts returns the statements that switch the session timeouts off for
+// server_version_num version. transaction_timeout exists only from
+// PostgreSQL 17 on; migration 00002 guards it the same way.
+func noTimeouts(version int) []string {
+	if version >= 170000 {
+		return []string{"SET transaction_timeout = 0", "SET statement_timeout = 0"}
+	}
+	return []string{"SET statement_timeout = 0"}
 }

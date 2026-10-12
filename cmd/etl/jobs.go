@@ -21,19 +21,20 @@ import (
 // run really did (etl publish: only on success; retention: also on error).
 type jobFunc func(ctx context.Context, cfg config.Config, log *slog.Logger) (gauges map[string]float64, err error)
 
-// runJob is the frame of every scheduled one-shot job: config, logger
+// runJob is the frame of every scheduled one-shot job: config (validated for
+// cmd, the command as typed: "publish", "maintenance retention", ...), logger
 // (<ETL_LOG_DIR>/<logService>/etl.log, appended, plus stdout = the Cronicle job
 // log), SIGINT/SIGTERM, the body, one Pushgateway report, the exit code
 // (0 ok, 1 failed). A config or logger error exits 1 before any push.
-func runJob(logService, job string, stderr io.Writer, body jobFunc) int {
-	cfg, err := config.Load(logService)
+func runJob(cmd, logService, job string, stderr io.Writer, body jobFunc) int {
+	cfg, err := config.Load(cmd)
 	if err != nil {
-		fmt.Fprintf(stderr, "etl %s: %v\n", logService, err)
+		fmt.Fprintf(stderr, "etl %s: %v\n", cmd, err)
 		return 1
 	}
 	log, closer, err := obs.NewLogger(logService, logDir(cfg.LogDir))
 	if err != nil {
-		fmt.Fprintf(stderr, "etl %s: %v\n", logService, err)
+		fmt.Fprintf(stderr, "etl %s: %v\n", cmd, err)
 		return 1
 	}
 	defer closer.Close()
@@ -67,9 +68,9 @@ func runMaintenance(args []string, stderr io.Writer) int {
 	}
 	switch args[0] {
 	case "retention":
-		return runJob("maintenance", obs.JobRetention, stderr, retentionJob)
+		return runJob(config.CmdRetention, "maintenance", obs.JobRetention, stderr, retentionJob)
 	case "vacuum":
-		return runJob("maintenance", obs.JobVacuum, stderr, vacuumJob)
+		return runJob(config.CmdVacuum, "maintenance", obs.JobVacuum, stderr, vacuumJob)
 	}
 	fmt.Fprintf(stderr, "etl: unknown maintenance job %q\n%s", args[0], usageText)
 	return 2

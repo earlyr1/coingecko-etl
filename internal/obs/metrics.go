@@ -68,7 +68,7 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 		}),
 		ExportBatches: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "etl_export_batches_total",
-			Help: "Exporter batches by result.",
+			Help: "Exporter raw parts by result (exported, error); error also counts every failed window step of a tick (ledger reads, a refused ETL_WINDOW or lake, open, claim, seal, _SUCCESS).",
 		}, []string{"result"}),
 		S3Puts: f.NewCounterVec(prometheus.CounterOpts{
 			Name: "etl_s3_put_total",

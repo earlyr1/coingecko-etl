@@ -114,6 +114,16 @@ func TestParseSuccessRejects(t *testing.T) {
 		"rows as a string":        `{` + ws + `,` + we + `,"rows":"0","parts":[]}`,
 		"rows as a float":         `{` + ws + `,` + we + `,"rows":0.5,"parts":[]}`,
 		"part rows as a fraction": `{` + ws + `,` + we + `,"rows":3,"parts":[{"key":"k","sha256":"` + shaA + `","rows":2.5}]}`,
+		// Valid JSON with the right values, but not the canonical bytes Marshal writes.
+		"duplicated key":         `{` + ws + `,` + we + `,"rows":5,"rows":0,"parts":[]}`,
+		"keys out of order":      `{` + we + `,` + ws + `,"rows":0,"parts":[]}`,
+		"space after a colon":    `{"window_start": "2026-10-10T10:00:00.000Z",` + we + `,"rows":0,"parts":[]}`,
+		"space between members":  `{` + ws + `, ` + we + `,"rows":0,"parts":[]}`,
+		"indented":               "{\n  " + ws + ",\n  " + we + ",\n  \"rows\":0,\n  \"parts\":[]\n}",
+		"trailing newline":       `{` + ws + `,` + we + `,"rows":0,"parts":[]}` + "\n",
+		"leading space":          ` {` + ws + `,` + we + `,"rows":0,"parts":[]}`,
+		"escaped key character":  `{"window_` + "\\u0073" + `tart":"2026-10-10T10:00:00.000Z",` + we + `,"rows":0,"parts":[]}`,
+		"part keys out of order": `{` + ws + `,` + we + `,"rows":3,"parts":[{"sha256":"` + shaA + `","key":"k","rows":3}]}`,
 	}
 	for name, in := range cases {
 		if _, err := ParseSuccess([]byte(in)); err == nil {

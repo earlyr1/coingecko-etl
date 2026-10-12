@@ -29,8 +29,8 @@ const (
 // constants: the Pushgateway rejects a push whose HELP or TYPE for a metric name
 // differs from another group's.
 var jobGaugeHelp = map[string]string{
-	MetricPublishRecords:             "Records the last publish run sent to the broker.",
-	MetricPublishDLQLines:            "Raw lines the last publish run wrote to the publish DLQ.",
+	MetricPublishRecords:             "Records the last successful publish run sent to the broker.",
+	MetricPublishDLQLines:            "Raw lines the last successful publish run wrote to the publish DLQ.",
 	MetricRetentionPartitionsDropped: "dedup_claims partitions the last retention run dropped.",
 	MetricRetentionBatchesDeleted:    "Written consumer_batches rows the last retention run deleted.",
 }

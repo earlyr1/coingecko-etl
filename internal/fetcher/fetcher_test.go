@@ -174,7 +174,7 @@ func TestScheduleAndRotation(t *testing.T) {
 		t.Errorf("inserted %d rows, want %d", len(h.inserted), len(want))
 	}
 	if h.partitions != 1 {
-		t.Errorf("EnsurePartitions called %d times in 3 min, want 1 (startup)", h.partitions)
+		t.Errorf("EnsureRawPartitions called %d times in 3 min, want 1 (startup)", h.partitions)
 	}
 	if got := promtest.ToFloat64(h.m.APIRequests.WithLabelValues(m, "200")); got != 7 {
 		t.Errorf("api_requests_total{coins_markets,200} = %v, want 7", got)
@@ -200,7 +200,7 @@ func TestPartitionsHourly(t *testing.T) {
 		t.Fatal(err)
 	}
 	if h.partitions != 3 { // start, +1h, +2h
-		t.Fatalf("EnsurePartitions calls = %d, want 3", h.partitions)
+		t.Fatalf("EnsureRawPartitions calls = %d, want 3", h.partitions)
 	}
 }
 

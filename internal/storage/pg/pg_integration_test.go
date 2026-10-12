@@ -87,11 +87,18 @@ func TestPostgresIntegration(t *testing.T) {
 			"content_sha256 bytea, status text, claimed_at timestamp with time zone, exported_at timestamp with time zone"; got != want {
 			t.Errorf("pipeline.export_batches columns =\n  %s\nwant\n  %s", got, want)
 		}
-		for _, idx := range []string{"api_calls_unexported_idx", "api_calls_export_batch_idx"} {
+		// The claim's literal predicates (outcome = 'ok' AND export_batch_id IS
+		// NULL) and the read-back by batch id rely on these exact partial indexes.
+		for idx, want := range map[string]string{
+			"api_calls_unexported_idx":   "(seq) WHERE ((outcome = 'ok'::text) AND (export_batch_id IS NULL))",
+			"api_calls_export_batch_idx": "(export_batch_id, seq) WHERE (export_batch_id IS NOT NULL)",
+		} {
 			var def string
 			if err := pool.QueryRow(ctx, `SELECT indexdef FROM pg_indexes
 				WHERE schemaname = 'raw' AND tablename = 'api_calls' AND indexname = $1`, idx).Scan(&def); err != nil {
 				t.Errorf("index %s on raw.api_calls: %v", idx, err)
+			} else if !strings.HasSuffix(def, want) {
+				t.Errorf("index %s = %s, want a definition ending in %s", idx, def, want)
 			}
 		}
 		// Windows close strictly in order (one pending window at most), and a
@@ -147,17 +154,35 @@ func TestPostgresIntegration(t *testing.T) {
 
 	now := time.Date(2026, 10, 10, 23, 30, 0, 0, time.UTC)
 
-	t.Run("EnsurePartitionsCreatesDailyPartitions", func(t *testing.T) {
+	t.Run("EnsureRawAndClaimPartitionsCreateOnlyTheirOwn", func(t *testing.T) {
+		// Each stage creates only its own table's partitions: the raw ones
+		// (init, fetcher) and the claims ones (init, transformer) separately.
 		for range 2 { // idempotent
-			if err := EnsurePartitions(ctx, pool, now, 3); err != nil {
-				t.Fatalf("ensure partitions: %v", err)
+			if err := EnsureRawPartitions(ctx, pool, now, 3); err != nil {
+				t.Fatalf("ensure raw partitions: %v", err)
 			}
 		}
 		want := []string{"20261009", "20261010", "20261011", "20261012", "20261013"}
-		for _, parent := range []string{"raw.api_calls", "pipeline.dedup_claims"} {
-			got := partitionsOf(t, pool, parent)
-			if strings.Join(got, ",") != strings.Join(want, ",") {
-				t.Errorf("%s partitions = %v, want %v", parent, got, want)
+		if got := partitionsOf(t, pool, "raw.api_calls"); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("raw.api_calls partitions = %v, want %v", got, want)
+		}
+		if got := partitionsOf(t, pool, "pipeline.dedup_claims"); len(got) != 0 {
+			t.Errorf("EnsureRawPartitions created pipeline.dedup_claims partitions %v", got)
+		}
+		for range 2 {
+			if err := EnsureClaimPartitions(ctx, pool, now, 1); err != nil {
+				t.Fatalf("ensure claim partitions: %v", err)
+			}
+		}
+		if got := partitionsOf(t, pool, "pipeline.dedup_claims"); strings.Join(got, ",") != strings.Join(want[:3], ",") {
+			t.Errorf("pipeline.dedup_claims partitions = %v, want %v", got, want[:3])
+		}
+		if got := partitionsOf(t, pool, "raw.api_calls"); strings.Join(got, ",") != strings.Join(want, ",") {
+			t.Errorf("EnsureClaimPartitions changed the raw.api_calls partitions: %v, want %v", got, want)
+		}
+		for _, f := range []func(context.Context, *pgxpool.Pool, time.Time, int) error{EnsureRawPartitions, EnsureClaimPartitions} {
+			if err := f(ctx, pool, now, -1); err == nil {
+				t.Error("daysAhead -1 accepted, want an error")
 			}
 		}
 		// Day boundaries are UTC regardless of the session TimeZone.
@@ -272,6 +297,10 @@ func TestPostgresIntegration(t *testing.T) {
 		if err := pool.QueryRow(ctx, `SELECT to_regclass('raw.api_calls_p20270301') IS NOT NULL`).Scan(&ok); err != nil || !ok {
 			t.Fatalf("partition raw.api_calls_p20270301 not created (err=%v)", err)
 		}
+		// The fetcher's repair creates raw partitions only, never the transformer's claims partitions.
+		if err := pool.QueryRow(ctx, `SELECT to_regclass('pipeline.dedup_claims_p20270301') IS NULL`).Scan(&ok); err != nil || !ok {
+			t.Fatalf("the raw insert repair created pipeline.dedup_claims_p20270301 (err=%v)", err)
+		}
 	})
 
 	t.Run("ConsumerBatchesRejectOverlap", func(t *testing.T) {
@@ -337,7 +366,10 @@ func migratedPool(t *testing.T, day time.Time, daysAhead int) (*pgxpool.Pool, st
 	if err := Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if err := EnsurePartitions(ctx, pool, day, daysAhead); err != nil {
+	if err := EnsureRawPartitions(ctx, pool, day, daysAhead); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsureClaimPartitions(ctx, pool, day, daysAhead); err != nil {
 		t.Fatal(err)
 	}
 	return pool, dsn

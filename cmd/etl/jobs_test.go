@@ -61,10 +61,12 @@ func TestRunJobReportsFailureOnSIGTERM(t *testing.T) {
 		b, _ := os.ReadFile(logFile)
 		return string(b)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	// Starting a fresh binary can be slow under load (exec, a malware scan on
+	// macOS, schema loading); only the exit after SIGTERM has a hard bound.
+	deadline := time.Now().Add(30 * time.Second)
 	for !strings.Contains(readLog(), `"msg":"publish started"`) {
 		if time.Now().After(deadline) {
-			t.Fatalf("no publish started line within 5 s:\n%s", readLog())
+			t.Fatalf("no publish started line within 30 s:\n%s", readLog())
 		}
 		time.Sleep(50 * time.Millisecond)
 	}

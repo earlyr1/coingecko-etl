@@ -29,6 +29,13 @@
 // finds a _SUCCESS, unless the lake already holds that _SUCCESS from an
 // earlier stack, which is never overwritten.
 //
+// ETL_WINDOW is fixed for the lifetime of the ledger and the lake: raw keys
+// (window=HHMM) do not carry the size, and each publish run reads one window
+// on the grid of its own ETL_WINDOW, so windows closed with an old size would
+// never be published. The exporter refuses to work while the newest ledger
+// window has another size, and on an empty ledger while the lake holds a
+// manifest of another size at the key of its first window.
+//
 // The cost: one non-HOT UPDATE per exported row (a dead row version for
 // vacuum and new index entries).
 package exporter
@@ -73,6 +80,11 @@ var (
 type Settings struct {
 	Window  time.Duration // ETL_WINDOW
 	PartMax int           // ETL_EXPORT_BATCH_MAX: maximum rows per raw part
+
+	// keptLake remembers the _SUCCESS keys found closed by an earlier stack
+	// (checkKeptLake), so their WARN and S3 GET happen once per process. Run
+	// sets it; nil checks the lake on every tick.
+	keptLake map[string]bool
 }
 
 // Window states in pipeline.export_windows: 'claiming' takes parts; 'sealed'
@@ -184,7 +196,10 @@ func rowToEvent(r apiRow) (event.RawEvent, error) {
 // that is due (now >= its end) in order: claim and export its parts, seal
 // its manifest, write its _SUCCESS. now is frozen for the whole call, so
 // windows that fall due during a long catch-up are closed by the next tick.
-// It returns the sum of row_count of the parts it exported. Every failure
+// It refuses to open, claim, seal or close any window while ETL_WINDOW
+// differs from the size the ledger (or, on an empty ledger, the lake) was
+// written with; a part claimed before is still finished, since its key and
+// bytes are fixed. It returns the sum of row_count of the parts it exported. Every failure
 // counts once in etl_export_batches_total{result="error"}: exportBatch
 // counts its own, every other failure is counted here.
 func ExportOnce(ctx context.Context, pool *pgxpool.Pool, s3c *s3.Client, reg *validation.Registry, m *obs.Metrics, log *slog.Logger, set Settings, now time.Time) (int, error) {
@@ -209,26 +224,20 @@ func ExportOnce(ctx context.Context, pool *pgxpool.Pool, s3c *s3.Client, reg *va
 	}
 
 	for {
-		w, status, found, bootstrap, err := pendingWindow(ctx, pool, set.Window, now)
+		p, err := pendingWindow(ctx, pool, set.Window, now)
 		if err != nil {
 			return fail(err)
 		}
-		if bootstrap {
-			_, err := s3c.Get(ctx, s3.BucketRaw, window.RawSuccessKey(w))
-			switch {
-			case err == nil: // an earlier stack closed it (the lake was kept): never overwrite
-				log.Warn("raw window already in the lake; starting at the next window", "stage", stage,
-					"window_start", xtime.Format(w.Start), "success_key", window.RawSuccessKey(w))
-				w = window.Window{Start: w.End, End: w.End.Add(set.Window)}
-			case errors.Is(err, s3.ErrNotFound): // a fresh lake: close w now (usually empty)
-			default:
-				return fail(fmt.Errorf("exporter: check bootstrap window: %w", err))
+		w, status := p.w, p.status
+		if p.first {
+			if w, err = checkKeptLake(ctx, s3c, log, set, w); err != nil {
+				return fail(err)
 			}
 		}
-		if !found && now.Before(w.End) {
+		if !p.open && now.Before(w.End) {
 			return exported, nil // the next window is not due yet
 		}
-		if !found {
+		if !p.open {
 			if err := openWindow(ctx, pool, w); err != nil {
 				return fail(err)
 			}
@@ -267,55 +276,127 @@ type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
 }
 
+// pending is the window the exporter works on next.
+type pending struct {
+	w      window.Window
+	status string // the ledger status when open, else ""
+	// open: w is in the ledger and not closed yet.
+	open bool
+	// first: the ledger is empty, so w would be its first window.
+	first bool
+	// bootstrap: first, and no row is older than the current window: w is the
+	// window just before the current one, already due.
+	bootstrap bool
+}
+
+// windowSizeError is the refusal to work with an ETL_WINDOW other than the
+// size of the newest ledger window (see the package doc).
+type windowSizeError struct {
+	ledger, configured time.Duration
+}
+
+func (e *windowSizeError) Error() string {
+	old, cur := minutes(e.ledger), minutes(e.configured)
+	return fmt.Sprintf("exporter: ETL_WINDOW changed from %s to %s: windows closed with %s would never be published; run make clean, or set ETL_WINDOW back to %s",
+		old, cur, old, old)
+}
+
+// minutes formats a window size the way ETL_WINDOW is usually written (5m, 60m).
+func minutes(d time.Duration) string {
+	if d > 0 && d%time.Minute == 0 {
+		return fmt.Sprintf("%dm", d/time.Minute)
+	}
+	return d.String()
+}
+
 // pendingWindow returns the window the exporter works on next (Postgres
-// only, read-only):
-//   - found: the window that is not closed yet (at most one exists), whatever
-//     its size, with its status;
-//   - otherwise the window after the last closed one: it starts at the first
-//     boundary of size at or after the last end, so a changed ETL_WINDOW
-//     switches at the next boundary of the new size and no key collides (the
-//     claim has no lower bound, so rows between the last end and that
-//     boundary go into it);
-//   - on an empty ledger, the window holding the oldest unexported ok row,
-//     or, when no row is older than the current window, the window just
+// only, read-only). It reads the newest ledger window: windows open only
+// after the previous one closed, at or after its end, so a window that is
+// not closed (at most one) is always the newest.
+//   - the newest window has another size than size: a *windowSizeError;
+//   - it is not closed: that window, open, with its status;
+//   - otherwise the window after it;
+//   - on an empty ledger (first), the window holding the oldest unexported ok
+//     row, or, when no row is older than the current window, the window just
 //     before the current one (bootstrap): it is already due, so the first
 //     tick closes it and the first publish run finds a _SUCCESS.
-func pendingWindow(ctx context.Context, q querier, size time.Duration, now time.Time) (w window.Window, status string, found, bootstrap bool, err error) {
+func pendingWindow(ctx context.Context, q querier, size time.Duration, now time.Time) (pending, error) {
 	var start, end time.Time
-	err = q.QueryRow(ctx, `
+	var status string
+	err := q.QueryRow(ctx, `
 SELECT window_start, window_end, status FROM pipeline.export_windows
- WHERE status <> 'closed' ORDER BY window_start LIMIT 1`).Scan(&start, &end, &status)
+ ORDER BY window_start DESC LIMIT 1`).Scan(&start, &end, &status)
 	switch {
 	case err == nil:
-		return window.Window{Start: start.UTC(), End: end.UTC()}, status, true, false, nil
+		last := window.Window{Start: start.UTC(), End: end.UTC()}
+		if got := last.End.Sub(last.Start); got != size {
+			return pending{}, &windowSizeError{ledger: got, configured: size}
+		}
+		if status != statusClosed {
+			return pending{w: last, status: status, open: true}, nil
+		}
+		next := window.Ceil(last.End, size)
+		return pending{w: window.Window{Start: next, End: next.Add(size)}}, nil
 	case !errors.Is(err, pgx.ErrNoRows):
-		return w, "", false, false, fmt.Errorf("exporter: pending window: %w", err)
-	}
-
-	var lastEnd *time.Time
-	if err := q.QueryRow(ctx, `SELECT max(window_end) FROM pipeline.export_windows`).Scan(&lastEnd); err != nil {
-		return w, "", false, false, fmt.Errorf("exporter: last window: %w", err)
-	}
-	if lastEnd != nil {
-		start = window.Ceil(*lastEnd, size)
-		return window.Window{Start: start, End: start.Add(size)}, "", false, false, nil
+		return pending{}, fmt.Errorf("exporter: newest window: %w", err)
 	}
 
 	// Empty ledger. The predicates are literals so the partial index applies.
 	var oldest *time.Time
 	if err := q.QueryRow(ctx, `
 SELECT min(fetched_at) FROM raw.api_calls WHERE outcome = 'ok' AND export_batch_id IS NULL`).Scan(&oldest); err != nil {
-		return w, "", false, false, fmt.Errorf("exporter: window anchor: %w", err)
+		return pending{}, fmt.Errorf("exporter: window anchor: %w", err)
 	}
 	current := window.Floor(now, size)
-	start = current
+	p := pending{first: true}
+	s := current
 	if oldest != nil && oldest.Before(now) {
-		start = window.Floor(*oldest, size)
+		s = window.Floor(*oldest, size)
 	}
-	if start.Equal(current) {
-		start, bootstrap = current.Add(-size), true
+	if s.Equal(current) {
+		s, p.bootstrap = current.Add(-size), true
 	}
-	return window.Window{Start: start, End: start.Add(size)}, "", false, bootstrap, nil
+	p.w = window.Window{Start: s, End: s.Add(size)}
+	return p, nil
+}
+
+// checkKeptLake looks into the lake before the ledger's first window w: a
+// lake kept across a stack re-creation may already hold w's _SUCCESS.
+//   - none: w (a fresh lake);
+//   - a manifest of w itself: an earlier stack with the same ETL_WINDOW closed
+//     it; it is never overwritten, and the work starts at the next window
+//     (the claim has no lower bound, so rows fetched in w go there). Logged
+//     once per process when set.keptLake is set;
+//   - a manifest of other bounds: the lake was written with another
+//     ETL_WINDOW, whose windows the new ones would collide with: an error;
+//   - anything else at that key: an error.
+func checkKeptLake(ctx context.Context, s3c *s3.Client, log *slog.Logger, set Settings, w window.Window) (window.Window, error) {
+	key := window.RawSuccessKey(w)
+	next := window.Window{Start: w.End, End: w.End.Add(set.Window)}
+	if set.keptLake[key] {
+		return next, nil
+	}
+	body, err := s3c.Get(ctx, s3.BucketRaw, key)
+	switch {
+	case errors.Is(err, s3.ErrNotFound):
+		return w, nil
+	case err != nil:
+		return w, fmt.Errorf("exporter: check the lake before the first window: %w", err)
+	}
+	m, err := window.ParseSuccess(body)
+	if err != nil {
+		return w, fmt.Errorf("exporter: the lake holds %s, which is not a raw manifest (%v); use a fresh lake", key, err)
+	}
+	if start, end := xtime.Format(w.Start), xtime.Format(w.End); m.WindowStart != start || m.WindowEnd != end {
+		return w, fmt.Errorf("exporter: the lake holds raw windows of another ETL_WINDOW: %s is the manifest of %s..%s, not of the %s window %s..%s; use a fresh lake or the same ETL_WINDOW",
+			key, m.WindowStart, m.WindowEnd, minutes(set.Window), start, end)
+	}
+	log.Warn("raw window already in the lake; starting at the next window", "stage", stage,
+		"window_start", xtime.Format(w.Start), "success_key", key)
+	if set.keptLake != nil {
+		set.keptLake[key] = true
+	}
+	return next, nil
 }
 
 // openWindow inserts w in status 'claiming'. A second exporter racing on it
@@ -792,21 +873,28 @@ func marshalDLQ(rec dlqRecord, reg *validation.Registry, log *slog.Logger) ([]by
 // updateLag sets etl_export_lag_seconds to the seconds past the end of the
 // oldest window the exporter has not closed yet: 0 on schedule (up to one
 // ETL_EXPORT_INTERVAL right after a window end), growing while a part keeps
-// failing, S3 or Postgres is down, or a catch-up is running. It is 0 before
-// the first window (bootstrap). Rows locked by another session or committed
+// failing, S3 or Postgres is down, a catch-up is running, or the exporter
+// refuses a changed ETL_WINDOW (counted on the ledger's own size). It is 0
+// before the first window (bootstrap). Rows locked by another session or committed
 // late do not count: they go into a later window. On a failed query or a
 // done ctx it logs and leaves the gauge unchanged.
 func updateLag(ctx context.Context, pool *pgxpool.Pool, m *obs.Metrics, log *slog.Logger, size time.Duration, now time.Time) {
 	if ctx.Err() != nil {
 		return
 	}
-	w, _, _, bootstrap, err := pendingWindow(ctx, pool, size, now)
+	p, err := pendingWindow(ctx, pool, size, now)
+	var changed *windowSizeError
+	if errors.As(err, &changed) {
+		// ETL_WINDOW changed and the exporter refuses to work: the lag counts
+		// on the grid the ledger was written with, so it keeps growing.
+		p, err = pendingWindow(ctx, pool, changed.ledger, now)
+	}
 	if err != nil {
 		log.Warn("export lag query failed", "stage", stage, "err", err)
 		return
 	}
-	lag := now.Sub(w.End).Seconds()
-	if bootstrap || lag < 0 {
+	lag := now.Sub(p.w.End).Seconds()
+	if p.bootstrap || lag < 0 {
 		lag = 0
 	}
 	m.ExportLag.Set(lag)
@@ -828,7 +916,7 @@ func Run(ctx context.Context, cfg config.Config, pool *pgxpool.Pool, s3c *s3.Cli
 	defer releaseLock(conn, log)
 	log.Info("exporter lock acquired", "stage", stage, "window", cfg.Window.String())
 
-	set := Settings{Window: cfg.Window, PartMax: cfg.ExportBatchMax}
+	set := Settings{Window: cfg.Window, PartMax: cfg.ExportBatchMax, keptLake: map[string]bool{}}
 	ticker := time.NewTicker(cfg.ExportInterval)
 	defer ticker.Stop()
 	for {

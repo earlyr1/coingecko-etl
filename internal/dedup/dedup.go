@@ -120,7 +120,7 @@ JOIN pipeline.dedup_claims c
 // COMMITTED) sees the winner. A single CTE statement could not see it.
 //
 // Partitions of pipeline.dedup_claims for every EventDate must already exist
-// (pg.EnsurePartitions); otherwise Postgres returns SQLSTATE 23514, which is
+// (pg.EnsureClaimPartitions); otherwise Postgres returns SQLSTATE 23514, which is
 // wrapped in the returned error.
 func ClaimAndDecide(ctx context.Context, tx pgx.Tx, claims []Claim) ([]Outcome, error) {
 	if len(claims) == 0 {

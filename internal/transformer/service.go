@@ -12,6 +12,7 @@ import (
 
 	"coingecko-etl/internal/config"
 	"coingecko-etl/internal/queue"
+	"coingecko-etl/internal/storage/pg"
 	"coingecko-etl/internal/storage/s3"
 
 	"github.com/google/uuid"
@@ -39,6 +40,29 @@ const (
 // haltedLagEvery is how often the lag of halted partitions is refreshed from
 // the topic's end offsets (a variable so tests can shorten it).
 var haltedLagEvery = 15 * time.Second
+
+// Run creates the daily dedup_claims partitions [today-1, today+claimDaysAhead]
+// before its first poll and then every claimPartitionsEvery, as etl init does
+// once (claimPartitionsRetry after a failure: Postgres may be down while the
+// broker is not, and the lag must still be reported). A batch with an
+// event_date outside them creates its own (ensureClaimPartitions).
+const (
+	claimDaysAhead       = 3
+	claimPartitionsEvery = time.Hour
+	claimPartitionsRetry = time.Minute
+)
+
+// ensureClaimsAhead creates the claims partitions ahead and returns when to
+// do it next.
+func ensureClaimsAhead(ctx context.Context, d Deps, now time.Time) time.Time {
+	if err := pg.EnsureClaimPartitions(ctx, d.Pool, now, claimDaysAhead); err != nil {
+		if ctx.Err() == nil {
+			d.Log.Error("ensure claims partitions failed", "stage", "transform", "retry_in", claimPartitionsRetry.String(), "err", err)
+		}
+		return now.Add(claimPartitionsRetry)
+	}
+	return now.Add(claimPartitionsEvery)
+}
 
 // runner holds the per-process consumer state.
 type runner struct {
@@ -106,7 +130,11 @@ func Run(ctx context.Context, cfg config.Config, d Deps) error {
 	defer cl.CloseAllowingRebalance()
 	d.Log.Info("transformer started", "stage", "transform", "topic", cfg.Topic, "topic_id", topicID.String(), "group", ConsumerGroup)
 
+	var partitionsDue time.Time // zero: before the first poll
 	for {
+		if now := time.Now(); !now.Before(partitionsDue) {
+			partitionsDue = ensureClaimsAhead(ctx, d, now)
+		}
 		pctx, cancel := context.WithTimeout(ctx, pollWait)
 		fetches := cl.PollRecords(pctx, r.maxRecords)
 		cancel()

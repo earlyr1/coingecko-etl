@@ -112,19 +112,16 @@ func TestAPICallArgsRejectsBadInput(t *testing.T) {
 }
 
 func TestPartitionDDL(t *testing.T) {
-	got := partitionDDL(time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC))
-	if len(got) != 2 {
-		t.Fatalf("got %d statements", len(got))
-	}
+	day := time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC)
 	wantRaw := "CREATE TABLE IF NOT EXISTS raw.api_calls_p20261231 PARTITION OF raw.api_calls\n" +
 		"  FOR VALUES FROM ('2026-12-31 00:00:00+00') TO ('2027-01-01 00:00:00+00')"
-	if got[0] != wantRaw {
-		t.Errorf("raw DDL:\n%s\nwant:\n%s", got[0], wantRaw)
+	if got := rawPartitionDDL(day); got != wantRaw {
+		t.Errorf("raw DDL:\n%s\nwant:\n%s", got, wantRaw)
 	}
 	wantDedup := "CREATE TABLE IF NOT EXISTS pipeline.dedup_claims_p20261231 PARTITION OF pipeline.dedup_claims\n" +
 		"  FOR VALUES FROM ('2026-12-31') TO ('2027-01-01')"
-	if got[1] != wantDedup {
-		t.Errorf("dedup DDL:\n%s\nwant:\n%s", got[1], wantDedup)
+	if got := claimPartitionDDL(day); got != wantDedup {
+		t.Errorf("dedup DDL:\n%s\nwant:\n%s", got, wantDedup)
 	}
 }
 

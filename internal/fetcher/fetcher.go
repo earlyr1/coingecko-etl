@@ -88,7 +88,7 @@ func Run(ctx context.Context, cfg config.Config, cg *coingecko.Client, lim *coin
 			return pg.InsertAPICall(ctx, pool, ev)
 		},
 		ensurePartitions: func(ctx context.Context, now time.Time) error {
-			return pg.EnsurePartitions(ctx, pool, now, partitionDaysAhead)
+			return pg.EnsureRawPartitions(ctx, pool, now, partitionDaysAhead)
 		},
 		reg: reg,
 		m:   m,
