@@ -79,3 +79,30 @@ func TestNewMetricsTwiceOnSameRegistryPanics(t *testing.T) {
 	}()
 	NewMetrics(reg)
 }
+
+// The latency now includes the wait for a window to close (up to ETL_WINDOW)
+// and the publish grace, so the buckets are dense up to 10 minutes: a p95
+// must not be interpolated across one 300-600 s bucket.
+func TestE2ELatencyBuckets(t *testing.T) {
+	reg := prometheus.NewRegistry()
+	m := NewMetrics(reg)
+	m.E2ELatency.Observe(200)
+
+	families, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather: %v", err)
+	}
+	var got []float64
+	for _, f := range families {
+		if f.GetName() != "etl_e2e_latency_seconds" {
+			continue
+		}
+		for _, b := range f.GetMetric()[0].GetHistogram().GetBucket() {
+			got = append(got, b.GetUpperBound())
+		}
+	}
+	want := []float64{5, 15, 30, 60, 120, 180, 240, 300, 360, 420, 480, 600, 900, 1800, 3600}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("etl_e2e_latency_seconds buckets = %v, want %v", got, want)
+	}
+}

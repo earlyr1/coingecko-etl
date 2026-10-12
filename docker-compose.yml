@@ -1,6 +1,17 @@
 name: coingecko-etl
 
-# Shared settings of every `etl` container (one image, one subcommand each).
+# Endpoints and settings every etl process needs: the long-running services
+# below and the batch jobs Cronicle runs. ETL_WINDOW is interpolated, so a
+# shell value overrides .env (make demo runs `make up` with ETL_WINDOW=1m).
+x-etl-env: &etl-env
+  ETL_PG_DSN: postgres://etl:etl@postgres:5432/etl?sslmode=disable
+  ETL_BROKERS: redpanda:9092
+  ETL_S3_ENDPOINT: http://versitygw:7070
+  ETL_LOG_DIR: /app/logs
+  ETL_WINDOW: ${ETL_WINDOW:-5m}
+
+# Shared settings of every long-running `etl` container (one image, one
+# subcommand each).
 x-etl: &etl
   image: coingecko-etl:local
   build: .
@@ -8,12 +19,7 @@ x-etl: &etl
   env_file:
     - path: .env
       required: false
-  environment: &etl-env
-    ETL_PG_DSN: postgres://etl:etl@postgres:5432/etl?sslmode=disable
-    ETL_BROKERS: redpanda:9092
-    ETL_S3_ENDPOINT: http://versitygw:7070
-    ETL_HTTP_ADDR: ":8080"
-    ETL_LOG_DIR: /app/logs
+  environment: *etl-env
   volumes:
     - ./logs:/app/logs
   restart: unless-stopped
@@ -108,6 +114,26 @@ services:
         condition: service_healthy
     restart: unless-stopped
 
+  # Holds the metrics the batch jobs push when they end (they are not running
+  # when Prometheus scrapes). Persisted, so a restart keeps the last success.
+  pushgateway:
+    image: prom/pushgateway:v1.11.4
+    command:
+      # /pushgateway is owned by the image user (nobody); a fresh named volume
+      # mounted there inherits that owner (mounting at /data fails with permission denied).
+      - --persistence.file=/pushgateway/metrics.db
+      - --persistence.interval=1m
+    volumes:
+      - pushgateway:/pushgateway
+    ports:
+      - "127.0.0.1:${PUSHGATEWAY_PORT:-9091}:9091"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:9091/-/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:v3.15.0
     command:
@@ -170,8 +196,64 @@ services:
     deploy:
       replicas: 2
 
+  # Scheduler of the batch jobs (local stand-in for Airflow): etl publish every
+  # ETL_WINDOW, etl maintenance retention and vacuum daily. The image is the
+  # Dockerfile's cronicle stage: Node, Cronicle and the same etl binary.
+  # Every job inherits this container's environment.
+  cronicle:
+    image: coingecko-etl-cronicle:local
+    build:
+      context: .
+      target: cronicle
+    hostname: cronicle
+    init: true # tini as PID 1: reaps job processes, forwards SIGTERM to Cronicle
+    user: "${ETL_UID:-65532}:${ETL_GID:-65532}"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      <<: *etl-env
+      ETL_PUSHGATEWAY_URL: http://pushgateway:9091
+      ETL_SCHEDULE_TZ: ${ETL_SCHEDULE_TZ:-UTC}
+      # Stored when a fresh cronicle volume is set up (make clean resets them);
+      # provision.js uses the API key at every start.
+      CRONICLE_ADMIN_PASSWORD: ${CRONICLE_ADMIN_PASSWORD:-admin}
+      CRONICLE_API_KEY: ${CRONICLE_API_KEY:-etl_local_dev_api_key_0001}
+      # Optional: URL Cronicle POSTs to at the start and end of every job.
+      CRONICLE_WEB_HOOK: ${CRONICLE_WEB_HOOK:-}
+      CRONICLE_base_app_url: http://localhost:${CRONICLE_PORT:-3012}
+    volumes:
+      - ./logs:/app/logs
+      - cronicle:/var/lib/cronicle
+    ports:
+      - "127.0.0.1:${CRONICLE_PORT:-3012}:3012"
+    # On SIGTERM Cronicle aborts running jobs (10 s kill timeout) and rewinds
+    # their event cursor, so the aborted window runs again after the restart.
+    stop_grace_period: 30s
+    healthcheck:
+      # /tmp/etl-provisioned is written by provision.js once the events exist.
+      test: ["CMD-SHELL", "test -f /tmp/etl-provisioned && node -e \"fetch('http://127.0.0.1:3012/').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))\""]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      init:
+        condition: service_completed_successfully
+      pushgateway:
+        condition: service_healthy
+      # On an empty ledger the exporter's first tick closes the window before
+      # the current one. Starting the scheduler after the exporter is healthy makes the
+      # first etl-publish run target that window or a later one, so it is green
+      # with 1-minute windows too.
+      exporter:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   pgdata:
   redpanda:
   prometheus:
   grafana:
+  pushgateway:
+  cronicle:

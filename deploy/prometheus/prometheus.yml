@@ -1,6 +1,8 @@
-# Scrapes every etl service on :8080/metrics. dns_sd_configs resolves the
-# compose service name to one A record per container, so both transformer
-# replicas (deploy.replicas: 2) are discovered without listing them.
+# Scrapes every long-running etl service on :8080/metrics. dns_sd_configs
+# resolves the compose service name to one A record per container, so both
+# transformer replicas (deploy.replicas: 2) are discovered without listing them.
+# The batch jobs (etl publish, etl maintenance) push to the Pushgateway when
+# they end; honor_labels keeps the job label they push (etl_publisher, ...).
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
@@ -29,6 +31,11 @@ scrape_configs:
         type: A
         port: 8080
         refresh_interval: 15s
+
+  - job_name: pushgateway
+    honor_labels: true
+    static_configs:
+      - targets: ["pushgateway:9091"]
 
   - job_name: prometheus
     static_configs:

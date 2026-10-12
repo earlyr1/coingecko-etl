@@ -215,6 +215,8 @@ tests:
         values: '1x10'
       - series: 'up{job="prometheus",instance="localhost:9090"}'
         values: '0x10' # not a pipeline service
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '0x10' # not a pipeline service either
     alert_rule_test:
       - eval_time: 10m
         alertname: ETLServiceDown
@@ -237,7 +239,7 @@ tests:
           - exp_labels: {severity: warning}
             exp_annotations:
               summary: "CoinGecko calls succeed but nothing reached the lake in 15 minutes"
-              description: "The exporter, the publisher (or the broker) or the transformers are stalled; check their logs and ETLServiceDown."
+              description: "The exporter, the publisher (Cronicle job etl-publish), the broker or the transformers are stalled; check their logs, ETLServiceDown and ETLPublisherStale."
 
   - name: a transformer that never wrote a batch counts as no progress
     interval: 1m
@@ -251,7 +253,7 @@ tests:
           - exp_labels: {severity: warning}
             exp_annotations:
               summary: "CoinGecko calls succeed but nothing reached the lake in 15 minutes"
-              description: "The exporter, the publisher (or the broker) or the transformers are stalled; check their logs and ETLServiceDown."
+              description: "The exporter, the publisher (Cronicle job etl-publish), the broker or the transformers are stalled; check their logs, ETLServiceDown and ETLPublisherStale."
 
   - name: no progress alert while records flow or while CoinGecko fails
     interval: 1m
@@ -322,3 +324,73 @@ tests:
             exp_annotations:
               summary: "etl_retention has never succeeded"
               description: "Check its Cronicle event (etl-retention or etl-vacuum) and logs/maintenance/etl.log."
+
+  - name: a publish run with dead-letter lines fires until a clean run
+    interval: 1m
+    input_series:
+      - series: 'etl_publish_dlq_lines{job="etl_publisher",instance=""}'
+        values: '0 0 0 0 0 2 2 2 2 2 0 0 0 0 0' # one window had 2 bad lines
+    alert_rule_test:
+      - eval_time: 3m
+        alertname: ETLDeadLetterRecords
+        exp_alerts: []
+      - eval_time: 7m
+        alertname: ETLDeadLetterRecords
+        exp_alerts:
+          - exp_labels: {severity: warning, stage: publish, error_class: "see the window's DLQ object"}
+            exp_annotations:
+              summary: "Records went to the dead-letter zone (publish / see the window's DLQ object)"
+              description: "Inspect data/dlq/; a human is needed."
+      - eval_time: 12m
+        alertname: ETLDeadLetterRecords
+        exp_alerts: []
+
+  - name: publisher stale after fifteen minutes without a success
+    interval: 1m
+    input_series:
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_publisher",instance=""}'
+        values: '60x30' # last success at minute 1, then only failures
+      - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 15m
+        alertname: ETLPublisherStale
+        exp_alerts: [] # 14 minutes old
+      - eval_time: 20m
+        alertname: ETLPublisherStale
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "No successful etl publish in over 15 minutes"
+              description: "Check the etl-publish job in Cronicle (red runs, their logs) and logs/publisher/etl.log; a missing raw _SUCCESS means the exporter is behind."
+
+  - name: no publisher alert while every window publishes
+    interval: 1m
+    input_series:
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_publisher",instance=""}'
+        values: '0 0 0 0 0 300 300 300 300 300 600 600 600 600 600 900 900 900 900 900 1200 1200 1200 1200 1200 1500 1500 1500 1500 1500 1800'
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_retention",instance=""}'
+        values: '0x30' # other jobs do not count
+      - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 30m
+        alertname: ETLPublisherStale
+        exp_alerts: []
+
+  - name: a publisher that never succeeded fires after the startup grace
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
+        values: '0x30'
+    alert_rule_test:
+      - eval_time: 10m
+        alertname: ETLPublisherStale
+        exp_alerts: [] # Prometheus up for 10 minutes: still in the startup grace
+      - eval_time: 20m
+        alertname: ETLPublisherStale
+        exp_alerts:
+          - exp_labels: {severity: critical, job: etl_publisher}
+            exp_annotations:
+              summary: "No successful etl publish in over 15 minutes"
+              description: "Check the etl-publish job in Cronicle (red runs, their logs) and logs/publisher/etl.log; a missing raw _SUCCESS means the exporter is behind."

@@ -8,6 +8,9 @@ logs/
 .s3meta/
 docs/
 deploy/
+# ...except the cronicle stage's entrypoint and provisioning scripts.
+!deploy/cronicle/
+deploy/cronicle/*.test.js
 *.md
 *.test
 *.out

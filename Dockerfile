@@ -17,7 +17,57 @@ RUN --mount=type=cache,target=/go/pkg/mod \
 # and the target directory itself would be created with mode 0755.
 RUN mkdir -p /out/app/logs && chmod 1777 /out/app/logs
 
+# ---- cronicle-build: Cronicle from the pinned upstream release ----
+# Cronicle publishes no official image; it is built from the release tarball.
+FROM node:24.21.0-trixie-slim AS cronicle-build
+ARG CRONICLE_VERSION=0.9.135
+WORKDIR /opt/cronicle
+ADD --checksum=sha256:96dcfebd7682df31134cfea2fa5e0f5d372fcddbfb82488e9ce0a12122367cd1 \
+    https://github.com/jhuckaby/Cronicle/archive/refs/tags/v${CRONICLE_VERSION}.tar.gz /tmp/cronicle.tar.gz
+# --ignore-scripts skips the postinstall hook that registers a systemd service.
+RUN tar -xzf /tmp/cronicle.tar.gz --strip-components 1 \
+ && rm /tmp/cronicle.tar.gz \
+ && npm ci --omit=dev --ignore-scripts --no-audit --no-fund \
+ && node bin/build.js dist \
+ && rm -rf /root/.npm
+
+# ---- cronicle: the scheduler of the batch jobs, with the etl binary ----
+FROM node:24.21.0-trixie-slim AS cronicle
+# procps: Cronicle samples the CPU and memory of running jobs with ps.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends procps \
+ && rm -rf /var/lib/apt/lists/*
+COPY --from=cronicle-build /opt/cronicle /opt/cronicle
+COPY --from=build /out/etl /usr/local/bin/etl
+COPY deploy/cronicle/entrypoint.sh deploy/cronicle/setup-gen.js deploy/cronicle/provision.js /opt/cronicle/etl/
+# Storage (data/) and logs (logs/, including the job files Cronicle uses to
+# record a job cut short by an unclean stop) live on one volume at
+# /var/lib/cronicle. The container runs as the host uid, so the volume root and
+# /app/logs are world-writable (Docker copies the mode into a fresh volume),
+# and setup-gen.js may rewrite conf/setup.json.
+RUN mkdir -p /var/lib/cronicle /app/logs \
+ && chmod 1777 /var/lib/cronicle /app/logs \
+ && rm -rf /opt/cronicle/data /opt/cronicle/logs \
+ && ln -s /var/lib/cronicle/data /opt/cronicle/data \
+ && ln -s /var/lib/cronicle/logs /opt/cronicle/logs \
+ && chmod 0666 /opt/cronicle/conf/setup.json \
+ && chmod 0755 /opt/cronicle/etl/entrypoint.sh
+WORKDIR /opt/cronicle
+# foreground: no daemon fork; echo: the error log and the transaction log
+# (event changes, job starts and ends) to stdout; master: a single server
+# becomes primary at once instead of after a 60 s election timeout.
+ENV CRONICLE_foreground=1 \
+    CRONICLE_echo="Error Transaction" \
+    CRONICLE_color=0 \
+    CRONICLE_master=1 \
+    CRONICLE_queue_dir=logs/queue \
+    CRONICLE_job_data_expire_days=30 \
+    ETL_LOG_DIR=/app/logs
+EXPOSE 3012
+ENTRYPOINT ["/opt/cronicle/etl/entrypoint.sh"]
+
 # ---- runtime: no shell, no package manager, runs as uid 65532 ----
+# The last stage is the default target (docker build . and the etl services).
 FROM gcr.io/distroless/static-debian13:nonroot
 WORKDIR /app
 COPY --from=build /out/etl /etl

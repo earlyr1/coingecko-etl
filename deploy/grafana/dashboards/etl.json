@@ -44,7 +44,7 @@
       "id": 3,
       "type": "stat",
       "title": "DLQ records (24h)",
-      "description": "Records sent to the dead-letter zone in the last 24 hours; anything above 0 needs a human.",
+      "description": "Records the exporter and the transformers sent to the dead-letter zone in the last 24 hours; anything above 0 needs a human. Lines the publish job sends to dlq/stage=publish are in Published per window.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 12, "y": 0, "w": 6, "h": 4},
       "fieldConfig": {"defaults": {"unit": "short", "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}, "color": {"mode": "thresholds"}}, "overrides": []},
@@ -70,7 +70,7 @@
       "id": 5,
       "type": "timeseries",
       "title": "Records per stage",
-      "description": "Throughput of the long-running hops: API calls stored and processed records by outcome.",
+      "description": "Throughput of the continuous hops: CoinGecko calls stored and processed records by outcome. The publisher runs once per window; see Published per window.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 0, "y": 4, "w": 24, "h": 8},
       "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
@@ -98,7 +98,7 @@
       "id": 7,
       "type": "timeseries",
       "title": "End-to-end latency",
-      "description": "Quantiles of fetched_at -> processed object written.",
+      "description": "From fetched_at to the processed object: includes the wait for the window to close (up to ETL_WINDOW) and the one-minute publish grace.",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 12, "y": 12, "w": 12, "h": 8},
       "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
@@ -140,7 +140,7 @@
       "id": 10,
       "type": "timeseries",
       "title": "Dead-letter records",
-      "description": "Records written to the dlq zone by stage and error class.",
+      "description": "Records written to the dlq zone by stage and error class (export and transform stages; the publish job's DLQ lines are in Published per window).",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 0, "y": 28, "w": 12, "h": 8},
       "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "stacking": {"mode": "normal", "group": "A"}}}, "overrides": []},
@@ -201,6 +201,61 @@
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
         {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (stage, schema, result) (rate(etl_schema_validations_total[5m])) * 60", "legendFormat": "{{stage}} {{schema}} {{result}}"}
+      ]
+    },
+    {
+      "id": 15,
+      "type": "stat",
+      "title": "Batch jobs: since last success",
+      "description": "Seconds since each Cronicle job (etl publish, retention, vacuum) last pushed a success to the Pushgateway. ETLPublisherStale fires above 15 minutes, ETLMaintenanceStale above 26 hours.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 52, "w": 8, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "color": {"mode": "thresholds"}}, "overrides": [{"matcher": {"id": "byName", "options": "etl_publisher"}, "properties": [{"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 600}, {"color": "red", "value": 900}]}}]}]},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "justifyMode": "auto", "orientation": "horizontal"},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "time() - max by (job) (etl_job_last_success_timestamp_seconds)", "legendFormat": "{{job}}", "instant": false}
+      ]
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "Published per window",
+      "description": "Records the last successful etl publish run produced to the broker and the lines it sent to dlq/stage=publish (pushed gauges: the value holds until the next successful run).",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 8, "y": 52, "w": 16, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "lineInterpolation": "stepAfter"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "max(etl_publish_records{job=\"etl_publisher\"})", "legendFormat": "published records"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "max(etl_publish_dlq_lines{job=\"etl_publisher\"})", "legendFormat": "dlq lines"}
+      ]
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "Batch job runs",
+      "description": "Duration and result (1 = success, 0 = failure) of the last run of each Cronicle job.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 0, "y": 60, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "lineInterpolation": "stepAfter"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "max by (job) (etl_job_duration_seconds)", "legendFormat": "{{job}} duration (s)"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "max by (job) (etl_job_success)", "legendFormat": "{{job}} success"}
+      ]
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "Retention",
+      "description": "What the last etl maintenance retention run removed.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 12, "y": 60, "w": 12, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "lineInterpolation": "stepAfter"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "max(etl_retention_partitions_dropped{job=\"etl_retention\"})", "legendFormat": "dedup claim partitions dropped"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "max(etl_retention_batches_deleted{job=\"etl_retention\"})", "legendFormat": "written consumer batches deleted"}
       ]
     }
   ]

@@ -99,10 +99,13 @@ func NewMetrics(reg prometheus.Registerer) *Metrics {
 			Help:    "Transformer batch processing time (TX1, PUTs, TX2).",
 			Buckets: prometheus.ExponentialBuckets(0.01, 2, 12), // 10ms .. ~20s
 		}),
+		// The latency includes the wait for the raw window to close (up to
+		// ETL_WINDOW) and the publish grace: the buckets are dense up to 10
+		// minutes, so a p95 is not interpolated across one wide bucket.
 		E2ELatency: f.NewHistogram(prometheus.HistogramOpts{
 			Name:    "etl_e2e_latency_seconds",
 			Help:    "From fetched_at to the processed object being written.",
-			Buckets: []float64{1, 2, 5, 10, 15, 30, 60, 120, 300, 600, 1800},
+			Buckets: []float64{5, 15, 30, 60, 120, 180, 240, 300, 360, 420, 480, 600, 900, 1800, 3600},
 		}),
 	}
 }
