@@ -53,11 +53,13 @@ RUN mkdir -p /var/lib/cronicle /app/logs \
  && chmod 0666 /opt/cronicle/conf/setup.json \
  && chmod 0755 /opt/cronicle/etl/entrypoint.sh
 WORKDIR /opt/cronicle
-# foreground: no daemon fork; echo: the error log and the transaction log
-# (event changes, job starts and ends) to stdout; master: a single server
-# becomes primary at once instead of after a 60 s election timeout.
+# foreground: no daemon fork; echo: only the error log to stdout (the
+# transaction log would print the request headers of every API call, the
+# provisioning X-API-Key included; job results are in the UI and in
+# logs/<service>/etl.log); master: a single server becomes primary at once
+# instead of after a 60 s election timeout.
 ENV CRONICLE_foreground=1 \
-    CRONICLE_echo="Error Transaction" \
+    CRONICLE_echo="Error" \
     CRONICLE_color=0 \
     CRONICLE_master=1 \
     CRONICLE_queue_dir=logs/queue \

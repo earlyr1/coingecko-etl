@@ -213,13 +213,73 @@ tests:
         values: '1x10'
       - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
         values: '1x10'
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1x10'
       - series: 'up{job="prometheus",instance="localhost:9090"}'
         values: '0x10' # not a pipeline service
-      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
-        values: '0x10' # not a pipeline service either
     alert_rule_test:
       - eval_time: 10m
         alertname: ETLServiceDown
+        exp_alerts: []
+
+  - name: a Pushgateway outage is ETLServiceDown, not a stale publisher
+    interval: 1m
+    input_series:
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1x19 0x21 1x18' # fails its scrapes from minute 20 to 41
+      - series: 'up{job="fetcher",instance="10.0.0.4:8080"}'
+        values: '1x60'
+      - series: 'up{job="exporter",instance="10.0.0.5:8080"}'
+        values: '1x60'
+      - series: 'up{job="transformer",instance="10.0.0.7:8080"}'
+        values: '1x60'
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_publisher",instance=""}'
+        # Publishes succeed every 5 minutes throughout. The scrape failure
+        # marks the series stale; the pushes of minutes 21-41 are lost, so the
+        # Pushgateway comes back with minute 16's success until the run of
+        # minute 46 pushes again.
+        values: '0 60x4 360x4 660x4 960x3 stale _x21 960x3 2760x4 3060x4 3360x4'
+      - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
+        values: '0x60'
+    alert_rule_test:
+      - eval_time: 25m
+        alertname: ETLServiceDown
+        exp_alerts:
+          - exp_labels: {severity: critical, job: pushgateway, instance: "pushgateway:9091"}
+            exp_annotations:
+              summary: "pushgateway is down (pushgateway:9091)"
+              description: "Prometheus cannot scrape it, or Docker DNS knows no running container for it. Check docker compose ps and its log."
+      - eval_time: 25m
+        alertname: ETLPublisherStale
+        exp_alerts: []
+      - eval_time: 41m
+        alertname: ETLPublisherStale
+        exp_alerts: []
+      - eval_time: 45m
+        alertname: ETLPublisherStale
+        exp_alerts: [] # back, but with minute 16's success
+      - eval_time: 50m
+        alertname: ETLServiceDown
+        exp_alerts: []
+      - eval_time: 60m
+        alertname: ETLPublisherStale
+        exp_alerts: []
+
+  - name: maintenance series lost in a long Pushgateway outage do not count as never succeeded
+    interval: 1m
+    input_series:
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1x10 0x1700'
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_retention",instance=""}'
+        values: '0x10 stale'
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_vacuum",instance=""}'
+        values: '0x10 stale'
+    alert_rule_test:
+      - eval_time: 27h
+        alertname: ETLMaintenanceNeverSucceeded
+        exp_alerts: []
+      - eval_time: 27h
+        alertname: ETLMaintenanceStale
         exp_alerts: []
 
   - name: fetches succeed but no records reach the lake
@@ -229,6 +289,8 @@ tests:
         values: '0+2x30'
       - series: 'etl_records_total{job="transformer",instance="10.0.0.7:8080",dataset="market_snapshot",outcome="written"}'
         values: '500x30' # flat: the publisher or the broker is stuck
+      - series: 'process_start_time_seconds{job="transformer",instance="10.0.0.7:8080"}'
+        values: '-3600x30' # up for an hour
     alert_rule_test:
       - eval_time: 4m
         alertname: ETLPipelineNotProgressing
@@ -246,6 +308,8 @@ tests:
     input_series:
       - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="200"}'
         values: '0+2x30'
+      - series: 'process_start_time_seconds{job="transformer",instance="10.0.0.7:8080"}'
+        values: '-3600x30' # up for an hour
     alert_rule_test:
       - eval_time: 20m
         alertname: ETLPipelineNotProgressing
@@ -262,6 +326,8 @@ tests:
         values: '0+2x30'
       - series: 'etl_records_total{job="transformer",instance="10.0.0.7:8080",dataset="market_snapshot",outcome="written"}'
         values: '0+100x30'
+      - series: 'process_start_time_seconds{job="transformer",instance="10.0.0.7:8080"}'
+        values: '-3600x30' # up for an hour
     alert_rule_test:
       - eval_time: 20m
         alertname: ETLPipelineNotProgressing
@@ -274,8 +340,61 @@ tests:
         values: '0+2x30'
       - series: 'etl_records_total{job="transformer",instance="10.0.0.7:8080",dataset="market_snapshot",outcome="written"}'
         values: '500x30'
+      - series: 'process_start_time_seconds{job="transformer",instance="10.0.0.7:8080"}'
+        values: '-3600x30' # up for an hour
     alert_rule_test:
       - eval_time: 20m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: []
+
+  - name: no progress alert on a fresh stack before its second processed window
+    interval: 1m
+    input_series:
+      - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="200"}'
+        values: '0+2x30'
+      - series: 'etl_records_total{job="transformer",instance="10.0.0.7:8080",dataset="market_snapshot",outcome="written"}'
+        values: '_x6 120x4 240x4 360x4 480x10' # 5m windows: the first processed at minute 6, the next at minute 11
+      - series: 'process_start_time_seconds{job="transformer",instance="10.0.0.7:8080"}'
+        values: '0x30' # started with the stack
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: []
+      - eval_time: 10m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: []
+      - eval_time: 30m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: []
+
+  - name: a fresh stack whose transformer never writes fires after the start grace
+    interval: 1m
+    input_series:
+      - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="200"}'
+        values: '0+2x30'
+      - series: 'process_start_time_seconds{job="transformer",instance="10.0.0.7:8080"}'
+        values: '0x30'
+      - series: 'process_start_time_seconds{job="transformer",instance="10.0.0.8:8080"}'
+        values: '_x10 600x20' # the second replica restarted at minute 10: the oldest one counts
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts: [] # up 15 minutes at minute 15, then pending for 5m
+      - eval_time: 22m
+        alertname: ETLPipelineNotProgressing
+        exp_alerts:
+          - exp_labels: {severity: warning}
+            exp_annotations:
+              summary: "CoinGecko calls succeed but nothing reached the lake in 15 minutes"
+              description: "The exporter, the publisher (Cronicle job etl-publish), the broker or the transformers are stalled; check their logs, ETLServiceDown and ETLPublisherStale."
+
+  - name: no progress alert while no transformer runs (ETLServiceDown covers that)
+    interval: 1m
+    input_series:
+      - series: 'etl_api_requests_total{job="fetcher",instance="10.0.0.4:8080",endpoint="coins_markets",status="200"}'
+        values: '0+2x30'
+    alert_rule_test:
+      - eval_time: 25m
         alertname: ETLPipelineNotProgressing
         exp_alerts: []
 
@@ -352,6 +471,8 @@ tests:
         values: '60x30' # last success at minute 1, then only failures
       - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
         values: '0x30'
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1x30'
     alert_rule_test:
       - eval_time: 15m
         alertname: ETLPublisherStale
@@ -369,20 +490,42 @@ tests:
     input_series:
       - series: 'etl_job_last_success_timestamp_seconds{job="etl_publisher",instance=""}'
         values: '0 0 0 0 0 300 300 300 300 300 600 600 600 600 600 900 900 900 900 900 1200 1200 1200 1200 1200 1500 1500 1500 1500 1500 1800'
-      - series: 'etl_job_last_success_timestamp_seconds{job="etl_retention",instance=""}'
-        values: '0x30' # other jobs do not count
       - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
         values: '0x30'
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1x30'
     alert_rule_test:
       - eval_time: 30m
         alertname: ETLPublisherStale
         exp_alerts: []
+
+  - name: a recent success of another job does not hide a stale publisher
+    interval: 1m
+    input_series:
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_publisher",instance=""}'
+        values: '60x30' # last success at minute 1
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_retention",instance=""}'
+        values: '0x14 900x15' # retention succeeded at minute 15, after the publisher
+      - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
+        values: '0x30'
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1x30'
+    alert_rule_test:
+      - eval_time: 20m
+        alertname: ETLPublisherStale
+        exp_alerts:
+          - exp_labels: {severity: critical}
+            exp_annotations:
+              summary: "No successful etl publish in over 15 minutes"
+              description: "Check the etl-publish job in Cronicle (red runs, their logs) and logs/publisher/etl.log; a missing raw _SUCCESS means the exporter is behind."
 
   - name: a publisher that never succeeded fires after the startup grace
     interval: 1m
     input_series:
       - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
         values: '0x30'
+      - series: 'up{job="pushgateway",instance="pushgateway:9091"}'
+        values: '1x30' # up, but nothing was ever pushed
     alert_rule_test:
       - eval_time: 10m
         alertname: ETLPublisherStale

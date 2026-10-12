@@ -8,31 +8,92 @@ const BASE = `http://127.0.0.1:${PORT}/api/app`;
 const MARKER = '/tmp/etl-provisioned'; // read by the compose healthcheck
 const GRACE_MINUTES = 1; // the publisher's fixed grace after a window end (window.PublishGrace)
 
-// parseGoDuration accepts Go's time.ParseDuration syntax (5m, 1h, 90s, 1m30s)
-// and returns milliseconds.
-function parseGoDuration(raw) {
-  const unit = { ns: 1e-6, us: 1e-3, 'µs': 1e-3, ms: 1, s: 1e3, m: 6e4, h: 3.6e6 };
-  if (typeof raw !== 'string') throw new Error(`invalid duration ${JSON.stringify(raw)}`);
-  // Go accepts one leading '+'. A '-' is rejected here, which is the same
-  // outcome as in Go for ETL_WINDOW: no window is negative.
-  const s = raw.startsWith('+') ? raw.slice(1) : raw;
-  if (s === '') throw new Error(`invalid duration ${JSON.stringify(raw)}`);
-  if (s === '0') return 0;
-  const re = /(\d+(?:\.\d*)?|\.\d+)(ns|us|µs|ms|s|m|h)/gy;
-  let ms = 0, pos = 0, m;
-  while ((m = re.exec(s)) !== null) { ms += parseFloat(m[1]) * unit[m[2]]; pos = re.lastIndex; }
-  if (pos !== s.length) throw new Error(`invalid duration ${JSON.stringify(raw)}`);
-  return ms;
+// The exporter and this script must agree on ETL_WINDOW, so it is read the
+// way internal/config reads it: strings.TrimSpace, a blank value is the
+// default, then time.ParseDuration and window.Validate.
+
+// goTrimSpace is strings.TrimSpace: it strips the runes unicode.IsSpace
+// reports (String.prototype.trim differs: it strips U+FEFF but not U+0085).
+const GO_SPACE = '\\t\\n\\v\\f\\r \\u0085\\u00a0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000';
+const GO_TRIM = new RegExp(`^[${GO_SPACE}]+|[${GO_SPACE}]+$`, 'g');
+function goTrimSpace(s) {
+  return String(s ?? '').replace(GO_TRIM, '');
 }
 
-// windowMinutes applies the ETL_WINDOW rule of internal/window: whole minutes,
-// 1m to 60m, and a divisor of 60m.
+// parseGoDuration is a port of Go's time.ParseDuration (same syntax, units,
+// overflow checks and float step for fractions) and returns nanoseconds as a
+// BigInt.
+const MAX_DURATION = 1n << 63n;
+const UNITS = new Map([
+  ['ns', 1n], ['us', 1000n], ['µs', 1000n], ['μs', 1000n], // micro sign, Greek mu
+  ['ms', 1000000n], ['s', 1000000000n], ['m', 60000000000n], ['h', 3600000000000n],
+]);
+function parseGoDuration(orig) {
+  const invalid = (why = 'invalid duration') => new Error(`${why} ${JSON.stringify(orig)}`);
+  if (typeof orig !== 'string') throw invalid();
+  const isDigit = (c) => c >= '0' && c <= '9';
+  let s = orig, neg = false, d = 0n;
+  if (s !== '' && (s[0] === '-' || s[0] === '+')) { neg = s[0] === '-'; s = s.slice(1); }
+  if (s === '0') return 0n;
+  if (s === '') throw invalid();
+  while (s !== '') {
+    if (!(s[0] === '.' || isDigit(s[0]))) throw invalid();
+    let i = 0, v = 0n; // leadingInt
+    for (; i < s.length && isDigit(s[i]); i++) {
+      if (v > MAX_DURATION / 10n) throw invalid();
+      v = v * 10n + BigInt(s[i]);
+      if (v > MAX_DURATION) throw invalid();
+    }
+    const pre = i > 0;
+    s = s.slice(i);
+    let f = 0n, scale = 1, post = false;
+    if (s !== '' && s[0] === '.') { // leadingFraction: stops gaining precision on overflow
+      s = s.slice(1);
+      let j = 0, overflow = false;
+      for (; j < s.length && isDigit(s[j]); j++) {
+        if (overflow) continue;
+        if (f > (MAX_DURATION - 1n) / 10n) { overflow = true; continue; }
+        const y = f * 10n + BigInt(s[j]);
+        if (y > MAX_DURATION) { overflow = true; continue; }
+        f = y;
+        scale *= 10;
+      }
+      post = j > 0;
+      s = s.slice(j);
+    }
+    if (!pre && !post) throw invalid();
+    let k = 0;
+    while (k < s.length && !(s[k] === '.' || isDigit(s[k]))) k++;
+    if (k === 0) throw invalid('missing unit in duration');
+    const unit = UNITS.get(s.slice(0, k));
+    if (unit === undefined) throw invalid(`unknown unit ${JSON.stringify(s.slice(0, k))} in duration`);
+    s = s.slice(k);
+    if (v > MAX_DURATION / unit) throw invalid();
+    v *= unit;
+    if (f > 0n) {
+      v += BigInt(Math.trunc(Number(f) * (Number(unit) / scale)));
+      if (v > MAX_DURATION) throw invalid();
+    }
+    d += v;
+    if (d > MAX_DURATION) throw invalid();
+  }
+  if (neg) return -d;
+  if (d > MAX_DURATION - 1n) throw invalid();
+  return d;
+}
+
+// windowMinutes applies window.Validate to a trimmed, non-blank ETL_WINDOW:
+// whole minutes, 1m to 60m, and a divisor of 60m.
 function windowMinutes(raw) {
-  const min = parseGoDuration(raw) / 6e4;
-  if (!Number.isInteger(min) || min < 1 || min > 60 || 60 % min !== 0) {
+  const min = 60000000000n, hour = 60n * min;
+  let size;
+  try { size = parseGoDuration(raw); } catch (e) {
+    throw new Error(`ETL_WINDOW=${raw}: not a Go duration (examples: 1m, 5m, 15m): ${e.message}`);
+  }
+  if (size < min || size > hour || size % min !== 0n || hour % size !== 0n) {
     throw new Error(`ETL_WINDOW=${raw}: must be whole minutes, between 1m and 60m, and divide 60m`);
   }
-  return min;
+  return Number(size / min);
 }
 
 // publishMinutes lists the minutes of the hour at which the publisher runs:
@@ -47,18 +108,39 @@ function shell(cmd) {
   return { script: `#!/bin/sh\nexec ${cmd}\n`, annotate: 0, json: 0 };
 }
 
-// timeZone returns tz if it is an IANA time zone name the runtime knows.
-function timeZone(tz) {
-  try { new Intl.DateTimeFormat('en-US', { timeZone: tz }); } catch (_) {
-    throw new Error(`ETL_SCHEDULE_TZ=${tz}: not an IANA time zone name`);
+// zoneValidator returns a check for time zone names. Cronicle schedules with
+// its bundled moment-timezone (tz data 2021e in v0.9.135), which has no zone
+// for newer names such as Europe/Kyiv and then schedules in UTC with only a
+// console warning, so inside the Cronicle image that library decides. The plain Node image of
+// make cronicle-test has no Cronicle: Intl decides there.
+const CRONICLE_MOMENT = '/opt/cronicle/node_modules/moment-timezone';
+function zoneValidator(load = () => require(CRONICLE_MOMENT)) {
+  let moment;
+  try { moment = load(); } catch (e) {
+    if (e.code !== 'MODULE_NOT_FOUND') throw e;
+    return (name) => {
+      try { new Intl.DateTimeFormat('en-US', { timeZone: name }); return true; } catch (_) { return false; }
+    };
+  }
+  return (name) => moment.tz.zone(name) !== null;
+}
+
+// timeZone returns the trimmed ETL_SCHEDULE_TZ (blank: UTC) if it is a time
+// zone name the scheduler knows. Offsets such as +03:00 are refused: Intl
+// accepts them, moment-timezone does not.
+function timeZone(raw, isZone = zoneValidator()) {
+  const tz = goTrimSpace(raw) || 'UTC';
+  if (/^[+-]/.test(tz) || !isZone(tz)) {
+    throw new Error(`ETL_SCHEDULE_TZ=${tz}: not an IANA time zone name the scheduler knows (Cronicle bundles tz data 2021e)`);
   }
   return tz;
 }
 
-// events returns the desired events for the given environment.
-function events(env) {
-  const n = windowMinutes(env.ETL_WINDOW || '5m');
-  const tz = timeZone(env.ETL_SCHEDULE_TZ || 'UTC');
+// events returns the desired events for the given environment. isZone
+// replaces the time zone check in tests.
+function events(env, { isZone } = {}) {
+  const n = windowMinutes(goTrimSpace(env.ETL_WINDOW) || '5m');
+  const tz = timeZone(env.ETL_SCHEDULE_TZ, isZone);
   const common = {
     enabled: 1, category: 'general', target: 'maingrp', plugin: 'shellplug',
     max_children: 1, catch_up: 1, multiplex: 0, detached: 0, queue: 0,
@@ -81,6 +163,12 @@ function events(env) {
   ];
 }
 
+// api calls Cronicle with the provisioning API key. Cronicle stores that key
+// in every event it creates (event.api_key), and its job_launch_failure web
+// hook posts the whole event, so a CRONICLE_WEB_HOOK receiver sees the key. An
+// admin login would avoid that, but a password changed in the UI (as the
+// README advises) would then fail at every restart, and the sixth failed login
+// in an hour locks the admin account (max_failed_logins_per_hour = 5).
 async function api(name, body) {
   const res = await fetch(`${BASE}/${name}/v1`, {
     method: 'POST',
@@ -129,4 +217,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { parseGoDuration, windowMinutes, publishMinutes, timeZone, events };
+module.exports = { goTrimSpace, parseGoDuration, windowMinutes, publishMinutes, zoneValidator, timeZone, events };

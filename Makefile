@@ -46,11 +46,13 @@ alerts-test:
 	  prom/prometheus:v3.15.0 test rules alerts_test.yml
 
 # Unit-test the Cronicle provisioning script (schedule from ETL_WINDOW), and check
-# that compose hands one ETL_WINDOW to the exporter, the transformers and the scheduler.
+# that compose hands one ETL_WINDOW to the exporter, the transformers and the
+# scheduler, and starts the scheduler only once the exporter is healthy (its
+# first tick closes the window the first etl-publish run reads).
 cronicle-test:
 	docker run --rm -v "$(CURDIR)/deploy/cronicle:/w:ro" -w /w $(NODE_IMAGE) node --test
 	ETL_WINDOW=15m $(COMPOSE) config --format json \
-	  | jq -e '[.services.exporter, .services.transformer, .services.cronicle] | all(.environment.ETL_WINDOW == "15m")' >/dev/null
+	  | jq -e '([.services.exporter, .services.transformer, .services.cronicle] | all(.environment.ETL_WINDOW == "15m")) and .services.cronicle.depends_on.exporter.condition == "service_healthy"' >/dev/null
 
 up:
 	mkdir -p data logs .s3meta
@@ -60,17 +62,20 @@ up:
 down:
 	$(COMPOSE) down
 
-# Wipes everything: the containers (orphans of services this file does not
-# define included), the named volumes (Postgres,
-# Redpanda, Prometheus, Grafana, Pushgateway, Cronicle), the lake and the logs.
-# Object names carry only time, so the lake may also be kept when the stack is re-created.
+# Wipes everything: the containers (including those of services this file no
+# longer defines), the named volumes (Postgres, Redpanda, Prometheus, Grafana,
+# Pushgateway, Cronicle), the lake and the logs. .env is kept.
 clean:
 	$(COMPOSE) down -v --remove-orphans && rm -rf data logs .s3meta
 
 # One-minute windows, so a window is exported, published by Cronicle and
-# processed within the wait. The variable reaches `up` (and compose) too.
+# processed within the wait. ETL_WINDOW is fixed for the lifetime of a stack,
+# so demo first runs `clean`: it WIPES the previous stack (containers, volumes,
+# the lake and the logs), then starts a new one with ETL_WINDOW=1m (the
+# variable reaches `up` and compose). Back to .env's window: make clean && make up.
 demo: export ETL_WINDOW = 1m
-demo: up
+demo: clean
+	@$(MAKE) --no-print-directory up
 	@echo "Pipeline started with ETL_WINDOW=1m; waiting up to $(DEMO_TIMEOUT)s for processed records..."
 	@for i in $$(seq $(DEMO_TIMEOUT)); do \
 	  if find data/processed -type f -name '*.jsonl' 2>/dev/null | grep -q .; then break; fi; \

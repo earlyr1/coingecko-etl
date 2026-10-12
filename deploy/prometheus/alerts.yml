@@ -89,9 +89,12 @@ groups:
         # Prometheus finds the containers through Docker DNS: a stopped or
         # crash-looping container has no target at all (absent), a hung one
         # fails its scrape (up == 0). The publisher is a batch job (etl
-        # publish), not a service: ETLPublisherStale covers it.
+        # publish), not a service: ETLPublisherStale covers it. The Pushgateway
+        # is a static target, so it is down when its scrape fails; while it is
+        # down the batch jobs' pushed metrics are missing, and
+        # ETLPublisherStale and ETLMaintenanceNeverSucceeded hold back.
         expr: |
-          up{job=~"fetcher|exporter|transformer"} == 0
+          up{job=~"fetcher|exporter|transformer|pushgateway"} == 0
           or absent(up{job="fetcher"})
           or absent(up{job="exporter"})
           or absent(up{job="transformer"})
@@ -106,10 +109,19 @@ groups:
         # CoinGecko calls succeed but no transformer counted a record (written,
         # duplicate, rejected or dlq) in 15 minutes. "or vector(0)": a
         # transformer that never wrote a batch has no etl_records_total series.
+        # A new transformer's series starts at its first batch, and increase()
+        # skips a series' first sample, so a fresh stack shows progress only
+        # at the second processed window (about 11 minutes with 5m windows):
+        # the rule waits until the oldest running transformer has been up for
+        # 15 minutes. With no transformer at all, ETLServiceDown fires instead.
+        # The 15-minute range assumes ETL_WINDOW of 15m or less; longer
+        # windows leave ranges with no batch in them.
         expr: |
           sum(increase(etl_api_requests_total{status="200"}[15m])) > 0
           and
           (sum(increase(etl_records_total[15m])) or vector(0)) == 0
+          and on()
+          (time() - min(process_start_time_seconds{job="transformer"}) > 900)
         for: 5m
         labels:
           severity: warning
@@ -156,11 +168,17 @@ groups:
 
       - alert: ETLMaintenanceNeverSucceeded
         # A fresh stack runs maintenance at 11:00/11:30 only: absent for 26 hours
-        # means it never succeeded.
+        # means it never succeeded. The pushed series also vanish while the
+        # Pushgateway cannot be scraped, so the rule is silent from its first
+        # failed scrape until 15 minutes after it is back (ETLServiceDown
+        # names the pushgateway meanwhile).
         expr: |
-          absent(etl_job_last_success_timestamp_seconds{job="etl_retention"})
-          or
-          absent(etl_job_last_success_timestamp_seconds{job="etl_vacuum"})
+          (
+            absent(etl_job_last_success_timestamp_seconds{job="etl_retention"})
+            or
+            absent(etl_job_last_success_timestamp_seconds{job="etl_vacuum"})
+          )
+          unless on() (min_over_time(up{job="pushgateway"}[15m]) == 0)
         for: 26h
         labels:
           severity: warning
@@ -174,14 +192,21 @@ groups:
         # branch covers a stack where no publish ever succeeded; it waits until
         # Prometheus has been up for 15 minutes (startup grace; `for` would also
         # delay the first branch). Pushgateway persistence keeps the series
-        # across restarts.
+        # across restarts. A Pushgateway outage is not a stale publisher: the
+        # series vanish while it cannot be scraped, and the successes pushed
+        # meanwhile are lost, so it comes back with an old timestamp until the
+        # next run. The rule is therefore silent while any scrape of the
+        # pushgateway in the last 15 minutes failed (ETLServiceDown names it).
         expr: |
-          time() - max(etl_job_last_success_timestamp_seconds{job="etl_publisher"}) > 900
-          or
           (
-            absent(etl_job_last_success_timestamp_seconds{job="etl_publisher"})
-            and on() (time() - max(process_start_time_seconds{job="prometheus"}) > 900)
+            time() - max(etl_job_last_success_timestamp_seconds{job="etl_publisher"}) > 900
+            or
+            (
+              absent(etl_job_last_success_timestamp_seconds{job="etl_publisher"})
+              and on() (time() - max(process_start_time_seconds{job="prometheus"}) > 900)
+            )
           )
+          unless on() (min_over_time(up{job="pushgateway"}[15m]) == 0)
         for: 1m
         labels:
           severity: critical

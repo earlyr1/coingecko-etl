@@ -219,7 +219,10 @@ services:
       # provision.js uses the API key at every start.
       CRONICLE_ADMIN_PASSWORD: ${CRONICLE_ADMIN_PASSWORD:-admin}
       CRONICLE_API_KEY: ${CRONICLE_API_KEY:-etl_local_dev_api_key_0001}
-      # Optional: URL Cronicle POSTs to at the start and end of every job.
+      # Optional: URL Cronicle POSTs to at the start and end of every job, and
+      # when a scheduled launch fails. That launch-failure POST carries the
+      # whole stored event, which includes CRONICLE_API_KEY (Cronicle records
+      # the key an event was created with), so the receiver must be trusted.
       CRONICLE_WEB_HOOK: ${CRONICLE_WEB_HOOK:-}
       CRONICLE_base_app_url: http://localhost:${CRONICLE_PORT:-3012}
     volumes:
