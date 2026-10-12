@@ -219,3 +219,92 @@ func TestPublishCommand(t *testing.T) {
 		t.Fatalf("log lacks the push failure:\n%s", l)
 	}
 }
+
+// TestMaintenanceJobs runs `etl maintenance retention` and `etl maintenance
+// vacuum` in-process against a migrated Postgres with a fake Pushgateway.
+func TestMaintenanceJobs(t *testing.T) {
+	dsn := testutil.StartPostgres(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	pool, err := pg.Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer pool.Close()
+	if err := pg.Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	// Two expired claims partitions (and their raw twins, which stay).
+	if err := pg.EnsurePartitions(ctx, pool, time.Now().AddDate(0, 0, -30), 0); err != nil {
+		t.Fatal(err)
+	}
+
+	logDir := t.TempDir()
+	t.Setenv("ETL_LOG_DIR", logDir)
+	t.Setenv("ETL_LOG_PER_HOST", "")
+	t.Setenv("ETL_PG_DSN", dsn)
+	rec, url := newPushRecorder(t)
+	t.Setenv("ETL_PUSHGATEWAY_URL", url)
+	readLog := func() string {
+		b, err := os.ReadFile(filepath.Join(logDir, "maintenance", "etl.log"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(b)
+	}
+	maint := func(job string) int {
+		var stderr bytes.Buffer
+		code := run([]string{"maintenance", job}, &bytes.Buffer{}, &stderr)
+		if stderr.Len() > 0 {
+			t.Logf("stderr: %s", stderr.String())
+		}
+		return code
+	}
+
+	if code := maint("retention"); code != 0 {
+		t.Fatalf("retention: exit %d, want 0\n%s", code, readLog())
+	}
+	if code := maint("vacuum"); code != 0 {
+		t.Fatalf("vacuum: exit %d, want 0\n%s", code, readLog())
+	}
+	got := rec.all()
+	if len(got) != 2 {
+		t.Fatalf("got %d pushes, want 2: %q", len(got), got)
+	}
+	for _, want := range []string{"POST /metrics/job/etl_retention\n", "\netl_job_success 1\n",
+		"\netl_retention_partitions_dropped 2\n", "\netl_retention_batches_deleted 0\n",
+		"\netl_job_last_success_timestamp_seconds "} {
+		if !strings.Contains(got[0], want) {
+			t.Errorf("retention push lacks %q:\n%s", want, got[0])
+		}
+	}
+	for _, want := range []string{"POST /metrics/job/etl_vacuum\n", "\netl_job_success 1\n"} {
+		if !strings.Contains(got[1], want) {
+			t.Errorf("vacuum push lacks %q:\n%s", want, got[1])
+		}
+	}
+	if strings.Contains(got[1], "etl_retention_") {
+		t.Errorf("vacuum push carries retention gauges:\n%s", got[1])
+	}
+	logged := readLog()
+	for _, job := range []string{"etl_retention", "etl_vacuum"} {
+		if !strings.Contains(logged, `"msg":"job finished","service":"maintenance","job":"`+job+`"`) {
+			t.Errorf("log lacks job finished for %s:\n%s", job, logged)
+		}
+	}
+
+	// A dead Pushgateway is logged and does not fail the job.
+	t.Setenv("ETL_PUSHGATEWAY_URL", "http://"+closedAddr(t))
+	if code := maint("vacuum"); code != 0 {
+		t.Fatalf("vacuum with the Pushgateway down: exit %d, want 0", code)
+	}
+	var failed []string
+	for line := range strings.SplitSeq(readLog(), "\n") {
+		if strings.Contains(line, `"level":"ERROR","msg":"pushgateway push failed"`) {
+			failed = append(failed, line)
+		}
+	}
+	if len(failed) != 1 || strings.Count(failed[0], `"job":"etl_vacuum"`) != 1 {
+		t.Fatalf("push failure records = %q, want one carrying job=etl_vacuum once", failed)
+	}
+}

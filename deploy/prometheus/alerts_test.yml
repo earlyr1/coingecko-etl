@@ -276,3 +276,49 @@ tests:
       - eval_time: 20m
         alertname: ETLPipelineNotProgressing
         exp_alerts: []
+
+  - name: maintenance stale after 26 hours, per job
+    interval: 1m
+    input_series:
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_retention",instance=""}'
+        values: '0x1700' # last success at time 0
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_vacuum",instance=""}'
+        values: '0+60x1700' # succeeds all the time
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: ETLMaintenanceStale
+        exp_alerts: []
+      - eval_time: 27h
+        alertname: ETLMaintenanceStale
+        exp_alerts:
+          - exp_labels: {severity: warning, job: etl_retention}
+            exp_annotations:
+              summary: "etl_retention has not succeeded for over 26 hours"
+              description: "Check its Cronicle event (etl-retention or etl-vacuum) and logs/maintenance/etl.log."
+
+  - name: no stale maintenance alert before the first run
+    interval: 1m
+    input_series:
+      - series: 'process_start_time_seconds{job="prometheus",instance="localhost:9090"}'
+        values: '0x1700'
+    alert_rule_test:
+      - eval_time: 27h
+        alertname: ETLMaintenanceStale
+        exp_alerts: []
+
+  - name: maintenance that never succeeded
+    interval: 1m
+    input_series:
+      - series: 'etl_job_last_success_timestamp_seconds{job="etl_vacuum",instance=""}'
+        values: '0+60x1700'
+    alert_rule_test:
+      - eval_time: 25h
+        alertname: ETLMaintenanceNeverSucceeded
+        exp_alerts: []
+      - eval_time: 26h1m
+        alertname: ETLMaintenanceNeverSucceeded
+        exp_alerts:
+          - exp_labels: {severity: warning, job: etl_retention}
+            exp_annotations:
+              summary: "etl_retention has never succeeded"
+              description: "Check its Cronicle event (etl-retention or etl-vacuum) and logs/maintenance/etl.log."

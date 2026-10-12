@@ -322,3 +322,157 @@ func partitionsOf(t *testing.T, pool *pgxpool.Pool, parent string) []string {
 	}
 	return out
 }
+
+// migratedPool starts a Postgres, migrates it and creates the daily
+// partitions [day-1, day+daysAhead].
+func migratedPool(t *testing.T, day time.Time, daysAhead int) (*pgxpool.Pool, string) {
+	t.Helper()
+	dsn := testutil.StartPostgres(t)
+	ctx := context.Background()
+	pool, err := Connect(ctx, dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+	if err := Migrate(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if err := EnsurePartitions(ctx, pool, day, daysAhead); err != nil {
+		t.Fatal(err)
+	}
+	return pool, dsn
+}
+
+func utcDate(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
+
+func TestListClaimPartitions(t *testing.T) {
+	pool, dsn := migratedPool(t, utcDate(2026, 10, 10), 1)
+	ctx := context.Background()
+	if _, err := pool.Exec(ctx, `CREATE TABLE pipeline.claims_legacy PARTITION OF pipeline.dedup_claims
+		FOR VALUES FROM ('2026-09-01') TO ('2026-09-02')`); err != nil {
+		t.Fatal(err)
+	}
+	want := []ClaimPartition{
+		{"pipeline", "claims_legacy", utcDate(2026, 9, 1), utcDate(2026, 9, 2)},
+		{"pipeline", "dedup_claims_p20261009", utcDate(2026, 10, 9), utcDate(2026, 10, 10)},
+		{"pipeline", "dedup_claims_p20261010", utcDate(2026, 10, 10), utcDate(2026, 10, 11)},
+		{"pipeline", "dedup_claims_p20261011", utcDate(2026, 10, 11), utcDate(2026, 10, 12)},
+	}
+	check := func(t *testing.T, pool *pgxpool.Pool, wantSkipped []string) {
+		t.Helper()
+		parts, skipped, err := ListClaimPartitions(ctx, pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(parts) != len(want) {
+			t.Fatalf("parts = %+v, want %+v", parts, want)
+		}
+		for i, p := range parts {
+			w := want[i]
+			if p.Schema != w.Schema || p.Name != w.Name || !p.From.Equal(w.From) || !p.To.Equal(w.To) ||
+				p.From.Location() != time.UTC || p.To.Location() != time.UTC {
+				t.Errorf("parts[%d] = %+v, want %+v (UTC)", i, p, w)
+			}
+		}
+		if strings.Join(skipped, ",") != strings.Join(wantSkipped, ",") {
+			t.Errorf("skipped = %q, want %q", skipped, wantSkipped)
+		}
+	}
+	check(t, pool, nil)
+	if got := want[0].QualifiedName(); got != `"pipeline"."claims_legacy"` {
+		t.Errorf("QualifiedName = %s", got)
+	}
+
+	t.Run("a DEFAULT partition is skipped", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `CREATE TABLE pipeline.claims_default PARTITION OF pipeline.dedup_claims DEFAULT`); err != nil {
+			t.Fatal(err)
+		}
+		check(t, pool, []string{"pipeline.claims_default"})
+		if _, err := pool.Exec(ctx, `DROP TABLE pipeline.claims_default`); err != nil {
+			t.Fatal(err)
+		}
+	})
+
+	t.Run("bounds parse under a non-ISO DateStyle", func(t *testing.T) {
+		if _, err := pool.Exec(ctx, `ALTER ROLE etl SET datestyle = 'SQL, DMY'`); err != nil {
+			t.Fatal(err)
+		}
+		dmy, err := Connect(ctx, dsn) // ALTER ROLE ... SET applies to new sessions
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer dmy.Close()
+		var style, bound string
+		if err := dmy.QueryRow(ctx, `SELECT current_setting('datestyle'),
+			pg_get_expr(relpartbound, oid) FROM pg_class WHERE oid = 'pipeline.claims_legacy'::regclass`).Scan(&style, &bound); err != nil {
+			t.Fatal(err)
+		}
+		if style != "SQL, DMY" || !strings.Contains(bound, "01/09/2026") {
+			t.Fatalf("datestyle = %q, bound = %q; the session does not print DMY dates", style, bound)
+		}
+		check(t, dmy, nil)
+	})
+}
+
+func TestDropClaimPartition(t *testing.T) {
+	pool, _ := migratedPool(t, utcDate(2026, 10, 10), 1)
+	ctx := context.Background()
+	find := func(name string) (ClaimPartition, bool) {
+		t.Helper()
+		parts, _, err := ListClaimPartitions(ctx, pool)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, p := range parts {
+			if p.Name == name {
+				return p, true
+			}
+		}
+		return ClaimPartition{}, false
+	}
+
+	p, ok := find("dedup_claims_p20261009")
+	if !ok {
+		t.Fatal("partition dedup_claims_p20261009 missing")
+	}
+	for i := range 2 { // the second call is a no-op
+		if err := DropClaimPartition(ctx, pool, p, time.Second); err != nil {
+			t.Fatalf("drop #%d: %v", i+1, err)
+		}
+	}
+	if _, ok := find(p.Name); ok {
+		t.Fatalf("%s still exists", p.Name)
+	}
+
+	// An uncommitted claim insert holds RowExclusive on the parent; the DROP
+	// needs AccessExclusive on it and gives up after lockTimeout.
+	busy, ok := find("dedup_claims_p20261011")
+	if !ok {
+		t.Fatal("partition dedup_claims_p20261011 missing")
+	}
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if _, err := tx.Exec(ctx, `INSERT INTO pipeline.dedup_claims
+		(dataset, record_key, event_date, topic_id, kafka_partition, kafka_offset, ordinal, event_id, content_sha256)
+		VALUES ('market_snapshot', 'bitcoin', '2026-10-10', $1, 0, 1, 0, $2, $3)`,
+		uuid.Must(uuid.NewV7()), uuid.Must(uuid.NewV7()), make([]byte, 32)); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	err = DropClaimPartition(ctx, pool, busy, 200*time.Millisecond)
+	if !IsLockTimeout(err) {
+		t.Fatalf("drop while a claim insert is open: %v, want a lock timeout (55P03)", err)
+	}
+	if d := time.Since(start); d > 5*time.Second {
+		t.Errorf("drop waited %v, want about 200ms", d)
+	}
+	if _, ok := find(busy.Name); !ok {
+		t.Fatalf("%s was dropped despite the lock timeout", busy.Name)
+	}
+	if IsLockTimeout(errors.New("x")) || IsLockTimeout(nil) {
+		t.Error("IsLockTimeout is true for an unrelated error")
+	}
+}

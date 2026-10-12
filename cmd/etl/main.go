@@ -37,12 +37,14 @@ import (
 const usageText = `usage: etl <command>
 
 commands:
-  init         run migrations, create partitions, topic and buckets (one-shot)
-  fetcher      poll CoinGecko into raw.api_calls
-  exporter     export raw.api_calls to s3://raw in ETL_WINDOW windows (JSONL parts + _SUCCESS)
-  publish      publish one closed raw window to the broker and exit (--now <unix seconds|RFC3339>)
-  transformer  consume, clean, dedup and write s3://processed
-  healthcheck  exit 0 if the local /readyz returns 200 (for container healthchecks)
+  init                   run migrations, create partitions, topic and buckets (one-shot)
+  fetcher                poll CoinGecko into raw.api_calls
+  exporter               export raw.api_calls to s3://raw in ETL_WINDOW windows (JSONL parts + _SUCCESS)
+  publish                publish one closed raw window to the broker and exit (--now <unix seconds|RFC3339>)
+  transformer            consume, clean, dedup and write s3://processed
+  maintenance retention  drop expired dedup claims partitions and written batch rows (one-shot, scheduled)
+  maintenance vacuum     VACUUM (ANALYZE) the updated pipeline tables (one-shot, scheduled)
+  healthcheck            exit 0 if the local /readyz returns 200 (for container healthchecks)
 `
 
 // startupTimeout bounds connecting to dependencies when a service starts.
@@ -67,6 +69,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return runService(args[0], stderr)
 	case "publish":
 		return runPublish(args[1:], stderr)
+	case "maintenance":
+		return runMaintenance(args[1:], stderr)
 	case "help", "-h", "--help":
 		fmt.Fprint(stdout, usageText)
 		return 0

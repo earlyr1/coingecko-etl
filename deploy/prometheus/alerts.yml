@@ -129,3 +129,30 @@ groups:
         annotations:
           summary: "CoinGecko returned HTTP 429 {{ $value }} times in 15 minutes"
           description: "Lower the request rate or set COINGECKO_API_KEY."
+
+      - alert: ETLMaintenanceStale
+        # Retention and VACUUM run daily (Cronicle events etl-retention and
+        # etl-vacuum). Fires only for a job that has succeeded before; a job that
+        # never succeeded is ETLMaintenanceNeverSucceeded.
+        expr: |
+          time() - max by (job) (etl_job_last_success_timestamp_seconds{job=~"etl_retention|etl_vacuum"}) > 26 * 3600
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} has not succeeded for over 26 hours"
+          description: "Check its Cronicle event (etl-retention or etl-vacuum) and logs/maintenance/etl.log."
+
+      - alert: ETLMaintenanceNeverSucceeded
+        # A fresh stack runs maintenance at 11:00/11:30 only: absent for 26 hours
+        # means it never succeeded.
+        expr: |
+          absent(etl_job_last_success_timestamp_seconds{job="etl_retention"})
+          or
+          absent(etl_job_last_success_timestamp_seconds{job="etl_vacuum"})
+        for: 26h
+        labels:
+          severity: warning
+        annotations:
+          summary: "{{ $labels.job }} has never succeeded"
+          description: "Check its Cronicle event (etl-retention or etl-vacuum) and logs/maintenance/etl.log."

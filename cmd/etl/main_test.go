@@ -2,12 +2,14 @@ package main
 
 import (
 	"bytes"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -23,6 +25,9 @@ func TestRunDispatch(t *testing.T) {
 		{[]string{"publisher"}, 2, `unknown command "publisher"`},
 		{[]string{"publish", "--now", "bogus"}, 2, "--now"},
 		{[]string{"publish", "extra"}, 2, `unexpected argument "extra"`},
+		{[]string{"maintenance"}, 2, "usage: etl"},
+		{[]string{"maintenance", "bogus"}, 2, `unknown maintenance job "bogus"`},
+		{[]string{"maintenance", "vacuum", "extra"}, 2, "usage: etl"},
 	}
 	for _, c := range cases {
 		t.Run(strings.Join(c.args, " "), func(t *testing.T) {
@@ -39,15 +44,24 @@ func TestRunDispatch(t *testing.T) {
 
 func TestServiceRejectsBadConfig(t *testing.T) {
 	t.Setenv("ETL_LOG_DIR", t.TempDir())
-	t.Setenv("ETL_TOPIC_PARTITIONS", "six")
-	for _, svc := range []string{"init", "fetcher", "exporter", "publish", "transformer"} {
-		var stderr bytes.Buffer
-		if code := run([]string{svc}, &bytes.Buffer{}, &stderr); code != 1 {
-			t.Fatalf("%s: exit %d, want 1", svc, code)
-		}
-		if !strings.Contains(stderr.String(), "ETL_TOPIC_PARTITIONS") {
-			t.Fatalf("%s: stderr %q does not name the bad variable", svc, stderr.String())
-		}
+	commands := [][]string{{"init"}, {"fetcher"}, {"exporter"}, {"publish"}, {"transformer"},
+		{"maintenance", "retention"}, {"maintenance", "vacuum"}}
+	for _, bad := range []struct{ name, value string }{
+		{"ETL_TOPIC_PARTITIONS", "six"},
+		{"ETL_CLAIMS_RETENTION_DAYS", "3"}, // below the 168h topic retention in days + 1
+	} {
+		t.Run(bad.name, func(t *testing.T) {
+			t.Setenv(bad.name, bad.value)
+			for _, args := range commands {
+				var stderr bytes.Buffer
+				if code := run(args, &bytes.Buffer{}, &stderr); code != 1 {
+					t.Fatalf("%v: exit %d, want 1", args, code)
+				}
+				if !strings.Contains(stderr.String(), bad.name) {
+					t.Fatalf("%v: stderr %q does not name the bad variable", args, stderr.String())
+				}
+			}
+		})
 	}
 }
 
@@ -143,5 +157,62 @@ func TestLogDirPerHost(t *testing.T) {
 	}
 	if got, want := logDir("logs"), filepath.Join("logs", host); got != want {
 		t.Fatalf("logDir = %q, want %q", got, want)
+	}
+}
+
+// pushRecorder is a fake Pushgateway that records "METHOD PATH\nBODY" per push.
+type pushRecorder struct {
+	mu     sync.Mutex
+	pushes []string
+}
+
+func newPushRecorder(t *testing.T) (*pushRecorder, string) {
+	t.Helper()
+	rec := &pushRecorder{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		rec.mu.Lock()
+		rec.pushes = append(rec.pushes, r.Method+" "+r.URL.Path+"\n"+string(body))
+		rec.mu.Unlock()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	return rec, srv.URL
+}
+
+func (r *pushRecorder) all() []string {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]string(nil), r.pushes...)
+}
+
+func TestMaintenanceFailsWhenPostgresUnreachable(t *testing.T) {
+	logDir := t.TempDir()
+	t.Setenv("ETL_LOG_DIR", logDir)
+	t.Setenv("ETL_LOG_PER_HOST", "")
+	t.Setenv("ETL_PG_DSN", "postgres://etl:etl@"+closedAddr(t)+"/etl?sslmode=disable&connect_timeout=1")
+	rec, url := newPushRecorder(t)
+	t.Setenv("ETL_PUSHGATEWAY_URL", url)
+
+	if code := run([]string{"maintenance", "retention"}, &bytes.Buffer{}, &bytes.Buffer{}); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	logged, err := os.ReadFile(filepath.Join(logDir, "maintenance", "etl.log"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{`"msg":"job failed"`, `"job":"etl_retention"`} {
+		if !strings.Contains(string(logged), want) {
+			t.Errorf("log lacks %s:\n%s", want, logged)
+		}
+	}
+	got := rec.all()
+	if len(got) != 1 {
+		t.Fatalf("got %d pushes, want 1: %q", len(got), got)
+	}
+	if !strings.HasPrefix(got[0], "POST /metrics/job/etl_retention\n") ||
+		!strings.Contains(got[0], "\netl_job_success 0\n") ||
+		strings.Contains(got[0], "etl_job_last_success_timestamp_seconds") {
+		t.Fatalf("push = %q; want a POST with etl_job_success 0 and no last-success timestamp", got[0])
 	}
 }
