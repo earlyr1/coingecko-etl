@@ -182,6 +182,7 @@ type tickerDoc struct {
 // are assigned in append order across all datasets of the message.
 type detailBuilder struct {
 	coinID    string
+	respKey   string // responseID(ev): keys records that have no id
 	snap      time.Time
 	snapAt    string
 	eventDate string
@@ -221,6 +222,7 @@ func transformDetail(ev event.RawEvent, rules Rules) ([]Record, error) {
 	}
 	b := &detailBuilder{
 		coinID:    strings.TrimSpace(strOrEmpty(doc.ID)),
+		respKey:   responseID(ev),
 		snap:      snap,
 		snapAt:    xtime.Format(snap),
 		eventDate: xtime.FormatDate(snap),
@@ -233,7 +235,7 @@ func transformDetail(ev event.RawEvent, rules Rules) ([]Record, error) {
 	}
 	if b.coinID == "" {
 		// Children cannot reference a parent without an id: only the reject is emitted.
-		if err := b.add(DatasetCoinSnapshot, "#0|"+b.snapAt, ZoneRejected, ReasonMissingID, parent); err != nil {
+		if err := b.add(DatasetCoinSnapshot, fallbackKey(b.respKey, 0, b.snapAt), ZoneRejected, ReasonMissingID, parent); err != nil {
 			return nil, err
 		}
 		return b.out, nil
@@ -457,7 +459,7 @@ func (b *detailBuilder) addTickers(docs []tickerDoc) error {
 		key := b.coinID + "|" + t.ExchangeID + "|" + t.Base + "|" + t.Target + "|" + b.snapAt
 		if t.ExchangeID == "" || t.Base == "" || t.Target == "" {
 			zone, reason = ZoneRejected, ReasonMissingID
-			key = fmt.Sprintf("#%d|%s", i, b.snapAt)
+			key = b.coinID + "|" + fallbackKey(b.respKey, i, b.snapAt)
 		}
 		if err := b.add(DatasetTicker, key, zone, reason, *t); err != nil {
 			return err

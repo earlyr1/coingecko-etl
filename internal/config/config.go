@@ -6,17 +6,21 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+
+	"coingecko-etl/internal/window"
 )
 
 type Config struct {
 	Service             string
 	HTTPAddr            string        // ETL_HTTP_ADDR, default ":8080"
+	PushgatewayURL      string        // ETL_PUSHGATEWAY_URL, default "http://pushgateway:9091" (trailing "/" trimmed)
 	LogDir              string        // ETL_LOG_DIR, default "logs"
 	PostgresDSN         string        // ETL_PG_DSN, default "postgres://etl:etl@localhost:5432/etl?sslmode=disable"
 	S3Endpoint          string        // ETL_S3_ENDPOINT, default "http://localhost:7070"
@@ -27,6 +31,7 @@ type Config struct {
 	Topic               string        // ETL_TOPIC, default "coingecko.raw"
 	TopicPartitions     int32         // ETL_TOPIC_PARTITIONS, default 6
 	TopicRetention      time.Duration // ETL_TOPIC_RETENTION, default 168h
+	ClaimsRetentionDays int           // ETL_CLAIMS_RETENTION_DAYS, default 8; >= ceil(TopicRetention/24h)+1
 	PipelineEpoch       string        // ETL_PIPELINE_EPOCH (uuid), default "00000000-0000-0000-0000-000000000001"
 	CoinGeckoBaseURL    string        // ETL_COINGECKO_BASE_URL, default "https://api.coingecko.com/api/v3"
 	CoinGeckoAPIKey     string        // COINGECKO_API_KEY, optional
@@ -38,6 +43,7 @@ type Config struct {
 	MinRequestSpacing   time.Duration // ETL_MIN_REQUEST_SPACING, default 15s
 	ExportInterval      time.Duration // ETL_EXPORT_INTERVAL, default 15s
 	ExportBatchMax      int           // ETL_EXPORT_BATCH_MAX, default 500
+	Window              time.Duration // ETL_WINDOW, default 5m; whole minutes in [1m,60m] dividing 60m; aligned to the UTC hour
 	PublishLease        time.Duration // ETL_PUBLISH_LEASE, default 2m
 	PublishPoll         time.Duration // ETL_PUBLISH_POLL, default 5s
 	TransformMaxRecords int           // ETL_TRANSFORM_MAX_RECORDS, default 500
@@ -54,6 +60,7 @@ func Load(service string) (Config, error) {
 	c := Config{
 		Service:             service,
 		HTTPAddr:            p.str("ETL_HTTP_ADDR", ":8080"),
+		PushgatewayURL:      p.httpURL("ETL_PUSHGATEWAY_URL", "http://pushgateway:9091"),
 		LogDir:              p.str("ETL_LOG_DIR", "logs"),
 		PostgresDSN:         p.str("ETL_PG_DSN", "postgres://etl:etl@localhost:5432/etl?sslmode=disable"),
 		S3Endpoint:          p.str("ETL_S3_ENDPOINT", "http://localhost:7070"),
@@ -64,6 +71,7 @@ func Load(service string) (Config, error) {
 		Topic:               p.str("ETL_TOPIC", "coingecko.raw"),
 		TopicPartitions:     p.int32("ETL_TOPIC_PARTITIONS", 6),
 		TopicRetention:      p.duration("ETL_TOPIC_RETENTION", 168*time.Hour, false),
+		ClaimsRetentionDays: p.int("ETL_CLAIMS_RETENTION_DAYS", 8),
 		PipelineEpoch:       p.uuid("ETL_PIPELINE_EPOCH", "00000000-0000-0000-0000-000000000001"),
 		CoinGeckoBaseURL:    strings.TrimRight(p.str("ETL_COINGECKO_BASE_URL", "https://api.coingecko.com/api/v3"), "/"),
 		CoinGeckoAPIKey:     p.str("COINGECKO_API_KEY", ""),
@@ -75,6 +83,7 @@ func Load(service string) (Config, error) {
 		MinRequestSpacing:   p.duration("ETL_MIN_REQUEST_SPACING", 15*time.Second, true),
 		ExportInterval:      p.duration("ETL_EXPORT_INTERVAL", 15*time.Second, false),
 		ExportBatchMax:      p.int("ETL_EXPORT_BATCH_MAX", 500),
+		Window:              p.windowSize("ETL_WINDOW", 5*time.Minute),
 		PublishLease:        p.duration("ETL_PUBLISH_LEASE", 2*time.Minute, false),
 		PublishPoll:         p.duration("ETL_PUBLISH_POLL", 5*time.Second, false),
 		TransformMaxRecords: p.int("ETL_TRANSFORM_MAX_RECORDS", 500),
@@ -82,6 +91,17 @@ func Load(service string) (Config, error) {
 		TickerStaleAfter:    p.duration("ETL_TICKER_STALE_AFTER", time.Hour, false),
 		TickerAnomalyPct:    p.float("ETL_TICKER_ANOMALY_PCT", 2.0),
 		AnomalyTolerancePct: p.nonNegFloat("ETL_ANOMALY_TOLERANCE_PCT", 0.5),
+	}
+	// Claims must outlive every message the topic still holds, so a replay
+	// from the earliest offset still finds them. Checked only when both inputs
+	// parsed, so a bad input reports one error, not two.
+	if c.ClaimsRetentionDays > 0 && c.TopicRetention > 0 {
+		const day = 24 * time.Hour
+		minDays := int((c.TopicRetention+day-1)/day) + 1 // 168h -> 8, 169h -> 9, 24h -> 2
+		if c.ClaimsRetentionDays < minDays {
+			p.errs = append(p.errs, fmt.Errorf("ETL_CLAIMS_RETENTION_DAYS=%d: must be at least %d (ETL_TOPIC_RETENTION=%s in whole days, rounded up, plus 1)",
+				c.ClaimsRetentionDays, minDays, c.TopicRetention))
+		}
 	}
 	if len(p.errs) > 0 {
 		return Config{}, fmt.Errorf("config: %w", errors.Join(p.errs...))
@@ -136,6 +156,33 @@ func (p *parser) duration(key string, def time.Duration, allowZero bool) time.Du
 		p.fail(key, v, "must be positive")
 	}
 	return d
+}
+
+// windowSize parses ETL_WINDOW (named so it does not read like the window package).
+func (p *parser) windowSize(key string, def time.Duration) time.Duration {
+	v, ok := p.raw(key)
+	if !ok {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		p.fail(key, v, "not a Go duration (examples: 1m, 5m, 15m)")
+		return d
+	}
+	if err := window.Validate(d); err != nil {
+		p.fail(key, v, err.Error())
+	}
+	return d
+}
+
+// httpURL parses an absolute http(s) URL with a host; the trailing "/" is trimmed.
+func (p *parser) httpURL(key, def string) string {
+	v := p.str(key, def)
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		p.fail(key, v, "must be an absolute http(s) URL, e.g. http://pushgateway:9091")
+	}
+	return strings.TrimRight(v, "/")
 }
 
 func (p *parser) int(key string, def int) int {

@@ -15,6 +15,7 @@ var allKeys = []string{
 	"ETL_MARKETS_PER_PAGE", "ETL_MIN_REQUEST_SPACING", "ETL_EXPORT_INTERVAL", "ETL_EXPORT_BATCH_MAX",
 	"ETL_PUBLISH_LEASE", "ETL_PUBLISH_POLL", "ETL_TRANSFORM_MAX_RECORDS", "ETL_STALE_AFTER",
 	"ETL_TICKER_STALE_AFTER", "ETL_TICKER_ANOMALY_PCT", "ETL_ANOMALY_TOLERANCE_PCT",
+	"ETL_WINDOW", "ETL_CLAIMS_RETENTION_DAYS", "ETL_PUSHGATEWAY_URL",
 }
 
 // clearEnv blanks every variable Load reads; blank means "use the default".
@@ -34,6 +35,7 @@ func TestLoadDefaults(t *testing.T) {
 	want := Config{
 		Service:             "fetcher",
 		HTTPAddr:            ":8080",
+		PushgatewayURL:      "http://pushgateway:9091",
 		LogDir:              "logs",
 		PostgresDSN:         "postgres://etl:etl@localhost:5432/etl?sslmode=disable",
 		S3Endpoint:          "http://localhost:7070",
@@ -44,6 +46,7 @@ func TestLoadDefaults(t *testing.T) {
 		Topic:               "coingecko.raw",
 		TopicPartitions:     6,
 		TopicRetention:      168 * time.Hour,
+		ClaimsRetentionDays: 8,
 		PipelineEpoch:       "00000000-0000-0000-0000-000000000001",
 		CoinGeckoBaseURL:    "https://api.coingecko.com/api/v3",
 		CoinGeckoAPIKey:     "",
@@ -55,6 +58,7 @@ func TestLoadDefaults(t *testing.T) {
 		MinRequestSpacing:   15 * time.Second,
 		ExportInterval:      15 * time.Second,
 		ExportBatchMax:      500,
+		Window:              5 * time.Minute,
 		PublishLease:        2 * time.Minute,
 		PublishPoll:         5 * time.Second,
 		TransformMaxRecords: 500,
@@ -100,6 +104,9 @@ func TestLoadOverrides(t *testing.T) {
 		"ETL_TICKER_STALE_AFTER":    "2h",
 		"ETL_TICKER_ANOMALY_PCT":    "3.5",
 		"ETL_ANOMALY_TOLERANCE_PCT": "1.25",
+		"ETL_WINDOW":                "15m",
+		"ETL_CLAIMS_RETENTION_DAYS": "30",
+		"ETL_PUSHGATEWAY_URL":       "http://pgw:9091/",
 	}
 	for k, v := range env {
 		t.Setenv(k, v)
@@ -142,6 +149,9 @@ func TestLoadOverrides(t *testing.T) {
 		{"TickerStaleAfter", c.TickerStaleAfter, 2 * time.Hour},
 		{"TickerAnomalyPct", c.TickerAnomalyPct, 3.5},
 		{"AnomalyTolerancePct", c.AnomalyTolerancePct, 1.25},
+		{"Window", c.Window, 15 * time.Minute},
+		{"ClaimsRetentionDays", c.ClaimsRetentionDays, 30},
+		{"PushgatewayURL", c.PushgatewayURL, "http://pgw:9091"},
 	}
 	for _, ch := range checks {
 		if !reflect.DeepEqual(ch.got, ch.want) {
@@ -152,23 +162,35 @@ func TestLoadOverrides(t *testing.T) {
 
 func TestLoadInvalid(t *testing.T) {
 	cases := []struct{ key, val string }{
-		{"ETL_MARKETS_INTERVAL", "30"},          // no unit
-		{"ETL_DETAIL_INTERVAL", "soon"},         // not a duration
-		{"ETL_EXPORT_INTERVAL", "-5s"},          // negative
-		{"ETL_PUBLISH_LEASE", "0s"},             // zero not allowed
-		{"ETL_DETAIL_OFFSET", "-1s"},            // zero allowed, negative not
-		{"ETL_TOPIC_PARTITIONS", "abc"},         // not an int
-		{"ETL_TOPIC_PARTITIONS", "99999999999"}, // overflows int32
-		{"ETL_EXPORT_BATCH_MAX", "0"},           // not positive
-		{"ETL_TICKER_ANOMALY_PCT", "two"},       // not a float
-		{"ETL_TICKER_ANOMALY_PCT", "NaN"},       // parses, but is no threshold
-		{"ETL_TICKER_ANOMALY_PCT", "+Inf"},      // parses, but is no threshold
-		{"ETL_ANOMALY_TOLERANCE_PCT", "-0.5"},   // negative
-		{"ETL_ANOMALY_TOLERANCE_PCT", "NaN"},    // not a number
-		{"ETL_ANOMALY_TOLERANCE_PCT", "Inf"},    // infinite
-		{"ETL_ANOMALY_TOLERANCE_PCT", "half"},   // not a float
-		{"ETL_PIPELINE_EPOCH", "not-a-uuid"},    // not a uuid
-		{"ETL_WATCHLIST", " , ,"},               // no values
+		{"ETL_MARKETS_INTERVAL", "30"},              // no unit
+		{"ETL_DETAIL_INTERVAL", "soon"},             // not a duration
+		{"ETL_EXPORT_INTERVAL", "-5s"},              // negative
+		{"ETL_PUBLISH_LEASE", "0s"},                 // zero not allowed
+		{"ETL_DETAIL_OFFSET", "-1s"},                // zero allowed, negative not
+		{"ETL_TOPIC_PARTITIONS", "abc"},             // not an int
+		{"ETL_TOPIC_PARTITIONS", "99999999999"},     // overflows int32
+		{"ETL_EXPORT_BATCH_MAX", "0"},               // not positive
+		{"ETL_TICKER_ANOMALY_PCT", "two"},           // not a float
+		{"ETL_TICKER_ANOMALY_PCT", "NaN"},           // parses, but is no threshold
+		{"ETL_TICKER_ANOMALY_PCT", "+Inf"},          // parses, but is no threshold
+		{"ETL_ANOMALY_TOLERANCE_PCT", "-0.5"},       // negative
+		{"ETL_ANOMALY_TOLERANCE_PCT", "NaN"},        // not a number
+		{"ETL_ANOMALY_TOLERANCE_PCT", "Inf"},        // infinite
+		{"ETL_ANOMALY_TOLERANCE_PCT", "half"},       // not a float
+		{"ETL_PIPELINE_EPOCH", "not-a-uuid"},        // not a uuid
+		{"ETL_WATCHLIST", " , ,"},                   // no values
+		{"ETL_WINDOW", "5"},                         // no unit
+		{"ETL_WINDOW", "90s"},                       // not whole minutes
+		{"ETL_WINDOW", "7m"},                        // does not divide an hour
+		{"ETL_WINDOW", "2h"},                        // longer than an hour
+		{"ETL_WINDOW", "0s"},                        // zero
+		{"ETL_WINDOW", "-5m"},                       // negative
+		{"ETL_CLAIMS_RETENTION_DAYS", "0"},          // not positive
+		{"ETL_CLAIMS_RETENTION_DAYS", "x"},          // not an int
+		{"ETL_CLAIMS_RETENTION_DAYS", "-1"},         // negative
+		{"ETL_PUSHGATEWAY_URL", "pushgateway:9091"}, // no scheme
+		{"ETL_PUSHGATEWAY_URL", "ftp://x"},          // not http(s)
+		{"ETL_PUSHGATEWAY_URL", "http://"},          // no host
 	}
 	for _, c := range cases {
 		t.Run(c.key+"="+c.val, func(t *testing.T) {
@@ -182,6 +204,99 @@ func TestLoadInvalid(t *testing.T) {
 				t.Fatalf("error %q does not name %s", err, c.key)
 			}
 		})
+	}
+}
+
+func TestLoadWindow(t *testing.T) {
+	for _, v := range []string{"1m", "2m", "3m", "4m", "5m", "6m", "10m", "12m", "15m", "20m", "30m", "60m"} {
+		t.Run(v, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("ETL_WINDOW", v)
+			c, err := Load("exporter")
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			want, _ := time.ParseDuration(v)
+			if c.Window != want {
+				t.Fatalf("Window = %v, want %v", c.Window, want)
+			}
+		})
+	}
+	clearEnv(t)
+	t.Setenv("ETL_WINDOW", "300s")
+	c, err := Load("exporter")
+	if err != nil {
+		t.Fatalf("Load(300s): %v", err)
+	}
+	if c.Window != 5*time.Minute {
+		t.Fatalf("Window = %v, want 5m", c.Window)
+	}
+}
+
+// Claims must outlive every message the topic still holds: a replay from the
+// earliest offset must still find the claims of what it re-reads.
+func TestLoadClaimsRetentionVsTopic(t *testing.T) {
+	cases := []struct {
+		topic, days string
+		ok          bool
+	}{
+		{"168h", "7", false},
+		{"168h", "8", true},
+		{"169h", "8", false},
+		{"169h", "9", true},
+		{"24h", "2", true},
+		{"24h", "1", false},
+	}
+	for _, c := range cases {
+		t.Run(c.topic+"/"+c.days, func(t *testing.T) {
+			clearEnv(t)
+			t.Setenv("ETL_TOPIC_RETENTION", c.topic)
+			t.Setenv("ETL_CLAIMS_RETENTION_DAYS", c.days)
+			_, err := Load("maintenance")
+			switch {
+			case c.ok && err != nil:
+				t.Fatalf("Load: %v", err)
+			case !c.ok && err == nil:
+				t.Fatal("Load succeeded, want an error")
+			case !c.ok && !strings.Contains(err.Error(), "ETL_CLAIMS_RETENTION_DAYS"):
+				t.Fatalf("error %q does not name ETL_CLAIMS_RETENTION_DAYS", err)
+			}
+		})
+	}
+	t.Run("bad topic retention reports one error", func(t *testing.T) {
+		clearEnv(t)
+		t.Setenv("ETL_TOPIC_RETENTION", "abc")
+		_, err := Load("maintenance")
+		if err == nil {
+			t.Fatal("Load succeeded, want an error")
+		}
+		if strings.Contains(err.Error(), "ETL_CLAIMS_RETENTION_DAYS") {
+			t.Fatalf("error %q also names ETL_CLAIMS_RETENTION_DAYS", err)
+		}
+		if !strings.Contains(err.Error(), "ETL_TOPIC_RETENTION") {
+			t.Fatalf("error %q does not name ETL_TOPIC_RETENTION", err)
+		}
+		if n := len(strings.Split(err.Error(), "\n")); n != 1 {
+			t.Fatalf("error has %d lines, want 1: %q", n, err)
+		}
+	})
+}
+
+func TestLoadPushgatewayURL(t *testing.T) {
+	cases := map[string]string{
+		"http://pgw:9091/":              "http://pgw:9091",
+		"https://pgw.example:443/base/": "https://pgw.example:443/base",
+	}
+	for in, want := range cases {
+		clearEnv(t)
+		t.Setenv("ETL_PUSHGATEWAY_URL", in)
+		c, err := Load("publish")
+		if err != nil {
+			t.Fatalf("Load(%q): %v", in, err)
+		}
+		if c.PushgatewayURL != want {
+			t.Fatalf("PushgatewayURL(%q) = %q, want %q", in, c.PushgatewayURL, want)
+		}
 	}
 }
 

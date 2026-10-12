@@ -34,13 +34,15 @@ CREATE TABLE pipeline.dedup_claims (
   kafka_offset    bigint NOT NULL,
   ordinal         int    NOT NULL,
   event_id        uuid   NOT NULL,
-  idempotency_key text,              -- winner's idempotency key; drop-reason metrics only (Task 14). NULL when absent
+  idempotency_key text,              -- winner's idempotency key, for the duplicate_response drop reason; NULL when absent
   content_sha256  bytea  NOT NULL CHECK (octet_length(content_sha256) = 32),
   first_seen_at   timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT dedup_claims_pkey PRIMARY KEY (dataset, record_key, event_date)
 ) PARTITION BY RANGE (event_date);
 
--- Orphaned-claim cleanup and lineage lookups by position.
+COMMENT ON COLUMN pipeline.dedup_claims.first_seen_at IS 'Audit only: when the key was first claimed. No code reads it.';
+
+-- Claims by Kafka position, for manual repair (ADR 0004); no pipeline code queries it.
 CREATE INDEX dedup_claims_position_idx ON pipeline.dedup_claims (topic_id, kafka_partition, kafka_offset);
 
 CREATE EXTENSION IF NOT EXISTS btree_gist;

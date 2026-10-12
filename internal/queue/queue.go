@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -28,21 +27,17 @@ const (
 	HeaderLineNo         = "line_no"
 )
 
-// MessageKey is the partitioning key: "coins_markets" for the markets
-// endpoint, the coin id (last segment of Request.Path, e.g. "/coins/bitcoin")
-// for the detail endpoint. Every repeat of the same data lands on one partition.
+// MessageKey is the partitioning key: the event's idempotency_key (sha256 of
+// request + body). Copies of one response (CDN repeats, publisher re-runs)
+// share it and land on one partition, so one transformer decides them in
+// order. Different responses spread over all partitions (franz-go's default
+// partitioner hashes keys with murmur2, like the Java client). Every ok event
+// has one; the event_id fallback only keeps the key deterministic and non-empty.
 func MessageKey(ev event.RawEvent) string {
-	if ev.Endpoint == event.EndpointMarkets {
-		return event.EndpointMarkets
+	if ev.IdempotencyKey != nil && *ev.IdempotencyKey != "" {
+		return *ev.IdempotencyKey
 	}
-	p := strings.TrimRight(ev.Request.Path, "/")
-	if i := strings.LastIndexByte(p, '/'); i >= 0 {
-		p = p[i+1:]
-	}
-	if p == "" {
-		return ev.Endpoint
-	}
-	return p
+	return ev.EventID
 }
 
 // NewProducer returns an idempotent producer with acks=all.

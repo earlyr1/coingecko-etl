@@ -220,8 +220,9 @@ func TestMarketsRejects(t *testing.T) {
 		reason string
 		key    string
 	}{
-		{ZoneRejected, ReasonMissingID, "#0|2026-10-10T10:07:55.000Z"},
-		{ZoneRejected, ReasonMissingID, "#1|2026-10-10T10:07:55.000Z"},
+		// rawEvent sets no idempotency key: the event id stands for the response.
+		{ZoneRejected, ReasonMissingID, "#0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11|0|2026-10-10T10:07:55.000Z"},
+		{ZoneRejected, ReasonMissingID, "#0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11|1|2026-10-10T10:07:55.000Z"},
 		{ZoneRejected, ReasonNullPrice, "nullprice|2026-10-10T10:07:55.000Z"},
 		{ZoneRejected, ReasonNonpositivePrice, "zeroprice|2026-10-10T10:07:55.000Z"},
 		{ZoneProcessed, "", "good|2026-10-10T10:07:55.000Z"},

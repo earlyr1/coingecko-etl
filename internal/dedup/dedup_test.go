@@ -204,6 +204,64 @@ func TestClaimAndDecide(t *testing.T) {
 		}
 	})
 
+	// Two transformers (partitions) claiming overlapping keys in opposite input
+	// orders must not deadlock: pickWinners sorts the keys and insertSQL keeps
+	// that order (WITH ORDINALITY ... ORDER BY u.ord), so every transaction
+	// inserts, and takes its row locks, in the same order.
+	t.Run("overlapping key sets in opposite input order do not deadlock", func(t *testing.T) {
+		for iter := 0; iter < 10; iter++ {
+			keys := make([]string, 100)
+			for i := range keys {
+				keys[i] = fmt.Sprintf("dl-%d-%03d", iter, i) // fresh keys every iteration
+			}
+			evA, evB := uuid.NewString(), uuid.NewString()   // dedup_claims.event_id is a uuid column
+			a := claimsFor(keys, 0, evA, "idem-a")           // ascending, partition 0
+			b := claimsFor(reversed(keys), 1, evB, "idem-b") // descending, partition 1, same content sha
+			start := make(chan struct{})
+			type res struct {
+				outs []dedup.Outcome
+				err  error
+			}
+			run := func(cs []dedup.Claim, out chan<- res) {
+				ctx := context.Background()
+				tx, err := pool.Begin(ctx)
+				if err != nil {
+					out <- res{err: err}
+					return
+				}
+				defer tx.Rollback(ctx)
+				<-start
+				outs, err := dedup.ClaimAndDecide(ctx, tx, cs)
+				if err == nil {
+					time.Sleep(50 * time.Millisecond) // hold the locks
+					err = tx.Commit(ctx)
+				}
+				out <- res{outs, err}
+			}
+			ra, rb := make(chan res, 1), make(chan res, 1)
+			go run(a, ra)
+			go run(b, rb)
+			close(start)
+			A, B := <-ra, <-rb
+			if A.err != nil || B.err != nil {
+				t.Fatalf("iteration %d: a: %v, b: %v (SQLSTATE 40P01 means the insert order is not fixed)", iter, A.err, B.err)
+			}
+			if len(A.outs) != len(keys) || len(B.outs) != len(keys) {
+				t.Fatalf("iteration %d: %d and %d outcomes, want %d each", iter, len(A.outs), len(B.outs), len(keys))
+			}
+			// Outcomes follow the input order: a[i] and b[len-1-i] carry keys[i].
+			for i := range keys {
+				oa, ob := A.outs[i], B.outs[len(keys)-1-i]
+				switch {
+				case oa == emit && ob == drop(dedup.ReasonDuplicateRecord):
+				case ob == emit && oa == drop(dedup.ReasonDuplicateRecord):
+				default:
+					t.Fatalf("iteration %d, key %s: outcomes %+v and %+v, want one emit and one duplicate_record drop", iter, keys[i], oa, ob)
+				}
+			}
+		}
+	})
+
 	t.Run("rolled back claims do not count", func(t *testing.T) {
 		ctx := context.Background()
 		k := "polkadot|2026-10-10T10:00:00.000Z"
@@ -244,4 +302,26 @@ func TestClaimAndDecide(t *testing.T) {
 			t.Fatalf("got %v", out)
 		}
 	})
+}
+
+// claimsFor builds the claims of one message (one position) for keys, in the
+// given order; the content of a key does not depend on the message.
+func claimsFor(keys []string, partition int32, eventID, idem string) []dedup.Claim {
+	out := make([]dedup.Claim, len(keys))
+	for i, k := range keys {
+		out[i] = dedup.Claim{
+			Dataset: "market_snapshot", Key: k, EventDate: day,
+			Pos:     dedup.Position{TopicID: topicID, Partition: partition, Offset: 5000, Ordinal: i},
+			EventID: eventID, IdempotencyKey: idem, ContentSHA256: sha256.Sum256([]byte(k)),
+		}
+	}
+	return out
+}
+
+func reversed(keys []string) []string {
+	out := make([]string, len(keys))
+	for i, k := range keys {
+		out[len(keys)-1-i] = k
+	}
+	return out
 }

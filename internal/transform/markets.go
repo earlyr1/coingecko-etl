@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -127,8 +126,8 @@ func transformMarkets(ev event.RawEvent, rules Rules) ([]Record, error) {
 		switch {
 		case b.CoinID == "":
 			rec.Zone, rec.Reason = ZoneRejected, ReasonMissingID
-			// No coin id to key on: the row's position in the payload keeps the key unique.
-			rec.Key = "#" + strconv.Itoa(i) + "|" + snapAt
+			// No coin id to key on: the response id and the row's position keep the key unique.
+			rec.Key = fallbackKey(responseID(ev), i, snapAt)
 		case b.Price == "":
 			rec.Zone, rec.Reason = ZoneRejected, ReasonNullPrice
 		case !positive(b.Price):

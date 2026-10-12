@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/twmb/franz-go/pkg/kgo"
 
+	"coingecko-etl/internal/event"
 	"coingecko-etl/internal/testutil"
 )
 
@@ -75,9 +76,10 @@ func TestQueueIntegration(t *testing.T) {
 
 	t.Run("produce and consume with headers", func(t *testing.T) {
 		value := []byte(`{"event_id":"x","payload":{"a":1}}`)
+		key := event.IdempotencyKey(event.SourceCoinGecko, event.EndpointCoinDetail, map[string]string{}, event.SHA256Hex(value))
 		rec := &kgo.Record{
 			Topic: topic,
-			Key:   []byte("bitcoin"),
+			Key:   []byte(key),
 			Value: value,
 			Headers: []kgo.RecordHeader{
 				{Key: HeaderEventID, Value: []byte("0199c8a0-0000-7000-8000-000000000001")},
@@ -105,7 +107,7 @@ func TestQueueIntegration(t *testing.T) {
 		if got == nil {
 			t.Fatal("no record consumed")
 		}
-		if string(got.Key) != "bitcoin" || string(got.Value) != string(value) {
+		if string(got.Key) != key || string(got.Value) != string(value) {
 			t.Fatalf("got key=%q value=%q", got.Key, got.Value)
 		}
 		h := map[string]string{}

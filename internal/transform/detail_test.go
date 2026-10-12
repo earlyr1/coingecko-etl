@@ -242,6 +242,9 @@ func TestTickerDuplicateKeysKeepOrdinals(t *testing.T) {
 	if tk[3].Zone != ZoneRejected || tk[3].Reason != ReasonMissingID {
 		t.Errorf("ticker without exchange id: %s/%s", tk[3].Zone, tk[3].Reason)
 	}
+	if want := "bitcoin|#0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11|3|2026-10-10T10:01:51.000Z"; tk[3].Key != want {
+		t.Errorf("ticker without exchange id keyed %q, want %q", tk[3].Key, want)
+	}
 }
 
 func TestCurrencyRejects(t *testing.T) {
@@ -287,6 +290,9 @@ func TestDetailMissingIDAndContracts(t *testing.T) {
 		[]byte(`{"id":"","symbol":"x","last_updated":"2026-10-10T10:01:51Z","tickers":[{"base":"X"}]}`)))
 	if len(recs) != 1 || recs[0].Dataset != DatasetCoinSnapshot || recs[0].Reason != ReasonMissingID {
 		t.Fatalf("missing id: %+v", recs)
+	}
+	if want := "#0199d0a4-6c1e-7cc2-9a51-3f1f2b9d8e11|0|2026-10-10T10:01:51.000Z"; recs[0].Key != want {
+		t.Errorf("id-less coin_snapshot keyed %q, want %q", recs[0].Key, want)
 	}
 	recs = mustTransform(t, rawEvent(event.EndpointCoinDetail, nil, []byte(`{"id":"tok","symbol":"tok",
 	  "last_updated":"2026-10-10T10:01:51Z",
