@@ -2,6 +2,8 @@
 
 A small but complete ETL pipeline in Go. It polls the public CoinGecko API, keeps every raw API call in Postgres, exports successful calls in 5-minute windows (JSON Lines plus a `_SUCCESS` manifest) to an S3-compatible lake, publishes each closed window to a Kafka-protocol broker (Redpanda) with a scheduled job, and writes cleaned, deduplicated and normalized JSON Lines to a processed zone. Every hop after the insert into Postgres is at-least-once; the processed zone still contains every stored record exactly once, because every write is idempotent and deduplication happens in one place, under the conditions in [Delivery guarantees](#delivery-guarantees).
 
+> **Interactive infographic: [`architecture.html`](architecture.html).** One page that shows the whole design visually: the pipeline as a clickable diagram, one CoinGecko snapshot traced end to end through every stage, the time model, the delivery guarantees with crash points you can pick, the data and schemas, storage, operations (metrics, alerts, dashboard) and the key decisions with the alternatives they rejected. Components, files and decisions open their details on click. GitHub shows HTML files as source, so clone or download the repository and open `architecture.html` in a browser: it is a single file and needs no server.
+
 Everything runs locally with `docker compose`. The lake is plain files under `./data/`, so you can `cat` any object.
 
 Data provided by [CoinGecko](https://www.coingecko.com/en/api).
@@ -82,7 +84,7 @@ Infrastructure: Postgres 18.6, Redpanda v26.2.4, versitygw v1.8.0 (S3 gateway ov
 
 Raw data lands in Postgres before the broker because the assignment asks for it; the cost is the exporter and its claim ([ADR 0005](docs/adr/0005-exporter-skip-locked-claim.md)). JVM alternatives for the exporter and the transformer (Debezium, Kafka Connect, Kafka Streams) are under [Productionization](#productionization).
 
-An interactive version of this architecture, with every stage and decision explained, is in [`docs/architecture/index.html`](docs/architecture/index.html) (open the file in a browser).
+Every stage and decision, explained interactively: [`architecture.html`](architecture.html).
 
 ### Key decisions
 
@@ -436,7 +438,7 @@ Every long-running service (fetcher, exporter, transformer) listens on `:8080` w
 | Metric | Type | Labels | What it tells you |
 |---|---|---|---|
 | `etl_api_requests_total` | counter | endpoint, status | CoinGecko calls by HTTP status, `network_error` or `skipped` (a skipped tick, not an error) |
-| `etl_api_request_duration_seconds` | histogram | endpoint | API latency, body read included |
+| `etl_api_request_duration_seconds` | histogram | endpoint | latency of calls that got an HTTP response, body read included |
 | `etl_api_rate_limited_total` | counter | — | HTTP 429 responses |
 | `etl_last_success_timestamp_seconds` | gauge | endpoint | Unix time of the last successful call; freshness = `time() - this` |
 | `etl_source_data_age_seconds` | gauge | endpoint | how old CoinGecko's data was when we fetched it (`fetched_at` minus the newest `last_updated`) |
@@ -461,7 +463,7 @@ Expected freshness: a record reaches `processed/` within about `ETL_WINDOW` + 1 
 
 The transformer's record, duplicate, reject, dlq, latency and batch-duration metrics are counted once per batch, when it is marked `written`, so a retried batch does not count twice; schema validation counters count every attempt. Every service also exposes the standard Go runtime and process metrics. Labels stay low-cardinality: no coin ids or offsets.
 
-The Grafana dashboard shows data freshness, duplicate share, DLQ records and end-to-end latency at the top; then records per stage, freshness and source age, end-to-end latency, duplicate share, rejects by reason, dead letters, consumer lag, API status codes, export lag with S3 writes and schema validations; and for the jobs, time since each job's last success, records published per window, job runs and retention results.
+The Grafana dashboard shows data freshness, duplicate share, DLQ records and end-to-end latency at the top; then records per stage, freshness and source age, end-to-end latency, duplicate share, rejects by reason, dead letters (a total that reads 0 while nothing is dead-lettered, plus the breakdown by stage and error class), consumer lag, API status codes, API latency (p50 and p95 by endpoint, from `etl_api_request_duration_seconds`), export lag with S3 writes and schema validations; and for the jobs, time since each job's last success next to time since its last run (`etl_job_last_run_timestamp_seconds`, failed runs included: a recent run with an old success means the job runs and fails, both old mean it does not run), records published per window, job runs and retention results.
 
 ## Alerts
 
@@ -610,6 +612,7 @@ The assignment leaves some points open. This is how they were read:
 ## Repository layout and tests
 
 ```
+architecture.html       the interactive architecture infographic (open in a browser)
 cmd/etl/                main and subcommand wiring: services, etl publish, etl maintenance
 internal/bootstrap/     etl init
 internal/config/        environment → Config
@@ -630,7 +633,6 @@ migrations/             goose SQL migrations
 deploy/                 Prometheus config and alerts, Grafana provisioning and dashboard, Redpanda bootstrap
 deploy/cronicle/        Cronicle image scripts: setup, event provisioning (events as code) and its tests
 docs/adr/               architecture decision records
-docs/architecture/      the interactive architecture page
 docs/superpowers/       design spec (current) and implementation plans (historical build logs) from the AI-assisted workflow
 ```
 

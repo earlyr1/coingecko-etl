@@ -140,13 +140,14 @@
       "id": 10,
       "type": "timeseries",
       "title": "Dead-letter records",
-      "description": "Records written to the dlq zone by stage and error class (export and transform stages; the publish job's DLQ lines are in Published per window).",
+      "description": "Records written to the dlq zone in the last 15 minutes: the total, 0 when nothing was dead-lettered (the normal state), and the breakdown by stage and error class (export and transform stages; the publish job's DLQ lines are in Published per window).",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
       "gridPos": {"x": 0, "y": 28, "w": 12, "h": 8},
-      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "stacking": {"mode": "normal", "group": "A"}}}, "overrides": []},
+      "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "stacking": {"mode": "normal", "group": "A"}}}, "overrides": [{"matcher": {"id": "byName", "options": "total"}, "properties": [{"id": "custom.stacking", "value": {"mode": "none", "group": "A"}}, {"id": "custom.fillOpacity", "value": 0}]}]},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
-        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (stage, error_class) (increase(etl_dlq_total[15m]))", "legendFormat": "{{stage}} / {{error_class}}"}
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (stage, error_class) (increase(etl_dlq_total[15m]))", "legendFormat": "{{stage}} / {{error_class}}"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "sum(increase(etl_dlq_total[15m])) or vector(0)", "legendFormat": "total"}
       ]
     },
     {
@@ -169,11 +170,25 @@
       "title": "CoinGecko API status codes",
       "description": "Calls per minute by endpoint and HTTP status: 429 = rate limited, network_error, skipped = tick skipped (limiter cooldown or a request still in flight).",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "gridPos": {"x": 0, "y": 36, "w": 12, "h": 8},
+      "gridPos": {"x": 0, "y": 36, "w": 8, "h": 8},
       "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "stacking": {"mode": "normal", "group": "A"}}}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
         {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "sum by (endpoint, status) (rate(etl_api_requests_total[5m])) * 60", "legendFormat": "{{endpoint}} {{status}}"}
+      ]
+    },
+    {
+      "id": 19,
+      "type": "timeseries",
+      "title": "CoinGecko API latency",
+      "description": "p50 and p95 of the CoinGecko call latency by endpoint over 5 minutes, from sending the request to the end of the body read, for every call that got an HTTP response (network errors are not timed). Under a second is normal; the client gives up at 10 s.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 8, "y": 36, "w": 8, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "s", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
+      "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "histogram_quantile(0.5, sum by (endpoint, le) (rate(etl_api_request_duration_seconds_bucket[5m])))", "legendFormat": "{{endpoint}} p50"},
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "B", "expr": "histogram_quantile(0.95, sum by (endpoint, le) (rate(etl_api_request_duration_seconds_bucket[5m])))", "legendFormat": "{{endpoint}} p95"}
       ]
     },
     {
@@ -182,7 +197,7 @@
       "title": "Export lag and S3 writes",
       "description": "How far the exporter is behind closing raw windows (0 on schedule), and conditional S3 PUT results (exists = idempotent retry, mismatch = alert).",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "gridPos": {"x": 12, "y": 36, "w": 12, "h": 8},
+      "gridPos": {"x": 16, "y": 36, "w": 8, "h": 8},
       "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false}}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
@@ -217,12 +232,25 @@
       ]
     },
     {
+      "id": 20,
+      "type": "stat",
+      "title": "Batch jobs: since last run",
+      "description": "Seconds since each Cronicle job (etl publish, retention, vacuum) last pushed a run to the Pushgateway, failed runs included. Read it next to Batch jobs: since last success: both small means the job runs and succeeds, a small last run with a large last success means it runs and fails, both large means it does not run (check Cronicle). etl publish runs every ETL_WINDOW, retention and vacuum once a day.",
+      "datasource": {"type": "prometheus", "uid": "prometheus"},
+      "gridPos": {"x": 8, "y": 52, "w": 8, "h": 8},
+      "fieldConfig": {"defaults": {"unit": "s", "decimals": 0, "thresholds": {"mode": "absolute", "steps": [{"color": "green", "value": null}]}, "color": {"mode": "thresholds"}}, "overrides": [{"matcher": {"id": "byName", "options": "etl_publisher"}, "properties": [{"id": "thresholds", "value": {"mode": "absolute", "steps": [{"color": "green", "value": null}, {"color": "orange", "value": 600}, {"color": "red", "value": 900}]}}]}]},
+      "options": {"reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "colorMode": "background", "graphMode": "none", "textMode": "value_and_name", "justifyMode": "auto", "orientation": "horizontal"},
+      "targets": [
+        {"datasource": {"type": "prometheus", "uid": "prometheus"}, "refId": "A", "expr": "time() - max by (job) (etl_job_last_run_timestamp_seconds)", "legendFormat": "{{job}}", "instant": false}
+      ]
+    },
+    {
       "id": 16,
       "type": "timeseries",
       "title": "Published per window",
       "description": "Records the last successful etl publish run produced to the broker and the lines it sent to dlq/stage=publish (pushed gauges: the value holds until the next successful run).",
       "datasource": {"type": "prometheus", "uid": "prometheus"},
-      "gridPos": {"x": 8, "y": 52, "w": 16, "h": 8},
+      "gridPos": {"x": 16, "y": 52, "w": 8, "h": 8},
       "fieldConfig": {"defaults": {"unit": "short", "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "spanNulls": false, "lineInterpolation": "stepAfter"}}, "overrides": []},
       "options": {"legend": {"displayMode": "list", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
       "targets": [
