@@ -1,6 +1,6 @@
 -- +goose Up
 -- Raw zone: one row per HTTP call to CoinGecko, including failed calls.
--- Rows are written before any deduplication; idempotency_key is informational.
+-- Rows are written before any deduplication; export_batch_id is the only column changed after insert (set once by the exporter).
 CREATE SCHEMA IF NOT EXISTS raw;
 
 CREATE TABLE raw.api_calls (
@@ -17,15 +17,19 @@ CREATE TABLE raw.api_calls (
   error            text,
   payload          json,
   payload_sha256   bytea       CHECK (octet_length(payload_sha256) = 32),
-  ingest_txid      xid8        NOT NULL DEFAULT pg_current_xact_id(),
+  export_batch_id  bigint,
   CONSTRAINT api_calls_pkey PRIMARY KEY (event_id, fetched_at),
   CONSTRAINT api_calls_payload_iff_ok CHECK ((outcome = 'ok') = (payload IS NOT NULL))
 ) PARTITION BY RANGE (fetched_at);
 
 COMMENT ON COLUMN raw.api_calls.payload IS 'Response body byte-for-byte (json, not jsonb).';
-COMMENT ON COLUMN raw.api_calls.ingest_txid IS 'xid8 of the inserting transaction; exporter cursor (ingest_txid, seq).';
+COMMENT ON COLUMN raw.api_calls.export_batch_id IS 'pipeline.export_batches.batch_id of the batch that exported this row; NULL = not exported yet (rows with outcome <> ok stay NULL forever).';
 
-CREATE INDEX api_calls_export_cursor_idx ON raw.api_calls (ingest_txid, seq) WHERE outcome = 'ok';
+-- Exporter claim and lag: unexported ok rows in seq order. Small in steady
+-- state; behaves like a queue index (dead entries until vacuum).
+CREATE INDEX api_calls_unexported_idx ON raw.api_calls (seq) WHERE outcome = 'ok' AND export_batch_id IS NULL;
+-- Exporter read-back of one batch.
+CREATE INDEX api_calls_export_batch_idx ON raw.api_calls (export_batch_id, seq) WHERE export_batch_id IS NOT NULL;
 CREATE INDEX api_calls_idempotency_key_idx ON raw.api_calls (idempotency_key);
 
 -- +goose Down

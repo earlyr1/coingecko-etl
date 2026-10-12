@@ -61,6 +61,41 @@ func TestPostgresIntegration(t *testing.T) {
 		if typ != "json" {
 			t.Errorf("payload type = %s, want json", typ)
 		}
+		// Exact column sets: the exporter's claim column is export_batch_id,
+		// and no column of an earlier export design is left behind.
+		columns := func(schema, table string) string {
+			var cols string
+			if err := pool.QueryRow(ctx, `SELECT string_agg(column_name || ' ' || data_type, ', ' ORDER BY ordinal_position)
+				FROM information_schema.columns WHERE table_schema = $1 AND table_name = $2`, schema, table).Scan(&cols); err != nil {
+				t.Fatal(err)
+			}
+			return cols
+		}
+		if got, want := columns("raw", "api_calls"), "seq bigint, event_id uuid, idempotency_key text, schema_version smallint, "+
+			"source text, endpoint text, request jsonb, fetched_at timestamp with time zone, outcome text, http jsonb, "+
+			"error text, payload json, payload_sha256 bytea, export_batch_id bigint"; got != want {
+			t.Errorf("raw.api_calls columns =\n  %s\nwant\n  %s", got, want)
+		}
+		if got, want := columns("pipeline", "export_batches"), "batch_id bigint, row_count integer, "+
+			"min_fetched_at timestamp with time zone, max_fetched_at timestamp with time zone, object_key text, "+
+			"content_sha256 bytea, status text, claimed_at timestamp with time zone, exported_at timestamp with time zone, "+
+			"publish_lease_until timestamp with time zone, published_at timestamp with time zone"; got != want {
+			t.Errorf("pipeline.export_batches columns =\n  %s\nwant\n  %s", got, want)
+		}
+		for _, idx := range []string{"api_calls_unexported_idx", "api_calls_export_batch_idx"} {
+			var def string
+			if err := pool.QueryRow(ctx, `SELECT indexdef FROM pg_indexes
+				WHERE schemaname = 'raw' AND tablename = 'api_calls' AND indexname = $1`, idx).Scan(&def); err != nil {
+				t.Errorf("index %s on raw.api_calls: %v", idx, err)
+			}
+		}
+		var fk string
+		if err := pool.QueryRow(ctx, `SELECT pg_get_constraintdef(oid) FROM pg_constraint
+			WHERE conname = 'api_calls_export_batch_fk' AND conrelid = 'raw.api_calls'::regclass`).Scan(&fk); err != nil {
+			t.Errorf("constraint api_calls_export_batch_fk: %v", err)
+		} else if !strings.Contains(fk, "REFERENCES pipeline.export_batches(batch_id)") {
+			t.Errorf("api_calls_export_batch_fk = %s, want a reference to pipeline.export_batches(batch_id)", fk)
+		}
 	})
 
 	t.Run("DatabaseTimeoutsApplyToNewSessions", func(t *testing.T) {

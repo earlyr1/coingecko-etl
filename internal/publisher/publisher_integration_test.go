@@ -266,8 +266,6 @@ UPDATE pipeline.export_batches SET published_at = NULL, publish_lease_until = no
 			t.Fatalf("event %s published %d times, want 2 (republish duplicates)", ev.EventID, copies)
 		}
 	})
-	// Runs last: it inserts a hand-made ledger row whose txid bounds are
-	// not real, which would confuse a later ExportOnce cursor.
 	t.Run("invalid line goes to dlq, valid line is published", func(t *testing.T) {
 		good := okEvent(t, event.EndpointCoinDetail, coingecko.CoinDetailRequest("bitcoin"), "coin_bitcoin_full_t0.json")
 		goodLine, err := event.Marshal(good)
@@ -283,8 +281,8 @@ UPDATE pipeline.export_batches SET published_at = NULL, publish_lease_until = no
 		var id int64
 		var exportedAt time.Time
 		err = e.pool.QueryRow(ctx, `
-INSERT INTO pipeline.export_batches (from_txid, from_seq, to_txid, to_seq, watermark_xmin, row_count, object_key, status, exported_at)
-VALUES ('1000000', 0, '1000000', 1, '1000000', 2, $1, 'exported', now()) RETURNING batch_id, exported_at`, key).Scan(&id, &exportedAt)
+INSERT INTO pipeline.export_batches (row_count, min_fetched_at, max_fetched_at, object_key, status, exported_at)
+VALUES (2, now(), now(), $1, 'exported', now()) RETURNING batch_id, exported_at`, key).Scan(&id, &exportedAt)
 		if err != nil {
 			t.Fatal(err)
 		}

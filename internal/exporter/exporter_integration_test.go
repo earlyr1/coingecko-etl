@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -96,18 +97,29 @@ VALUES ($1, $2, 1, $3, $4, $5::jsonb, $6, 'ok', $7::jsonb, NULL, $8::json, decod
 RETURNING seq`
 
 func (e *env) okArgs(source, endpoint string) (eventID string, args []any) {
+	return e.okArgsAt(source, endpoint, time.Now())
+}
+
+// okArgsAt is okArgs with an explicit fetched_at.
+func (e *env) okArgsAt(source, endpoint string, fetchedAt time.Time) (eventID string, args []any) {
 	eventID = uuid.Must(uuid.NewV7()).String()
 	sha := event.SHA256Hex(e.payload)
 	params := map[string]string{"vs_currency": "usd", "page": "1"}
 	req, _ := json.Marshal(event.Request{Path: "/coins/markets", Params: params})
 	httpMeta, _ := json.Marshal(event.HTTPMeta{Status: 200, LatencyMS: 90})
 	return eventID, []any{eventID, event.IdempotencyKey(source, endpoint, params, sha), source, endpoint,
-		string(req), time.Now().UTC(), string(httpMeta), string(e.payload), sha}
+		string(req), fetchedAt.UTC(), string(httpMeta), string(e.payload), sha}
 }
 
 func (e *env) insertCommitted(t *testing.T, source, endpoint string) (string, int64) {
 	t.Helper()
-	id, args := e.okArgs(source, endpoint)
+	return e.insertCommittedAt(t, source, endpoint, time.Now())
+}
+
+// insertCommittedAt inserts one committed ok row fetched at fetchedAt.
+func (e *env) insertCommittedAt(t *testing.T, source, endpoint string, fetchedAt time.Time) (string, int64) {
+	t.Helper()
+	id, args := e.okArgsAt(source, endpoint, fetchedAt)
 	var seq int64
 	if err := e.pool.QueryRow(context.Background(), insertSQL, args...).Scan(&seq); err != nil {
 		t.Fatalf("insert: %v", err)
@@ -115,16 +127,51 @@ func (e *env) insertCommitted(t *testing.T, source, endpoint string) (string, in
 	return id, seq
 }
 
-func (e *env) insertFailedCall(t *testing.T) {
+// insertFailedCall inserts an http_error row and returns its event id.
+func (e *env) insertFailedCall(t *testing.T) string {
 	t.Helper()
+	id := uuid.Must(uuid.NewV7()).String()
 	_, err := e.pool.Exec(context.Background(), `
 INSERT INTO raw.api_calls (event_id, schema_version, source, endpoint, request, fetched_at, outcome, http, error)
 VALUES ($1, 1, 'coingecko', 'coins_markets', '{"path":"/coins/markets","params":{}}', now(), 'http_error',
         '{"status":429,"latency_ms":40,"date":null,"age_s":null,"cf_cache_status":null,"etag":null,"retry_after_s":60}', 'HTTP 429')`,
-		uuid.Must(uuid.NewV7()).String())
+		id)
 	if err != nil {
 		t.Fatalf("insert failed call: %v", err)
 	}
+	return id
+}
+
+// batchOf returns raw.api_calls.export_batch_id of one row (nil = not exported).
+func (e *env) batchOf(t *testing.T, eventID string) *int64 {
+	t.Helper()
+	var id *int64
+	if err := e.pool.QueryRow(context.Background(),
+		`SELECT export_batch_id FROM raw.api_calls WHERE event_id = $1`, eventID).Scan(&id); err != nil {
+		t.Fatalf("export_batch_id of %s: %v", eventID, err)
+	}
+	return id
+}
+
+// objectEventIDs returns the event ids of the lines of one raw object.
+func (e *env) objectEventIDs(t *testing.T, key string) []string {
+	t.Helper()
+	body, err := e.s3.Get(context.Background(), s3.BucketRaw, key)
+	if err != nil {
+		t.Fatalf("get %s: %v", key, err)
+	}
+	var ids []string
+	for _, line := range strings.Split(strings.TrimSuffix(string(body), "\n"), "\n") {
+		if line == "" {
+			continue
+		}
+		ev, err := event.Unmarshal([]byte(line))
+		if err != nil {
+			t.Fatalf("unmarshal line of %s: %v", key, err)
+		}
+		ids = append(ids, ev.EventID)
+	}
+	return ids
 }
 
 func (e *env) exportOnce(t *testing.T, max int) int {
@@ -163,7 +210,8 @@ func (e *env) ledger(t *testing.T) []ledgerRow {
 }
 
 // exportedEventIDs reads every raw object named in the ledger and returns the
-// event ids of all lines in order, checking object bytes and checksums.
+// event ids of all lines in order, checking object bytes, checksums and that
+// every ledger row_count equals the rows stamped with its batch id.
 func (e *env) exportedEventIDs(t *testing.T) []string {
 	t.Helper()
 	keyRe := regexp.MustCompile(`^source=coingecko/ingest_date=\d{4}-\d{2}-\d{2}/batch=\d{20}\.jsonl$`)
@@ -171,6 +219,14 @@ func (e *env) exportedEventIDs(t *testing.T) []string {
 	for _, l := range e.ledger(t) {
 		if l.status != "exported" {
 			t.Fatalf("batch %d status %q, want exported", l.id, l.status)
+		}
+		var stamped int
+		if err := e.pool.QueryRow(context.Background(),
+			`SELECT count(*) FROM raw.api_calls WHERE export_batch_id = $1`, l.id).Scan(&stamped); err != nil {
+			t.Fatalf("count stamped rows of batch %d: %v", l.id, err)
+		}
+		if stamped != l.rows {
+			t.Fatalf("batch %d: row_count %d, but %d rows carry its export_batch_id", l.id, l.rows, stamped)
 		}
 		if !keyRe.MatchString(l.key) {
 			t.Fatalf("object key %q does not match the raw key layout", l.key)
@@ -213,7 +269,7 @@ func TestExportOnceExportsEveryRowExactlyOnce(t *testing.T) {
 		id, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
 		want[id] = true
 	}
-	e.insertFailedCall(t) // outcome http_error: never exported
+	failedID := e.insertFailedCall(t) // outcome http_error: never exported
 
 	if n := e.exportOnce(t, 2); n != 2 {
 		t.Fatalf("first ExportOnce = %d, want 2", n)
@@ -241,25 +297,41 @@ func TestExportOnceExportsEveryRowExactlyOnce(t *testing.T) {
 	if got := promtest.ToFloat64(e.m.ExportLag); got != 0 {
 		t.Fatalf("export lag = %v after full export, want 0", got)
 	}
+	if b := e.batchOf(t, failedID); b != nil {
+		t.Fatalf("http_error row stamped with batch %d, want NULL", *b)
+	}
 }
 
 func TestExportOnceResumesAfterCrash(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
-	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
-	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+	id1, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+	id2, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
 
 	// Crash 1: the claim transaction committed, nothing was written to S3.
 	b, ok, err := claimNext(ctx, e.pool, 500)
 	if err != nil || !ok || b.RowCount != 2 {
 		t.Fatalf("claimNext: ok=%v rows=%d err=%v", ok, b.RowCount, err)
 	}
-	if n := e.exportOnce(t, 500); n != 2 {
-		t.Fatalf("ExportOnce after claim-crash = %d, want 2 (resumed batch)", n)
+	for _, id := range []string{id1, id2} {
+		if got := e.batchOf(t, id); got == nil || *got != b.ID {
+			t.Fatalf("row %s export_batch_id = %v after the claim, want %d", id, got, b.ID)
+		}
+	}
+	// A row inserted after the claim is not part of the claimed batch.
+	id3, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+	if n := e.exportOnce(t, 500); n != 3 {
+		t.Fatalf("ExportOnce after claim-crash = %d, want 3 (resumed batch of 2 + a new batch of 1)", n)
 	}
 	l := e.ledger(t)
-	if len(l) != 1 || l[0].id != b.ID || l[0].key != b.ObjectKey || l[0].status != "exported" {
-		t.Fatalf("ledger after resume = %+v, want the claimed batch %d exported", l, b.ID)
+	if len(l) != 2 || l[0].id != b.ID || l[0].key != b.ObjectKey || l[0].status != "exported" || l[0].rows != 2 {
+		t.Fatalf("ledger after resume = %+v, want the claimed batch %d exported with 2 rows, then one more", l, b.ID)
+	}
+	if got := e.objectEventIDs(t, b.ObjectKey); fmt.Sprint(got) != fmt.Sprint([]string{id1, id2}) {
+		t.Fatalf("resumed batch holds %v, want [%s %s]", got, id1, id2)
+	}
+	if got := e.batchOf(t, id3); got == nil || *got != l[1].id {
+		t.Fatalf("late row export_batch_id = %v, want the next batch %d", got, l[1].id)
 	}
 	first, err := e.s3.Get(ctx, s3.BucketRaw, b.ObjectKey)
 	if err != nil {
@@ -280,15 +352,15 @@ func TestExportOnceResumesAfterCrash(t *testing.T) {
 	if err != nil || !bytes.Equal(first, again) {
 		t.Fatalf("object changed after retry (err=%v)", err)
 	}
-	if ids := e.exportedEventIDs(t); len(ids) != 2 {
-		t.Fatalf("exported %d lines, want 2", len(ids))
+	if ids := e.exportedEventIDs(t); len(ids) != 3 {
+		t.Fatalf("exported %d lines, want 3", len(ids))
 	}
 }
 
-// TestExportOnceNeverSkipsOutOfOrderCommits is the reason for the xid8 cursor:
-// transaction A inserts first but commits last. An identity/seq watermark
-// would export B, move past A's seq and lose A forever.
-func TestExportOnceNeverSkipsOutOfOrderCommits(t *testing.T) {
+// TestExportOnceExportsLateCommitInLaterBatch: transaction A inserts first
+// but commits last. The claim must neither wait for A nor lose it: B goes
+// into batch 1, A into batch 2 once it has committed.
+func TestExportOnceExportsLateCommitInLaterBatch(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 
@@ -308,26 +380,237 @@ func TestExportOnceNeverSkipsOutOfOrderCommits(t *testing.T) {
 		t.Fatalf("seq B (%d) should be greater than seq A (%d)", seqB, seqA)
 	}
 
-	// A is still open: the exporter must stall rather than export B past A.
-	if n := e.exportOnce(t, 500); n != 0 {
-		t.Fatalf("ExportOnce with A open = %d, want 0 (stall)", n)
+	if n := e.exportOnce(t, 500); n != 1 {
+		t.Fatalf("ExportOnce with A open = %d, want 1 (B only)", n)
 	}
-	if l := e.ledger(t); len(l) != 0 {
-		t.Fatalf("a batch was claimed while A was open: %+v", l)
+	l := e.ledger(t)
+	if len(l) != 1 {
+		t.Fatalf("ledger with A open = %+v, want one batch", l)
+	}
+	if got := e.objectEventIDs(t, l[0].key); fmt.Sprint(got) != fmt.Sprint([]string{idB}) {
+		t.Fatalf("batch 1 holds %v, want only B=%s", got, idB)
 	}
 
 	if err := txA.Commit(ctx); err != nil {
 		t.Fatalf("commit A: %v", err)
 	}
-	if n := e.exportOnce(t, 500); n != 2 {
-		t.Fatalf("ExportOnce after A committed = %d, want 2", n)
+	if n := e.exportOnce(t, 500); n != 1 {
+		t.Fatalf("ExportOnce after A committed = %d, want 1 (A only)", n)
+	}
+	l = e.ledger(t)
+	if len(l) != 2 {
+		t.Fatalf("ledger after A committed = %+v, want two batches", l)
+	}
+	if got := e.objectEventIDs(t, l[1].key); fmt.Sprint(got) != fmt.Sprint([]string{idA}) {
+		t.Fatalf("batch 2 holds %v, want only A=%s", got, idA)
 	}
 	ids := e.exportedEventIDs(t)
-	if len(ids) != 2 || ids[0] != idA || ids[1] != idB {
-		t.Fatalf("exported %v, want [A=%s B=%s] in ingest_txid order", ids, idA, idB)
+	if len(ids) != 2 || ids[0] != idB || ids[1] != idA {
+		t.Fatalf("exported %v, want [B=%s A=%s]", ids, idB, idA)
 	}
 	if n := e.exportOnce(t, 500); n != 0 {
 		t.Fatalf("extra ExportOnce = %d, want 0", n)
+	}
+}
+
+// TestExportOnceNotStalledByOpenTransaction: a session that holds a
+// transaction id open does not hold back rows committed after it started.
+func TestExportOnceNotStalledByOpenTransaction(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+
+	open, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer open.Rollback(ctx)
+	if _, err := open.Exec(ctx, `SELECT pg_current_xact_id()`); err != nil {
+		t.Fatalf("assign xid: %v", err)
+	}
+
+	want := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		id, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+		want[id] = true
+	}
+	if n := e.exportOnce(t, 500); n != 3 {
+		t.Fatalf("ExportOnce with an open transaction = %d, want 3", n)
+	}
+	if got := promtest.ToFloat64(e.m.ExportLag); got != 0 {
+		t.Fatalf("export lag = %v with the transaction still open, want 0", got)
+	}
+	ids := e.exportedEventIDs(t)
+	if len(ids) != 3 {
+		t.Fatalf("exported %v, want 3 rows", ids)
+	}
+	for _, id := range ids {
+		if !want[id] {
+			t.Fatalf("unexpected or duplicate event %s", id)
+		}
+		delete(want, id)
+	}
+}
+
+// TestConcurrentClaimsAreDisjoint: a claim never waits for rows another
+// claim holds (SKIP LOCKED), and the two batches share no row.
+func TestConcurrentClaimsAreDisjoint(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	for i := 0; i < 6; i++ {
+		e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+	}
+	tx1, err := e.pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx1.Rollback(ctx)
+	b1, ok, err := claimIn(ctx, tx1, 3) // rows locked, not committed
+	if err != nil || !ok || b1.RowCount != 3 {
+		t.Fatalf("claimIn: %v %v %+v", err, ok, b1)
+	}
+
+	dctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	start := time.Now()
+	b2, ok, err := claimNext(dctx, e.pool, 500) // SKIP LOCKED: must not wait for tx1
+	if took := time.Since(start); err != nil || !ok || b2.RowCount != 3 || took > 2*time.Second {
+		t.Fatalf("claimNext: %v %v %+v after %v", err, ok, b2, took)
+	}
+
+	if err := tx1.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	rows, err := e.pool.Query(ctx,
+		`SELECT event_id::text, export_batch_id FROM raw.api_calls WHERE export_batch_id IN ($1, $2)`, b1.ID, b2.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owner := map[string]int64{}
+	perBatch := map[int64]int{}
+	for rows.Next() {
+		var id string
+		var batchID int64
+		if err := rows.Scan(&id, &batchID); err != nil {
+			t.Fatal(err)
+		}
+		if prev, dup := owner[id]; dup {
+			t.Fatalf("row %s stamped by batches %d and %d", id, prev, batchID)
+		}
+		owner[id] = batchID
+		perBatch[batchID]++
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if len(owner) != 6 || perBatch[b1.ID] != 3 || perBatch[b2.ID] != 3 {
+		t.Fatalf("stamped rows per batch = %v (%d rows), want 3 for %d and 3 for %d", perBatch, len(owner), b1.ID, b2.ID)
+	}
+
+	if n := e.exportOnce(t, 500); n != 6 {
+		t.Fatalf("ExportOnce after both claims = %d, want 6 (two resumed batches)", n)
+	}
+	ids := e.exportedEventIDs(t)
+	seen := map[string]bool{}
+	for _, id := range ids {
+		if seen[id] {
+			t.Fatalf("event %s exported twice", id)
+		}
+		seen[id] = true
+	}
+	if len(seen) != 6 {
+		t.Fatalf("exported %d unique rows, want 6", len(seen))
+	}
+}
+
+// TestExportsRowInPartitionCreatedAfterClaim: the partial indexes of the
+// parent are cloned into partitions created later, and the claim finds rows
+// there.
+func TestExportsRowInPartitionCreatedAfterClaim(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+	if _, ok, err := claimNext(ctx, e.pool, 500); err != nil || !ok {
+		t.Fatalf("claimNext: ok=%v err=%v", ok, err)
+	}
+
+	later := time.Now().UTC().AddDate(0, 0, 10)
+	if err := pg.EnsurePartitions(ctx, e.pool, later, 0); err != nil {
+		t.Fatalf("EnsurePartitions: %v", err)
+	}
+	e.insertCommittedAt(t, event.SourceCoinGecko, event.EndpointMarkets, later)
+	if n := e.exportOnce(t, 500); n != 2 {
+		t.Fatalf("ExportOnce = %d, want 2 (resumed batch + the row in the new partition)", n)
+	}
+	if ids := e.exportedEventIDs(t); len(ids) != 2 {
+		t.Fatalf("exported %v, want 2 rows", ids)
+	}
+
+	var n int
+	if err := e.pool.QueryRow(ctx, `
+SELECT count(*) FROM pg_indexes
+ WHERE schemaname = 'raw' AND tablename = $1 AND indexdef LIKE '%export_batch_id%'`,
+		"api_calls_p"+later.Format("20060102")).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("new partition has %d indexes on export_batch_id, want 2", n)
+	}
+}
+
+// TestExportLagGrowsWhileClaimedBatchIsStuck: rows of a claimed batch that
+// keeps failing still count in the lag, even after newer rows arrive.
+func TestExportLagGrowsWhileClaimedBatchIsStuck(t *testing.T) {
+	e := setup(t)
+	ctx := context.Background()
+	e.insertCommittedAt(t, event.SourceCoinGecko, event.EndpointMarkets, time.Now().Add(-10*time.Minute))
+	b, ok, err := claimNext(ctx, e.pool, 500)
+	if err != nil || !ok {
+		t.Fatalf("claimNext: ok=%v err=%v", ok, err)
+	}
+	if _, err := e.s3.PutIfAbsent(ctx, s3.BucketRaw, b.ObjectKey, []byte("other bytes\n")); err != nil {
+		t.Fatalf("put other bytes: %v", err)
+	}
+
+	for i, insertFresh := range []bool{false, true} {
+		if insertFresh {
+			e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+		}
+		_, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, 500)
+		if !errors.Is(err, s3.ErrChecksumMismatch) {
+			t.Fatalf("ExportOnce #%d = %v, want a checksum mismatch", i+1, err)
+		}
+		if got := promtest.ToFloat64(e.m.ExportLag); got < 590 {
+			t.Fatalf("export lag after ExportOnce #%d = %v, want >= 590 (the stuck batch's row is 10 minutes old)", i+1, got)
+		}
+	}
+	l := e.ledger(t)
+	if len(l) != 1 || l[0].id != b.ID || l[0].status != "claimed" {
+		t.Fatalf("ledger = %+v, want only batch %d, still claimed", l, b.ID)
+	}
+	if got := promtest.ToFloat64(e.m.S3Puts.WithLabelValues("mismatch")); got < 1 {
+		t.Fatalf("s3_put_total{mismatch} = %v, want >= 1", got)
+	}
+}
+
+// TestExportOnceBatchesInSeqOrder: batches take the oldest unexported rows
+// first, at most max per batch.
+func TestExportOnceBatchesInSeqOrder(t *testing.T) {
+	e := setup(t)
+	var want []string
+	for i := 0; i < 9; i++ {
+		id, _ := e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
+		want = append(want, id)
+	}
+	for i, n := range []int{4, 4, 1, 0} {
+		if got := e.exportOnce(t, 4); got != n {
+			t.Fatalf("ExportOnce #%d = %d, want %d", i+1, got, n)
+		}
+	}
+	if l := e.ledger(t); len(l) != 3 {
+		t.Fatalf("ledger has %d batches, want 3: %+v", len(l), l)
+	}
+	if got := e.exportedEventIDs(t); fmt.Sprint(got) != fmt.Sprint(want) {
+		t.Fatalf("exported %v, want %v in insert order", got, want)
 	}
 }
 
@@ -392,178 +675,12 @@ func TestExportOnceSendsInvalidRowsToDLQ(t *testing.T) {
 	if got := promtest.ToFloat64(e.m.DLQ.WithLabelValues("export", "schema_violation")); got != 1 {
 		t.Fatalf("dlq_total = %v, want 1", got)
 	}
-}
-
-// insertTxidSQL is insertSQL that also returns the row's ingest_txid.
-const insertTxidSQL = insertSQL + `, ingest_txid::text::bigint`
-
-// insertWithTxid inserts one committed ok row and returns its event id and
-// ingest_txid.
-func (e *env) insertWithTxid(t *testing.T) (string, uint64) {
-	t.Helper()
-	id, args := e.okArgs(event.SourceCoinGecko, event.EndpointMarkets)
-	var (
-		seq  int64
-		txid uint64
-	)
-	if err := e.pool.QueryRow(context.Background(), insertTxidSQL, args...).Scan(&seq, &txid); err != nil {
-		t.Fatalf("insert: %v", err)
+	// The bad row belongs to the batch that sent it to the DLQ: never claimed again.
+	if got := e.batchOf(t, badID); got == nil || *got != l[0].id {
+		t.Fatalf("bad row export_batch_id = %v, want %d", got, l[0].id)
 	}
-	return id, txid
-}
-
-// burnXidsBelow advances the transaction id counter, one autocommit
-// transaction per statement, until the next xid is `before` ids below a power
-// of ten (1000 on a fresh container). It returns that power of ten.
-func (e *env) burnXidsBelow(t *testing.T, before uint64) uint64 {
-	t.Helper()
-	current := func() uint64 {
-		var x uint64
-		// pg_current_xact_id assigns an xid to the statement's own transaction.
-		if err := e.pool.QueryRow(context.Background(), `SELECT pg_current_xact_id()::text::bigint`).Scan(&x); err != nil {
-			t.Fatalf("burn xid: %v", err)
-		}
-		return x
-	}
-	cur := current()
-	boundary := uint64(1000)
-	for boundary <= cur+before {
-		boundary *= 10
-	}
-	for cur+1 < boundary-before {
-		cur = current()
-	}
-	return boundary
-}
-
-type txidBatch struct {
-	id               int64
-	fromTxid, toTxid uint64
-	fromSeq, toSeq   int64
-	rows             int
-	status           string
-}
-
-func (e *env) txidLedger(t *testing.T) []txidBatch {
-	t.Helper()
-	rows, err := e.pool.Query(context.Background(), `
-SELECT batch_id, from_txid::text::bigint, from_seq, to_txid::text::bigint, to_seq, row_count, status
-FROM pipeline.export_batches ORDER BY batch_id`)
-	if err != nil {
-		t.Fatalf("ledger: %v", err)
-	}
-	defer rows.Close()
-	var out []txidBatch
-	for rows.Next() {
-		var b txidBatch
-		if err := rows.Scan(&b.id, &b.fromTxid, &b.fromSeq, &b.toTxid, &b.toSeq, &b.rows, &b.status); err != nil {
-			t.Fatalf("ledger scan: %v", err)
-		}
-		out = append(out, b)
-	}
-	return out
-}
-
-// checkChain asserts that every batch starts exactly where the previous one
-// ended (the first one at (0,0)) and is exported.
-func checkChain(t *testing.T, l []txidBatch) {
-	t.Helper()
-	var prevTxid uint64
-	var prevSeq int64
-	for _, b := range l {
-		if b.fromTxid != prevTxid || b.fromSeq != prevSeq {
-			t.Fatalf("batch %d starts at (%d,%d), want the previous end (%d,%d); ledger=%+v", b.id, b.fromTxid, b.fromSeq, prevTxid, prevSeq, l)
-		}
-		if b.status != "exported" {
-			t.Fatalf("batch %d status %q, want exported", b.id, b.status)
-		}
-		prevTxid, prevSeq = b.toTxid, b.toSeq
-	}
-}
-
-// TestExportCursorCrossesTxidPowerOfTen: transaction ids travel as text, and
-// text sorts "1000" before "999". With one row per batch on each side of the
-// boundary, the cursor must still be the true maximum: every claim starts
-// where the previous batch ended, and the lag drops to 0 after each export.
-func TestExportCursorCrossesTxidPowerOfTen(t *testing.T) {
-	e := setup(t)
-	ctx := context.Background()
-	boundary := e.burnXidsBelow(t, 12)
-
-	var ids []string
-	var txids []uint64
-	for len(txids) == 0 || txids[len(txids)-1] < boundary+5 {
-		id, txid := e.insertWithTxid(t)
-		ids, txids = append(ids, id), append(txids, txid)
-		if n := e.exportOnce(t, 500); n != 1 {
-			t.Fatalf("ExportOnce after the row at txid %d = %d, want 1", txid, n)
-		}
-		txidS, seq, err := lastBatchEnd(ctx, e.pool, false)
-		if err != nil || txidS != fmt.Sprint(txid) {
-			t.Fatalf("cursor after the row at txid %d = (%s,%d) err=%v, want txid %d", txid, txidS, seq, err, txid)
-		}
-		if got := promtest.ToFloat64(e.m.ExportLag); got != 0 {
-			t.Fatalf("export lag = %v after exporting the row at txid %d, want 0", got, txid)
-		}
-	}
-	if txids[0] >= boundary || txids[len(txids)-1] < boundary {
-		t.Fatalf("test setup: txids %v do not straddle %d", txids, boundary)
-	}
-
-	l := e.txidLedger(t)
-	if len(l) != len(txids) {
-		t.Fatalf("ledger has %d batches, want %d (one per row): %+v", len(l), len(txids), l)
-	}
-	checkChain(t, l)
-	for i, b := range l {
-		if b.rows != 1 || b.toTxid != txids[i] {
-			t.Fatalf("batch %d = %+v, want 1 row ending at txid %d", b.id, b, txids[i])
-		}
-	}
-	if got := e.exportedEventIDs(t); fmt.Sprint(got) != fmt.Sprint(ids) {
-		t.Fatalf("exported %v, want %v", got, ids)
-	}
-	if got := promtest.ToFloat64(e.m.ExportBatches.WithLabelValues("error")); got != 0 {
-		t.Fatalf("export_batches_total{error} = %v, want 0", got)
-	}
-}
-
-// TestExportClaimStraddlingTxidPowerOfTen: a claim whose rows lie on both
-// sides of a power of ten must take the lowest rows first (LIMIT) and store
-// bounds and a row count that readRange finds again.
-func TestExportClaimStraddlingTxidPowerOfTen(t *testing.T) {
-	e := setup(t)
-	boundary := e.burnXidsBelow(t, 5)
-
-	var ids []string
-	var txids []uint64
-	for i := 0; i < 9; i++ {
-		id, txid := e.insertWithTxid(t)
-		ids, txids = append(ids, id), append(txids, txid)
-	}
-	if txids[3] >= boundary || txids[4] >= boundary || txids[7] < boundary {
-		t.Fatalf("test setup: txids %v, want rows 0-4 below %d and row 7 at or above it", txids, boundary)
-	}
-
-	// max 4: batches [0..3], [4..7] (straddles the boundary), [8].
-	for i, want := range []int{4, 4, 1, 0} {
-		if n := e.exportOnce(t, 4); n != want {
-			t.Fatalf("ExportOnce #%d = %d, want %d", i+1, n, want)
-		}
-	}
-	l := e.txidLedger(t)
-	if len(l) != 3 {
-		t.Fatalf("ledger has %d batches, want 3: %+v", len(l), l)
-	}
-	checkChain(t, l)
-	for i, last := range []int{3, 7, 8} {
-		wantRows := []int{4, 4, 1}[i]
-		if l[i].toTxid != txids[last] || l[i].rows != wantRows {
-			t.Fatalf("batch %d = %+v, want %d rows ending at txid %d", l[i].id, l[i], wantRows, txids[last])
-		}
-	}
-	if got := e.exportedEventIDs(t); fmt.Sprint(got) != fmt.Sprint(ids) {
-		t.Fatalf("exported %v, want %v in ingest_txid order", got, ids)
+	if n := e.exportOnce(t, 500); n != 0 {
+		t.Fatalf("ExportOnce after the DLQ batch = %d, want 0", n)
 	}
 }
 
@@ -573,12 +690,12 @@ func TestExportOnceCountsClaimFailures(t *testing.T) {
 	e := setup(t)
 	ctx := context.Background()
 	e.insertCommitted(t, event.SourceCoinGecko, event.EndpointMarkets)
-	// The ledger stays readable, the claim's range select fails.
+	// The ledger stays readable, the claim's row pick fails.
 	if _, err := e.pool.Exec(ctx, `ALTER TABLE raw.api_calls RENAME TO api_calls_gone`); err != nil {
 		t.Fatalf("rename: %v", err)
 	}
-	if _, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, 500); err == nil || !strings.Contains(err.Error(), "select range") {
-		t.Fatalf("ExportOnce without raw.api_calls = %v, want a select range error", err)
+	if _, err := ExportOnce(ctx, e.pool, e.s3, e.reg, e.m, e.log, 500); err == nil || !strings.Contains(err.Error(), "pick rows") {
+		t.Fatalf("ExportOnce without raw.api_calls = %v, want a pick rows error", err)
 	}
 	if got := promtest.ToFloat64(e.m.ExportBatches.WithLabelValues("error")); got != 1 {
 		t.Fatalf("export_batches_total{error} = %v after a failed claim, want 1", got)

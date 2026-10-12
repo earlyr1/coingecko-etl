@@ -150,8 +150,8 @@ func TestRunRefusesALakeFromAnotherLifetime(t *testing.T) {
 	}
 	defer pool.Close()
 	if _, err := pool.Exec(ctx, `INSERT INTO pipeline.export_batches
-		(from_txid, from_seq, to_txid, to_seq, watermark_xmin, row_count, object_key)
-		VALUES ('0', 0, '1', 1, '2', 1, 'source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl')`); err != nil {
+		(row_count, min_fetched_at, max_fetched_at, object_key)
+		VALUES (1, now(), now(), 'source=coingecko/ingest_date=2026-10-10/batch=00000000000000000001.jsonl')`); err != nil {
 		t.Fatal(err)
 	}
 	if err := Run(ctx, cfg, discardLogger()); err != nil {

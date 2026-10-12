@@ -2,14 +2,20 @@
 // write-once JSONL objects in the raw bucket.
 //
 // Correctness rests on three pieces:
-//   - an (ingest_txid, seq) cursor bounded by pg_snapshot_xmin(pg_current_snapshot()):
-//     every transaction id below the snapshot xmin has finished, so no row can
-//     later appear behind the cursor (an identity watermark would skip rows
-//     whose transactions commit out of order);
-//   - the pipeline.export_batches ledger: the row range is claimed and committed
-//     before any S3 I/O, so a retry after a crash rebuilds exactly the same bytes;
+//   - a claim transaction locks unexported ok rows FOR UPDATE SKIP LOCKED,
+//     inserts the pipeline.export_batches row (object key, row count, fetched_at
+//     bounds) and stamps raw.api_calls.export_batch_id, all committed before
+//     any S3 I/O, so a retry after a crash reads the same rows back
+//     (WHERE export_batch_id = id ORDER BY seq, primary key) and rebuilds the
+//     same bytes;
+//   - a row that commits late still has export_batch_id NULL and goes into a
+//     later batch, so nothing is skipped and nothing waits for a long
+//     transaction;
 //   - PutIfAbsent (If-None-Match: *): a repeated PUT gets 412 and is accepted
 //     when the stored sha256 matches.
+//
+// The cost: one non-HOT UPDATE per exported row (a dead row version for
+// vacuum and new index entries).
 package exporter
 
 import (
@@ -47,19 +53,16 @@ var (
 	lockRetryDelay = 5 * time.Second
 )
 
-// batch is one row of pipeline.export_batches. Transaction ids travel as
-// decimal strings and are cast in SQL with $n::text::xid8, so no pgx xid8
-// codec is needed.
+// batch is one row of pipeline.export_batches.
 type batch struct {
-	ID        int64
-	FromTxid  string
-	FromSeq   int64
-	ToTxid    string
-	ToSeq     int64
-	RowCount  int
-	ObjectKey string
-	SHA256    []byte // nil until the content was built once
-	ClaimedAt time.Time
+	ID       int64
+	RowCount int
+	// fetched_at bounds of the claimed rows: they prune partitions when the
+	// batch is read back.
+	MinFetchedAt, MaxFetchedAt time.Time
+	ObjectKey                  string
+	SHA256                     []byte // nil until the content was built once
+	ClaimedAt                  time.Time
 }
 
 // apiRow is one raw.api_calls row as text/scalar columns.
@@ -192,14 +195,14 @@ func ExportOnce(ctx context.Context, pool *pgxpool.Pool, s3c *s3.Client, reg *va
 // claimedBatches returns ledger rows that were claimed but never marked exported.
 func claimedBatches(ctx context.Context, pool *pgxpool.Pool) ([]batch, error) {
 	rows, err := pool.Query(ctx, `
-SELECT batch_id, from_txid::text, from_seq, to_txid::text, to_seq, row_count, object_key, content_sha256, claimed_at
-FROM pipeline.export_batches WHERE status = 'claimed' ORDER BY batch_id`)
+SELECT batch_id, row_count, min_fetched_at, max_fetched_at, object_key, content_sha256, claimed_at
+  FROM pipeline.export_batches WHERE status = 'claimed' ORDER BY batch_id`)
 	if err != nil {
 		return nil, fmt.Errorf("exporter: list claimed: %w", err)
 	}
 	out, err := pgx.CollectRows(rows, func(r pgx.CollectableRow) (batch, error) {
 		var b batch
-		err := r.Scan(&b.ID, &b.FromTxid, &b.FromSeq, &b.ToTxid, &b.ToSeq, &b.RowCount, &b.ObjectKey, &b.SHA256, &b.ClaimedAt)
+		err := r.Scan(&b.ID, &b.RowCount, &b.MinFetchedAt, &b.MaxFetchedAt, &b.ObjectKey, &b.SHA256, &b.ClaimedAt)
 		return b, err
 	})
 	if err != nil {
@@ -209,104 +212,103 @@ FROM pipeline.export_batches WHERE status = 'claimed' ORDER BY batch_id`)
 }
 
 // claimNext runs the short claim transaction. It returns ok=false when no
-// committed row lies between the cursor and the snapshot xmin.
+// unexported ok row is free to claim.
 func claimNext(ctx context.Context, pool *pgxpool.Pool, max int) (batch, bool, error) {
-	var b batch
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return b, false, fmt.Errorf("exporter: begin claim: %w", err)
+		return batch{}, false, fmt.Errorf("exporter: begin claim: %w", err)
 	}
-	defer tx.Rollback(ctx) // no-op after Commit
-
-	// hi: every xid below it is committed or aborted. Evaluated in its own
-	// statement; the SELECT below runs on a newer snapshot (READ COMMITTED),
-	// in which every transaction below hi is already resolved.
-	var hi string
-	var now time.Time
-	if err := tx.QueryRow(ctx, `SELECT pg_snapshot_xmin(pg_current_snapshot())::text, now()`).Scan(&hi, &now); err != nil {
-		return b, false, fmt.Errorf("exporter: watermark: %w", err)
-	}
-
-	b.FromTxid, b.FromSeq, err = lastBatchEnd(ctx, tx, false)
-	if err != nil {
-		return b, false, fmt.Errorf("exporter: cursor: %w", err)
-	}
-
-	// Sort on the xid8 column, not on its text alias (see lastBatchEnd): the
-	// last row read is the batch's upper bound.
-	rows, err := tx.Query(ctx, `
-SELECT ingest_txid::text AS txid_s, seq FROM raw.api_calls
-WHERE outcome = 'ok'
-  AND (ingest_txid, seq) > ($1::text::xid8, $2::bigint)
-  AND ingest_txid < $3::text::xid8
-ORDER BY api_calls.ingest_txid, api_calls.seq
-LIMIT $4`, b.FromTxid, b.FromSeq, hi, max)
-	if err != nil {
-		return b, false, fmt.Errorf("exporter: select range: %w", err)
-	}
-	for rows.Next() {
-		if err := rows.Scan(&b.ToTxid, &b.ToSeq); err != nil {
-			rows.Close()
-			return b, false, fmt.Errorf("exporter: scan range: %w", err)
-		}
-		b.RowCount++
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return b, false, fmt.Errorf("exporter: select range: %w", err)
-	}
-	if b.RowCount == 0 {
-		return b, false, nil
-	}
-
-	// Take the id first so the object key can be stored in the same INSERT.
-	// pg_get_serial_sequence also works for identity columns.
-	if err := tx.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('pipeline.export_batches', 'batch_id'))`).Scan(&b.ID); err != nil {
-		return b, false, fmt.Errorf("exporter: next batch id: %w", err)
-	}
-	b.ClaimedAt = now
-	b.ObjectKey = rawObjectKey(b.ID, now)
-	_, err = tx.Exec(ctx, `
-INSERT INTO pipeline.export_batches
-  (batch_id, from_txid, from_seq, to_txid, to_seq, watermark_xmin, row_count, object_key, claimed_at)
-VALUES ($1, $2::text::xid8, $3, $4::text::xid8, $5, $6::text::xid8, $7, $8, $9)`,
-		b.ID, b.FromTxid, b.FromSeq, b.ToTxid, b.ToSeq, hi, b.RowCount, b.ObjectKey, b.ClaimedAt)
-	if err != nil {
-		return b, false, fmt.Errorf("exporter: insert batch: %w", err)
+	defer tx.Rollback(ctx) // no-op after Commit; otherwise releases the row locks
+	b, ok, err := claimIn(ctx, tx, max)
+	if err != nil || !ok {
+		return b, ok, err
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return b, false, fmt.Errorf("exporter: commit claim: %w", err)
+		return batch{}, false, fmt.Errorf("exporter: commit claim: %w", err)
 	}
 	return b, true, nil
 }
 
-// querier is the part of pgxpool.Pool and pgx.Tx that lastBatchEnd needs.
-type querier interface {
-	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
-}
+// claimIn claims up to max unexported ok rows inside tx: it locks them
+// (SKIP LOCKED, so a concurrent claim never waits and never takes the same
+// row), inserts the ledger row and stamps the rows with its batch id. No S3
+// I/O happens here.
+func claimIn(ctx context.Context, tx pgx.Tx, max int) (batch, bool, error) {
+	var b batch
+	// The predicates are literals: with "outcome = $n" the generic plan pgx
+	// switches to cannot use the partial index and scans every partition.
+	rows, err := tx.Query(ctx, `
+SELECT event_id::text, fetched_at FROM raw.api_calls
+ WHERE outcome = 'ok' AND export_batch_id IS NULL
+ ORDER BY seq
+ LIMIT $1
+   FOR UPDATE SKIP LOCKED`, max)
+	if err != nil {
+		return b, false, fmt.Errorf("exporter: pick rows: %w", err)
+	}
+	var ids []string
+	var ts []time.Time
+	for rows.Next() {
+		var id string
+		var at time.Time
+		if err := rows.Scan(&id, &at); err != nil {
+			rows.Close()
+			return b, false, fmt.Errorf("exporter: pick rows: %w", err)
+		}
+		ids, ts = append(ids, id), append(ts, at)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return b, false, fmt.Errorf("exporter: pick rows: %w", err)
+	}
+	if len(ids) == 0 {
+		return b, false, nil // no nextval: batch ids stay dense
+	}
 
-// lastBatchEnd returns the upper bound (to_txid, to_seq) of the highest batch
-// in the ledger, or of the highest exported batch when exportedOnly is set;
-// ("0", 0) when there is none.
-//
-// The text cast gets its own alias and ORDER BY names the table column: an
-// unqualified "to_txid" would resolve to the text output column, and text
-// sorts "996" above "1007", which sent the cursor backwards once txids
-// passed 1000.
-func lastBatchEnd(ctx context.Context, q querier, exportedOnly bool) (txid string, seq int64, err error) {
-	sql := `
-SELECT to_txid::text AS to_txid_s, to_seq FROM pipeline.export_batches
-ORDER BY export_batches.to_txid DESC, export_batches.to_seq DESC LIMIT 1`
-	if exportedOnly {
-		sql = `
-SELECT to_txid::text AS to_txid_s, to_seq FROM pipeline.export_batches WHERE status = 'exported'
-ORDER BY export_batches.to_txid DESC, export_batches.to_seq DESC LIMIT 1`
+	// Take the id first so the object key can be stored in the same INSERT.
+	// pg_get_serial_sequence also works for identity columns.
+	if err := tx.QueryRow(ctx, `SELECT nextval(pg_get_serial_sequence('pipeline.export_batches', 'batch_id')), now()`).Scan(&b.ID, &b.ClaimedAt); err != nil {
+		return b, false, fmt.Errorf("exporter: next batch id: %w", err)
 	}
-	err = q.QueryRow(ctx, sql).Scan(&txid, &seq)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return "0", 0, nil
+	b.ObjectKey = rawObjectKey(b.ID, b.ClaimedAt)
+	b.RowCount = len(ids)
+	b.MinFetchedAt, b.MaxFetchedAt = ts[0], ts[0]
+	for _, at := range ts[1:] {
+		if at.Before(b.MinFetchedAt) {
+			b.MinFetchedAt = at
+		}
+		if at.After(b.MaxFetchedAt) {
+			b.MaxFetchedAt = at
+		}
 	}
-	return txid, seq, err
+
+	// Ledger row first: the foreign key rejects a stamp pointing at a missing batch.
+	if _, err := tx.Exec(ctx, `
+INSERT INTO pipeline.export_batches (batch_id, row_count, min_fetched_at, max_fetched_at, object_key, claimed_at)
+VALUES ($1, $2, $3, $4, $5, $6)`, b.ID, b.RowCount, b.MinFetchedAt, b.MaxFetchedAt, b.ObjectKey, b.ClaimedAt); err != nil {
+		return b, false, fmt.Errorf("exporter: insert batch: %w", err)
+	}
+
+	// Stamp by primary key, never by seq (its uniqueness cannot be enforced on
+	// the partitioned table). The redundant BETWEEN lets the planner prune
+	// partitions; without it the join scans every partition.
+	tag, err := tx.Exec(ctx, `
+UPDATE raw.api_calls a
+   SET export_batch_id = $1
+  FROM unnest($2::text[]::uuid[], $3::timestamptz[]) AS p(event_id, fetched_at)
+ WHERE a.event_id = p.event_id
+   AND a.fetched_at = p.fetched_at
+   AND a.export_batch_id IS NULL
+   AND a.fetched_at BETWEEN $4 AND $5`, b.ID, ids, ts, b.MinFetchedAt, b.MaxFetchedAt)
+	if err != nil {
+		return b, false, fmt.Errorf("exporter: stamp rows: %w", err)
+	}
+	// The rows are locked by the pick, so every one of them must be stamped;
+	// the ledger row_count is then exactly the number of stamped rows.
+	if n := tag.RowsAffected(); n != int64(len(ids)) {
+		return b, false, fmt.Errorf("exporter: batch %d: locked %d rows, stamped %d", b.ID, len(ids), n)
+	}
+	return b, true, nil
 }
 
 // exportBatch runs steps 2-4 for a claimed batch. No transaction is open
@@ -318,7 +320,7 @@ func exportBatch(ctx context.Context, pool *pgxpool.Pool, s3c *s3.Client, reg *v
 		}
 	}()
 
-	rows, err := readRange(ctx, pool, b)
+	rows, err := readBatch(ctx, pool, b)
 	if err != nil {
 		return err
 	}
@@ -404,15 +406,18 @@ func put(ctx context.Context, s3c *s3.Client, m *obs.Metrics, bucket, key string
 	return created, nil
 }
 
-func readRange(ctx context.Context, pool *pgxpool.Pool, b batch) ([]apiRow, error) {
+// readBatch reads back the rows stamped with the batch id. The fetched_at
+// bounds from the ledger prune partitions. ORDER BY names the table columns:
+// a bare event_id would resolve to the text output column event_id::text.
+// (seq, primary key) is a total order, so a retry rebuilds the same bytes.
+func readBatch(ctx context.Context, pool *pgxpool.Pool, b batch) ([]apiRow, error) {
 	rows, err := pool.Query(ctx, `
 SELECT seq, event_id::text, idempotency_key, schema_version, source, endpoint, request::text,
        fetched_at, outcome, http::text, error, payload::text, encode(payload_sha256, 'hex')
-FROM raw.api_calls
-WHERE outcome = 'ok'
-  AND (ingest_txid, seq) >  ($1::text::xid8, $2::bigint)
-  AND (ingest_txid, seq) <= ($3::text::xid8, $4::bigint)
-ORDER BY api_calls.ingest_txid, api_calls.seq`, b.FromTxid, b.FromSeq, b.ToTxid, b.ToSeq)
+  FROM raw.api_calls
+ WHERE export_batch_id = $1
+   AND fetched_at BETWEEN $2 AND $3
+ ORDER BY api_calls.seq, api_calls.event_id, api_calls.fetched_at`, b.ID, b.MinFetchedAt, b.MaxFetchedAt)
 	if err != nil {
 		return nil, fmt.Errorf("exporter: read batch %d: %w", b.ID, err)
 	}
@@ -499,21 +504,18 @@ func marshalDLQ(rec dlqRecord, reg *validation.Registry, log *slog.Logger) ([]by
 }
 
 // updateLag sets etl_export_lag_seconds = now - fetched_at of the oldest ok
-// row after the last exported batch (0 when everything is exported).
+// row not yet exported, counting the rows of batches still 'claimed' (a stuck
+// batch must not hide behind newer rows); 0 when everything is exported.
+// LEAST ignores NULLs; both NULL gives 0.
 func updateLag(ctx context.Context, pool *pgxpool.Pool, m *obs.Metrics, log *slog.Logger) {
 	if ctx.Err() != nil {
 		return
 	}
-	txid, seq, err := lastBatchEnd(ctx, pool, true)
-	if err != nil {
-		log.Warn("export lag: cursor query failed", "stage", stage, "err", err)
-		return
-	}
 	var lag float64
-	err = pool.QueryRow(ctx, `
-SELECT COALESCE(EXTRACT(EPOCH FROM now() - min(fetched_at)), 0)::float8
-FROM raw.api_calls
-WHERE outcome = 'ok' AND (ingest_txid, seq) > ($1::text::xid8, $2::bigint)`, txid, seq).Scan(&lag)
+	err := pool.QueryRow(ctx, `
+SELECT COALESCE(EXTRACT(EPOCH FROM now() - LEAST(
+         (SELECT min(fetched_at) FROM raw.api_calls WHERE outcome = 'ok' AND export_batch_id IS NULL),
+         (SELECT min(min_fetched_at) FROM pipeline.export_batches WHERE status = 'claimed'))), 0)::float8`).Scan(&lag)
 	if err != nil {
 		log.Warn("export lag query failed", "stage", stage, "err", err)
 		return
